@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 
 
+LEVEL_SCORE = {"很小": -2, "较小": -1, "适中": 0, "较大": 1, "很大": 2}
+
+
 def _finite_scale(values: pd.Series, fallback: float = 1.0) -> float:
     """Return a positive scale from observed values."""
     clean = pd.to_numeric(values, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
@@ -100,45 +103,66 @@ def apply_qualitative_feedback_rules(
     roughness = str(feedback.get("roughness", "unknown") or "unknown")
     depth = str(feedback.get("depth", "unknown") or "unknown")
     efficiency = str(feedback.get("efficiency", "unknown") or "unknown")
+    roughness_level = LEVEL_SCORE.get(roughness)
+    depth_level = LEVEL_SCORE.get(depth)
+    efficiency_level = LEVEL_SCORE.get(efficiency)
     previous_d = _previous_d_proxy(previous_parameters)
     d_proxy = pd.to_numeric(out.get("D_proxy"), errors="coerce")
 
-    if roughness == "too_large":
+    if roughness_level is not None and roughness_level > 0:
+        strength = float(roughness_level)
         if previous_d is not None:
-            out.loc[d_proxy > previous_d, "rule_adjustment"] -= 2.0 + (d_proxy[d_proxy > previous_d] - previous_d).fillna(0)
-            out.loc[d_proxy <= previous_d, "rule_adjustment"] += 0.8
-        out["rule_adjustment"] += out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.25
-        out["rule_adjustment"] += out["hatch_spacing_um"].rank(pct=True).fillna(0) * 0.25
-        out["rule_adjustment"] -= out["passes"].rank(pct=True).fillna(0) * 0.25
-        notes.append("Previous feedback indicated excessive roughness; candidates with lower D_proxy, fewer passes, higher scan speed, or wider hatch spacing were favored.")
+            out.loc[d_proxy > previous_d, "rule_adjustment"] -= strength * (2.0 + (d_proxy[d_proxy > previous_d] - previous_d).fillna(0))
+            out.loc[d_proxy <= previous_d, "rule_adjustment"] += 0.8 * strength
+        out["rule_adjustment"] += out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.25 * strength
+        out["rule_adjustment"] += out["hatch_spacing_um"].rank(pct=True).fillna(0) * 0.25 * strength
+        out["rule_adjustment"] -= out["passes"].rank(pct=True).fillna(0) * 0.25 * strength
+        notes.append(f"Roughness feedback was {roughness}; lower D_proxy, fewer passes, higher scan speed, and wider hatch spacing were favored with level-dependent strength.")
 
-    if depth == "too_shallow":
+    if roughness_level is not None and roughness_level < 0:
+        strength = float(abs(roughness_level))
         if previous_d is not None:
-            out.loc[d_proxy < previous_d, "rule_adjustment"] -= 2.0 + (previous_d - d_proxy[d_proxy < previous_d]).fillna(0)
-            out.loc[d_proxy >= previous_d, "rule_adjustment"] += 0.8
-        out["rule_adjustment"] += out["passes"].rank(pct=True).fillna(0) * 0.25
-        out["rule_adjustment"] -= out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.25
-        out["rule_adjustment"] -= out["hatch_spacing_um"].rank(pct=True).fillna(0) * 0.25
-        notes.append("Previous feedback indicated insufficient depth; candidates with higher D_proxy were favored.")
+            out.loc[d_proxy >= previous_d, "rule_adjustment"] += 0.35 * strength
+        out["rule_adjustment"] += out["predicted_depth_um"].rank(pct=True).fillna(0) * 0.15 * strength
+        notes.append(f"Roughness feedback was {roughness}; the surface margin allows slightly more depth/efficiency-oriented candidates.")
 
-    if depth == "too_deep":
+    if depth_level is not None and depth_level < 0:
+        strength = float(abs(depth_level))
         if previous_d is not None:
-            out.loc[d_proxy > previous_d, "rule_adjustment"] -= 1.5
-            out.loc[d_proxy <= previous_d, "rule_adjustment"] += 0.5
-        notes.append("Previous feedback indicated excessive depth; lower energy accumulation candidates were favored.")
+            out.loc[d_proxy < previous_d, "rule_adjustment"] -= strength * (2.0 + (previous_d - d_proxy[d_proxy < previous_d]).fillna(0))
+            out.loc[d_proxy >= previous_d, "rule_adjustment"] += 0.8 * strength
+        out["rule_adjustment"] += out["passes"].rank(pct=True).fillna(0) * 0.25 * strength
+        out["rule_adjustment"] -= out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.25 * strength
+        out["rule_adjustment"] -= out["hatch_spacing_um"].rank(pct=True).fillna(0) * 0.25 * strength
+        notes.append(f"Depth feedback was {depth}; higher D_proxy candidates were favored with level-dependent strength.")
 
-    if efficiency == "too_low":
-        out["rule_adjustment"] += out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.35
-        out["rule_adjustment"] -= out["passes"].rank(pct=True).fillna(0) * 0.35
-        notes.append("Previous feedback indicated low efficiency; faster scan speed and fewer passes were favored when constraints allowed.")
+    if depth_level is not None and depth_level > 0:
+        strength = float(depth_level)
+        if previous_d is not None:
+            out.loc[d_proxy > previous_d, "rule_adjustment"] -= 1.5 * strength
+            out.loc[d_proxy <= previous_d, "rule_adjustment"] += 0.5 * strength
+        out["rule_adjustment"] -= out["passes"].rank(pct=True).fillna(0) * 0.15 * strength
+        notes.append(f"Depth feedback was {depth}; lower energy accumulation candidates were favored.")
 
-    if roughness == "acceptable" and depth == "acceptable":
+    if efficiency_level is not None and efficiency_level < 0:
+        strength = float(abs(efficiency_level))
+        out["rule_adjustment"] += out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.35 * strength
+        out["rule_adjustment"] -= out["passes"].rank(pct=True).fillna(0) * 0.35 * strength
+        notes.append(f"Efficiency feedback was {efficiency}; faster scan speed and fewer passes were favored when constraints allowed.")
+
+    if efficiency_level is not None and efficiency_level > 0:
+        strength = float(efficiency_level)
+        out["rule_adjustment"] -= out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.12 * strength
+        out["rule_adjustment"] += out["predicted_Sa_um"].rank(pct=True, ascending=False).fillna(0) * 0.12 * strength
+        notes.append(f"Efficiency feedback was {efficiency}; the search can spend some efficiency margin on quality or depth robustness.")
+
+    if roughness == "适中" and depth == "适中":
         if previous_d is not None:
             distance = (d_proxy - previous_d).abs()
             scale = max(float(distance.dropna().median()), 1e-12)
             out["rule_adjustment"] -= distance.fillna(scale) / scale * 0.1
         out["rule_adjustment"] += out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.1
-        notes.append("Previous quality and depth were acceptable; local exploitation near the last point was favored.")
+        notes.append("Roughness and depth feedback were moderate; local exploitation near the last point was favored.")
 
     if "acquisition_score" in out:
         out["acquisition_score"] = out["acquisition_score"] + out["rule_adjustment"]

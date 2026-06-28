@@ -166,9 +166,10 @@ def run_app() -> None:
         measured_Sa_um = st.number_input("measured_Sa_um", min_value=0.0, value=0.0, step=0.01)
         processing_time_s = st.number_input("processing_time_s", min_value=0.0, value=0.0, step=1.0)
     with f2:
-        roughness_feedback = st.selectbox("roughness_feedback", ["acceptable", "too_large", "too_small", "unknown"], index=3)
-        depth_feedback = st.selectbox("depth_feedback", ["acceptable", "too_shallow", "too_deep", "unknown"], index=3)
-        efficiency_feedback = st.selectbox("efficiency_feedback", ["acceptable", "too_low", "too_high", "unknown"], index=3)
+        level_options = ["很小", "较小", "适中", "较大", "很大", "unknown"]
+        roughness_feedback = st.selectbox("roughness_feedback", level_options, index=2)
+        depth_feedback = st.selectbox("depth_feedback", level_options, index=2)
+        efficiency_feedback = st.selectbox("efficiency_feedback", level_options, index=2)
     with f3:
         note = st.text_area("note", value="")
 

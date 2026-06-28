@@ -7,9 +7,9 @@
     "processing_time_s": 36.0
   },
   "qualitative_feedback": {
-    "roughness": "too_large",
-    "depth": "acceptable",
-    "efficiency": "acceptable"
+    "roughness": "较大",
+    "depth": "适中",
+    "efficiency": "适中"
   },
   "note": "Surface roughness exceeds requirement."
 }

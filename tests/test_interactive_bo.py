@@ -151,6 +151,23 @@ def test_recommend_next_changes_direction_when_depth_too_shallow(tmp_path):
     assert rec2["D_proxy"] >= rec1["D_proxy"] * 0.95
 
 
+def test_five_level_feedback_strength_direction(tmp_path):
+    cfg = _config(tmp_path)
+    state = init_task(cfg, "SiC", "quality_first", depth_min_um=12, Sa_max_um=1.5)
+    rec1 = recommend_parameters(state, "balanced")
+    state = load_task_state(_state_path(cfg, rec1["task_id"]))
+    state = submit_feedback(
+        state,
+        {
+            "iteration": 1,
+            "qualitative_feedback": {"roughness": "很大", "depth": "适中", "efficiency": "适中"},
+        },
+    )
+    assert state["history"][0]["feedback"]["qualitative_feedback"]["roughness"] == "很大"
+    rec2 = recommend_next(state, "balanced")
+    assert rec2["D_proxy"] <= rec1["D_proxy"]
+
+
 def test_ui_imports_without_running_streamlit():
     assert callable(task_history_table)
 

@@ -23,6 +23,6 @@
   "roughness_model_available": true,
   "within_observed_range": true,
   "D_proxy": 0.0625,
-  "reason": "Candidate selected by balanced acquisition under quality_first objective. Previous feedback indicated excessive roughness; candidates with lower D_proxy, fewer passes, higher scan speed, or wider hatch spacing were favored.",
-  "created_at": "2026-06-28T09:38:00Z"
+  "reason": "Candidate selected by balanced acquisition under quality_first objective. Roughness feedback was 较大; lower D_proxy, fewer passes, higher scan speed, and wider hatch spacing were favored with level-dependent strength.",
+  "created_at": "2026-06-28T09:42:17Z"
 }

@@ -114,11 +114,13 @@ Recommend parameters:
 python main.py recommend --task-id SiC_20260101_001 --type balanced
 ```
 
-Submit feedback:
+Submit feedback with the new five-level qualitative scale:
 
 ```bash
-python main.py feedback --task-id SiC_20260101_001 --iteration 1 --depth 28.7 --sa 2.4 --roughness too_large --depth-status acceptable
+python main.py feedback --task-id SiC_20260101_001 --iteration 1 --depth 28.7 --sa 2.4 --roughness 较大 --depth-status 适中
 ```
+
+Legacy qualitative values are still accepted for compatibility: `acceptable`, `too_large`, `too_small`, `too_shallow`, `too_deep`, `too_low`, `too_high`, and `unknown`. Internally they are mapped to the five-level scale.
 
 Recommend after feedback:
 
@@ -183,9 +185,9 @@ The UI contains task settings, parameter recommendation, machining feedback, and
     "processing_time_s": 36.0
   },
   "qualitative_feedback": {
-    "roughness": "too_large",
-    "depth": "acceptable",
-    "efficiency": "acceptable"
+    "roughness": "较大",
+    "depth": "适中",
+    "efficiency": "适中"
   },
   "note": "Surface roughness exceeds requirement."
 }
@@ -202,7 +204,7 @@ The UI contains task settings, parameter recommendation, machining feedback, and
 
 ### Interactive Method Limits
 
-If only qualitative feedback is provided, the system does not fabricate numeric labels. Qualitative feedback only adjusts candidate ranking directions, such as favoring lower `D_proxy` when roughness is too large or higher `D_proxy` when depth is too shallow.
+If only qualitative feedback is provided, the system does not fabricate numeric labels. Qualitative feedback uses five levels: `很小`, `较小`, `适中`, `较大`, `很大`. Larger roughness favors lower `D_proxy`; smaller depth favors higher `D_proxy`; smaller efficiency favors faster scan speed and fewer passes. The old categorical values remain supported as aliases.
 
 Only measured `depth_um` and/or `Sa_um` are appended to the training table. Missing measured values remain missing.
 

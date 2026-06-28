@@ -39,6 +39,12 @@ MODEL_FEATURES = PROCESS_COLUMNS + ["D_proxy"]
 OBJECTIVE_MODES = {"quality_first", "efficiency_first", "balanced"}
 RECOMMENDATION_TYPES = {"exploitation", "exploration", "balanced"}
 QUALITATIVE_DEFAULTS = {"roughness": "unknown", "depth": "unknown", "efficiency": "unknown"}
+LEVEL_VALUES = {"很小", "较小", "适中", "较大", "很大", "unknown"}
+LEGACY_QUALITATIVE_MAP = {
+    "roughness": {"acceptable": "适中", "too_large": "较大", "too_small": "较小", "unknown": "unknown"},
+    "depth": {"acceptable": "适中", "too_shallow": "较小", "too_deep": "较大", "unknown": "unknown"},
+    "efficiency": {"acceptable": "适中", "too_low": "较小", "too_high": "较大", "unknown": "unknown"},
+}
 
 
 def init_task(
@@ -502,16 +508,12 @@ def _normalize_qualitative_feedback(qualitative: dict[str, Any], raw: dict[str, 
         "depth": qualitative.get("depth", raw.get("depth_status")),
         "efficiency": qualitative.get("efficiency", raw.get("efficiency")),
     }
-    allowed = {
-        "roughness": {"acceptable", "too_large", "too_small", "unknown"},
-        "depth": {"acceptable", "too_shallow", "too_deep", "unknown"},
-        "efficiency": {"acceptable", "too_low", "too_high", "unknown"},
-    }
     for key, value in aliases.items():
         if value is None:
             continue
         value = str(value)
-        if value not in allowed[key]:
+        value = LEGACY_QUALITATIVE_MAP[key].get(value, value)
+        if value not in LEVEL_VALUES:
             raise ValueError(f"Unsupported qualitative feedback {key}={value}")
         result[key] = value
     return result

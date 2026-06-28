@@ -137,9 +137,10 @@ def parse_args() -> argparse.Namespace:
     fb_parser.add_argument("--depth", type=float)
     fb_parser.add_argument("--sa", type=float)
     fb_parser.add_argument("--processing-time", type=float)
-    fb_parser.add_argument("--roughness", default="unknown", choices=["acceptable", "too_large", "too_small", "unknown"])
-    fb_parser.add_argument("--depth-status", default="unknown", choices=["acceptable", "too_shallow", "too_deep", "unknown"])
-    fb_parser.add_argument("--efficiency", default="unknown", choices=["acceptable", "too_low", "too_high", "unknown"])
+    level_choices = ["很小", "较小", "适中", "较大", "很大", "acceptable", "too_large", "too_small", "too_shallow", "too_deep", "too_low", "too_high", "unknown"]
+    fb_parser.add_argument("--roughness", default="unknown", choices=level_choices)
+    fb_parser.add_argument("--depth-status", default="unknown", choices=level_choices)
+    fb_parser.add_argument("--efficiency", default="unknown", choices=level_choices)
     fb_parser.add_argument("--note", default="")
 
     next_parser = subparsers.add_parser("recommend-next", help="Recommend the next point after feedback")
