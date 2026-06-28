@@ -1,0 +1,6 @@
+﻿material,n_samples,valid_rows,valid_depth_samples,valid_roughness_samples,missing_field_ratio,outlier_row_count,missing_power_W_ratio,missing_Sq_um_ratio,missing_Sz_um_ratio
+AlSiC,120,120,120,120,0.1,14,1.0,0.0,0.0
+CFRP,128,128,128,128,0.1,27,1.0,0.0,0.0
+Diamond,60,52,52,52,0.32666666666666666,8,1.0,1.0,1.0
+SiC,120,120,120,120,0.1,21,1.0,0.0,0.0
+ZrO2,120,120,120,120,0.1,16,1.0,0.0,0.0

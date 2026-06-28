@@ -1,0 +1,113 @@
+"""Run the full process-quality modeling and BO recommendation workflow."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import pandas as pd
+
+from src.bayes_opt import BO_COLUMNS, recommend_bo
+from src.features import add_engineered_features, available_feature_columns
+from src.importance import build_feature_importance, build_response_curves
+from src.io_utils import ensure_directories, load_config, read_table, resolve_input_files, setup_logging
+from src.models import fit_models_for_target, select_best_models, summarize_performance
+from src.plotting import plot_bo_maps, plot_feature_importance, plot_pred_vs_true, plot_response_curve
+from src.preprocessing import build_data_quality_report, clean_material_table, combine_cleaned_tables, write_schema_summary
+from src.report import generate_modeling_report
+
+
+def run(config_path: str | Path) -> None:
+    """Execute the reproducible modeling workflow from a config file."""
+    root = Path(config_path).resolve().parent
+    config = load_config(config_path)
+    dirs = ensure_directories(root)
+    logger = setup_logging(dirs["outputs"])
+    logger.info("Starting workflow with config: %s", config_path)
+
+    cleaned_tables = []
+    source_summaries = []
+    for material, path in resolve_input_files(config, root).items():
+        if not path.exists():
+            raise FileNotFoundError(f"Input file not found for {material}: {path}")
+        for raw_df, metadata in read_table(path):
+            cleaned, summary = clean_material_table(raw_df, material, metadata)
+            cleaned_tables.append(cleaned)
+            source_summaries.append(summary)
+            logger.info("Loaded %s from %s: %s rows", material, path.name, len(cleaned))
+
+    unified = combine_cleaned_tables(cleaned_tables)
+    quality = build_data_quality_report(unified)
+    unified_path = dirs["data_processed"] / "unified_experiments.csv"
+    quality_path = dirs["data_processed"] / "data_quality_report.csv"
+    unified.to_csv(unified_path, index=False, encoding="utf-8-sig")
+    quality.to_csv(quality_path, index=False, encoding="utf-8-sig")
+    write_schema_summary(dirs["outputs"] / "data_schema_summary.md", unified, source_summaries, quality)
+
+    featured = add_engineered_features(unified)
+    featured.to_csv(dirs["data_processed"] / "unified_experiments_with_features.csv", index=False, encoding="utf-8-sig")
+
+    random_seed = int(config.get("random_seed", 42))
+    cv_max_folds = int(config.get("cv_max_folds", 5))
+    all_results = []
+    for material, group in featured.groupby("material"):
+        feature_columns = available_feature_columns(group)
+        for target in ["depth_um", "Sa_um"]:
+            if group[target].notna().sum() == 0:
+                logger.warning("Skipping %s / %s: target has no valid samples", material, target)
+                continue
+            all_results.extend(
+                fit_models_for_target(
+                    group,
+                    material=material,
+                    target=target,
+                    feature_columns=feature_columns,
+                    random_seed=random_seed,
+                    cv_max_folds=cv_max_folds,
+                    logger=logger,
+                )
+            )
+
+    performance = summarize_performance(all_results)
+    performance.to_csv(dirs["outputs"] / "model_performance_summary.csv", index=False, encoding="utf-8-sig")
+    prediction_results = pd.concat([r.predictions for r in all_results], ignore_index=True) if all_results else pd.DataFrame()
+    prediction_results.to_csv(dirs["outputs"] / "prediction_results.csv", index=False, encoding="utf-8-sig")
+    plot_pred_vs_true(prediction_results, dirs["figures"])
+
+    best_models = select_best_models(all_results)
+    importance = build_feature_importance(best_models, all_results, featured, random_seed, logger)
+    importance.to_csv(dirs["outputs"] / "feature_importance_summary.csv", index=False, encoding="utf-8-sig")
+    plot_feature_importance(importance, dirs["figures"])
+
+    response_curves = build_response_curves(best_models, featured)
+    response_curves.to_csv(dirs["outputs"] / "response_curves.csv", index=False, encoding="utf-8-sig")
+    plot_response_curve(response_curves, dirs["figures"])
+
+    recommendations, candidate_maps = recommend_bo(featured, all_results, config, logger)
+    if recommendations.empty:
+        recommendations = pd.DataFrame(columns=BO_COLUMNS)
+    recommendations.to_csv(dirs["outputs"] / "bo_recommendations.csv", index=False, encoding="utf-8-sig")
+    plot_bo_maps(recommendations, candidate_maps, dirs["figures"])
+
+    generate_modeling_report(
+        dirs["outputs"] / "modeling_report.md",
+        unified=unified,
+        quality=quality,
+        performance=performance,
+        best_models=best_models,
+        importance=importance,
+        recommendations=recommendations,
+    )
+    logger.info("Workflow complete")
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Ultrafast laser process-quality modeling workflow")
+    parser.add_argument("--config", default="config.yaml", help="Path to YAML configuration")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    run(args.config)

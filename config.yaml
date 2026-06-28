@@ -1,0 +1,15 @@
+input_files:
+  AlSiC: AlSiC.csv
+  CFRP: CFRP.csv
+  SiC: SiC.csv
+  ZrO2: ZrO2.csv
+  Diamond: 金刚石实验结果.xlsx
+output_dir: outputs
+target_depth_by_material: {}
+Sa_max_by_material: {}
+bo_mode: target_depth_min_sa
+lambda_sa: 0.25
+random_seed: 42
+cv_max_folds: 5
+bo_n_recommendations: 5
+bo_candidate_grid_size: 3000
