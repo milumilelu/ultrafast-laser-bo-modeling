@@ -6,3 +6,4 @@ PyYAML
 openpyxl
 tabulate
 pytest
+streamlit

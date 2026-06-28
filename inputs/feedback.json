@@ -1,0 +1,15 @@
+{
+  "task_id": "SiC_20260101_001",
+  "iteration": 1,
+  "measured_result": {
+    "depth_um": 28.7,
+    "Sa_um": 2.4,
+    "processing_time_s": 36.0
+  },
+  "qualitative_feedback": {
+    "roughness": "too_large",
+    "depth": "acceptable",
+    "efficiency": "acceptable"
+  },
+  "note": "Surface roughness exceeds requirement."
+}

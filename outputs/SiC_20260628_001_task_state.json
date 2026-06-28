@@ -1,0 +1,131 @@
+{
+  "task_id": "SiC_20260628_001",
+  "created_at": "2026-06-28T09:37:53Z",
+  "updated_at": "2026-06-28T09:38:00Z",
+  "material": "SiC",
+  "objective_mode": "quality_first",
+  "target_depth_um": 30.0,
+  "depth_min_um": null,
+  "Sa_max_um": 2.0,
+  "parameter_bounds": {
+    "pulse_width_ps": [
+      0.223,
+      4.0
+    ],
+    "frequency_kHz": [
+      2.0,
+      40.0
+    ],
+    "hatch_spacing_um": [
+      2.0,
+      10.0
+    ],
+    "passes": [
+      1.0,
+      5.0
+    ],
+    "scan_speed_mm_s": [
+      10.0,
+      50.0
+    ]
+  },
+  "available_historical_samples": 120,
+  "depth_model_available": true,
+  "roughness_model_available": true,
+  "output_dir": "outputs",
+  "data_path": "data\\processed\\updated_experiments.csv",
+  "lambda_sa": 0.25,
+  "bo_candidate_grid_size": 3000,
+  "random_seed": 42,
+  "history": [
+    {
+      "iteration": 1,
+      "recommendation": {
+        "task_id": "SiC_20260628_001",
+        "iteration": 1,
+        "material": "SiC",
+        "objective_mode": "quality_first",
+        "recommended_parameters": {
+          "pulse_width_ps": 0.5,
+          "frequency_kHz": 40,
+          "hatch_spacing_um": 2,
+          "passes": 4,
+          "scan_speed_mm_s": 40
+        },
+        "prediction": {
+          "depth_um": 32.45325124071141,
+          "depth_std_um": 19.651715728526312,
+          "Sa_um": 1.920235179611032,
+          "Sa_std_um": 2.2817332322267725
+        },
+        "acquisition": {
+          "type": "balanced",
+          "score": -0.646982427049846
+        },
+        "roughness_model_available": true,
+        "within_observed_range": true,
+        "D_proxy": 2,
+        "reason": "Candidate selected by balanced acquisition under quality_first objective.",
+        "created_at": "2026-06-28T09:37:55Z"
+      },
+      "feedback": {
+        "iteration": 1,
+        "measured_result": {
+          "depth_um": null,
+          "Sa_um": null,
+          "processing_time_s": null
+        },
+        "qualitative_feedback": {
+          "roughness": "too_large",
+          "depth": "acceptable",
+          "efficiency": "acceptable"
+        },
+        "note": "Surface roughness exceeds requirement.",
+        "numeric_feedback_used": false,
+        "qualitative_rules_used": true,
+        "created_at": "2026-06-28T09:37:58Z"
+      },
+      "numeric_feedback_used": false,
+      "qualitative_rules_used": true,
+      "next_recommendation_reason": "Candidate selected by balanced acquisition under quality_first objective.",
+      "created_at": "2026-06-28T09:37:55Z"
+    },
+    {
+      "iteration": 2,
+      "recommendation": {
+        "task_id": "SiC_20260628_001",
+        "iteration": 2,
+        "material": "SiC",
+        "objective_mode": "quality_first",
+        "recommended_parameters": {
+          "pulse_width_ps": 0.223,
+          "frequency_kHz": 2,
+          "hatch_spacing_um": 4,
+          "passes": 5,
+          "scan_speed_mm_s": 40
+        },
+        "prediction": {
+          "depth_um": 23.785544705642444,
+          "depth_std_um": 0.9980227707104647,
+          "Sa_um": 0.9175141326168499,
+          "Sa_std_um": 0.1252555394446456
+        },
+        "acquisition": {
+          "type": "balanced",
+          "score": 0.026388061689052722
+        },
+        "roughness_model_available": true,
+        "within_observed_range": true,
+        "D_proxy": 0.0625,
+        "reason": "Candidate selected by balanced acquisition under quality_first objective. Previous feedback indicated excessive roughness; candidates with lower D_proxy, fewer passes, higher scan speed, or wider hatch spacing were favored.",
+        "created_at": "2026-06-28T09:38:00Z"
+      },
+      "feedback": {},
+      "numeric_feedback_used": false,
+      "qualitative_rules_used": true,
+      "next_recommendation_reason": "Candidate selected by balanced acquisition under quality_first objective. Previous feedback indicated excessive roughness; candidates with lower D_proxy, fewer passes, higher scan speed, or wider hatch spacing were favored.",
+      "created_at": "2026-06-28T09:38:00Z"
+    }
+  ],
+  "warnings": []
+}
