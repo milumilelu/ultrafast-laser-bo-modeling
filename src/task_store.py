@@ -136,6 +136,11 @@ def _flatten_recommendation(recommendation: dict[str, Any]) -> dict[str, Any]:
     params = recommendation.get("recommended_parameters", {})
     pred = recommendation.get("prediction", {})
     acq = recommendation.get("acquisition", {})
+    bo = recommendation.get("bo_component", {})
+    rule = recommendation.get("feedback_rule_component", {})
+    interpretation = recommendation.get("feedback_interpretation", {})
+    direction = interpretation.get("suggested_direction", {})
+    penalty = rule.get("penalty_or_bias", {})
     return {
         "task_id": recommendation.get("task_id"),
         "iteration": recommendation.get("iteration"),
@@ -153,8 +158,15 @@ def _flatten_recommendation(recommendation: dict[str, Any]) -> dict[str, Any]:
         "predicted_Sa_std_um": pred.get("Sa_std_um"),
         "acquisition_type": acq.get("type"),
         "acquisition_score": acq.get("score"),
+        "bo_raw_acquisition_score": bo.get("raw_acquisition_score"),
+        "rule_adjustment": penalty.get("selected_rule_adjustment"),
+        "feedback_rule_applied": rule.get("applied"),
+        "feedback_rule_strength": rule.get("rule_strength"),
+        "feedback_conflict": direction.get("conflict"),
+        "feedback_resolution": direction.get("resolution"),
         "roughness_model_available": recommendation.get("roughness_model_available"),
         "within_observed_range": recommendation.get("within_observed_range"),
         "reason": recommendation.get("reason"),
+        "final_selection_reason": recommendation.get("final_selection_reason"),
         "created_at": recommendation.get("created_at"),
     }

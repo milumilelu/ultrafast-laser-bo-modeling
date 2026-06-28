@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.acquisition import apply_qualitative_feedback_rules
 from src.features import add_engineered_features
 from src.interactive_bo import (
     feedback_json,
@@ -80,6 +81,8 @@ def test_recommendation_has_required_fields(tmp_path):
     assert {"pulse_width_ps", "frequency_kHz", "hatch_spacing_um", "passes", "scan_speed_mm_s"}.issubset(rec["recommended_parameters"])
     assert "depth_um" in rec["prediction"]
     assert "score" in rec["acquisition"]
+    assert rec["bo_component"]["surrogate_model"] == "GPR"
+    assert rec["feedback_rule_component"]["applied"] is False
 
 
 def test_feedback_numeric_updates_history(tmp_path):
@@ -166,6 +169,83 @@ def test_five_level_feedback_strength_direction(tmp_path):
     assert state["history"][0]["feedback"]["qualitative_feedback"]["roughness"] == "很大"
     rec2 = recommend_next(state, "balanced")
     assert rec2["D_proxy"] <= rec1["D_proxy"]
+    assert rec2["feedback_interpretation"]["roughness_score"] == 2
+    assert rec2["feedback_rule_component"]["applied"] is True
+    assert "raw_acquisition_score" in rec2["bo_component"]
+
+
+def test_stronger_roughness_feedback_has_larger_penalty():
+    scored = pd.DataFrame(
+        {
+            "D_proxy": [0.5, 1.0, 2.0],
+            "scan_speed_mm_s": [100.0, 80.0, 50.0],
+            "hatch_spacing_um": [8.0, 6.0, 4.0],
+            "passes": [1.0, 2.0, 4.0],
+            "predicted_depth_um": [10.0, 12.0, 14.0],
+            "predicted_Sa_um": [0.8, 1.2, 2.0],
+            "acquisition_score": [0.0, 0.0, 0.0],
+        }
+    )
+    weak, _, weak_meta = apply_qualitative_feedback_rules(scored, {"roughness": "较大"}, {"frequency_kHz": 10, "passes": 2, "scan_speed_mm_s": 10, "hatch_spacing_um": 2})
+    strong, _, strong_meta = apply_qualitative_feedback_rules(scored, {"roughness": "很大"}, {"frequency_kHz": 10, "passes": 2, "scan_speed_mm_s": 10, "hatch_spacing_um": 2})
+    assert weak_meta["feedback_rule_component"]["rule_strength"] == 1
+    assert strong_meta["feedback_rule_component"]["rule_strength"] == 2
+    assert abs(strong.loc[2, "rule_adjustment"]) > abs(weak.loc[2, "rule_adjustment"])
+
+
+def test_stronger_efficiency_feedback_has_larger_d_proxy_bias():
+    scored = pd.DataFrame(
+        {
+            "D_proxy": [0.5, 1.0, 2.0],
+            "scan_speed_mm_s": [50.0, 80.0, 100.0],
+            "hatch_spacing_um": [8.0, 6.0, 4.0],
+            "passes": [1.0, 2.0, 4.0],
+            "predicted_depth_um": [10.0, 12.0, 14.0],
+            "predicted_Sa_um": [0.8, 1.2, 2.0],
+            "acquisition_score": [0.0, 0.0, 0.0],
+        }
+    )
+    weak, _, _ = apply_qualitative_feedback_rules(scored, {"efficiency": "较小"}, {"frequency_kHz": 10, "passes": 2, "scan_speed_mm_s": 10, "hatch_spacing_um": 2})
+    strong, _, _ = apply_qualitative_feedback_rules(scored, {"efficiency": "很小"}, {"frequency_kHz": 10, "passes": 2, "scan_speed_mm_s": 10, "hatch_spacing_um": 2})
+    assert strong.loc[2, "rule_adjustment"] > weak.loc[2, "rule_adjustment"]
+
+
+def test_conflict_feedback_records_resolution(tmp_path):
+    cfg = _config(tmp_path)
+    state = init_task(cfg, "SiC", "balanced", target_depth_um=20, Sa_max_um=2.0)
+    rec1 = recommend_parameters(state, "balanced")
+    state = load_task_state(_state_path(cfg, rec1["task_id"]))
+    state = submit_feedback(
+        state,
+        {
+            "iteration": 1,
+            "qualitative_feedback": {"roughness": "很大", "depth": "适中", "efficiency": "很小"},
+        },
+    )
+    rec2 = recommend_next(state, "balanced")
+    direction = rec2["feedback_interpretation"]["suggested_direction"]
+    assert direction["conflict"] is True
+    assert direction["resolution"] == "balanced_tradeoff"
+    assert rec2["feedback_rule_component"]["decrease_strength"] == 2
+    assert rec2["feedback_rule_component"]["increase_strength"] == 2
+
+
+def test_quality_first_conflict_prioritizes_roughness_direction(tmp_path):
+    cfg = _config(tmp_path)
+    state = init_task(cfg, "SiC", "quality_first", depth_min_um=12, Sa_max_um=1.5)
+    rec1 = recommend_parameters(state, "balanced")
+    state = load_task_state(_state_path(cfg, rec1["task_id"]))
+    state = submit_feedback(
+        state,
+        {
+            "iteration": 1,
+            "qualitative_feedback": {"roughness": "很大", "depth": "适中", "efficiency": "很小"},
+        },
+    )
+    rec2 = recommend_next(state, "balanced")
+    assert rec2["feedback_interpretation"]["suggested_direction"]["conflict"] is True
+    assert rec2["feedback_interpretation"]["suggested_direction"]["resolution"].startswith("quality_first")
+    assert rec2["D_proxy"] < rec1["D_proxy"]
 
 
 def test_ui_imports_without_running_streamlit():

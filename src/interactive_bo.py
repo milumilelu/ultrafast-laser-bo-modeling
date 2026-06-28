@@ -121,13 +121,18 @@ def recommend_parameters(task_state: dict[str, Any], recommendation_type: str = 
     candidates = generate_candidate_grid(material_data, task_state)
     scored = score_candidates(candidates, models, material_data, task_state, recommendation_type)
     feedback_rule_reason = "No prior feedback rule applied."
+    feedback_metadata = {
+        "feedback_interpretation": {},
+        "feedback_rule_component": {"applied": False, "rule_strength": 0, "penalty_or_bias": {}},
+    }
     last_feedback = _last_feedback(task_state)
     if last_feedback:
         previous_params = _last_recommendation(task_state).get("recommended_parameters", {}) if _last_recommendation(task_state) else {}
-        scored, feedback_rule_reason = apply_qualitative_feedback_rules(
+        scored, feedback_rule_reason, feedback_metadata = apply_qualitative_feedback_rules(
             scored,
             last_feedback.get("qualitative_feedback"),
             previous_params,
+            task_state["objective_mode"],
         )
     valid = scored.replace([np.inf, -np.inf], np.nan).dropna(subset=["acquisition_score", "predicted_depth_um"])
     deduped = _drop_previous_recommendations(valid, task_state)
@@ -137,7 +142,7 @@ def recommend_parameters(task_state: dict[str, Any], recommendation_type: str = 
         raise ValueError("No valid candidate remains after applying objective and feedback constraints.")
     selected = valid.sort_values(["acquisition_score", "D_proxy"], ascending=[False, True]).iloc[0]
     iteration = len(task_state.get("history", [])) + 1
-    recommendation = _build_recommendation_json(task_state, selected, iteration, recommendation_type, feedback_rule_reason)
+    recommendation = _build_recommendation_json(task_state, selected, iteration, recommendation_type, feedback_rule_reason, feedback_metadata)
 
     task_state.setdefault("history", []).append(
         {
@@ -338,6 +343,7 @@ def score_candidates(
         out["acquisition_score"] = score_exploration(out, task_state["objective_mode"], context)
     else:
         out["acquisition_score"] = score_balanced(out, task_state["objective_mode"], context)
+    out["bo_acquisition_score"] = out["acquisition_score"]
     return out
 
 
@@ -428,6 +434,7 @@ def _build_recommendation_json(
     iteration: int,
     recommendation_type: str,
     feedback_rule_reason: str,
+    feedback_metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Build the public recommendation JSON payload."""
     params = {col: _json_number(selected.get(col)) for col in PROCESS_COLUMNS}
@@ -440,6 +447,14 @@ def _build_recommendation_json(
         if warning not in warnings:
             warnings.append(warning)
     reason = _reason_text(task_state["objective_mode"], recommendation_type, feedback_rule_reason, roughness_available)
+    selected_rule_adjustment = _json_number(selected.get("rule_adjustment"))
+    rule_component = dict(feedback_metadata.get("feedback_rule_component", {}))
+    penalty_or_bias = dict(rule_component.get("penalty_or_bias", {}))
+    penalty_or_bias["selected_rule_adjustment"] = selected_rule_adjustment
+    penalty_or_bias["score_before_feedback"] = _json_number(selected.get("bo_acquisition_score"))
+    penalty_or_bias["score_after_feedback"] = _json_number(selected.get("acquisition_score"))
+    rule_component["penalty_or_bias"] = penalty_or_bias
+    final_reason = "Candidate selected by BO acquisition score after feedback-direction adjustment." if rule_component.get("applied") else "Candidate selected by BO acquisition score without qualitative feedback adjustment."
     return {
         "task_id": task_state["task_id"],
         "iteration": iteration,
@@ -453,6 +468,23 @@ def _build_recommendation_json(
             "Sa_std_um": _json_number(selected.get("predicted_Sa_std_um")),
         },
         "acquisition": {"type": recommendation_type, "score": _json_number(selected.get("acquisition_score"))},
+        "bo_component": {
+            "surrogate_model": "GPR",
+            "acquisition": recommendation_type,
+            "objective_value": _json_number(selected.get("objective_value")),
+            "raw_acquisition_score": _json_number(selected.get("bo_acquisition_score")),
+            "predicted_mean": {
+                "depth_um": _json_number(selected.get("predicted_depth_um")),
+                "Sa_um": _json_number(selected.get("predicted_Sa_um")),
+            },
+            "predicted_std": {
+                "depth_um": _json_number(selected.get("predicted_depth_std_um")),
+                "Sa_um": _json_number(selected.get("predicted_Sa_std_um")),
+            },
+        },
+        "feedback_interpretation": feedback_metadata.get("feedback_interpretation", {}),
+        "feedback_rule_component": rule_component,
+        "final_selection_reason": final_reason,
         "roughness_model_available": roughness_available,
         "within_observed_range": True,
         "D_proxy": _json_number(selected.get("D_proxy")),

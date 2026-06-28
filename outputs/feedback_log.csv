@@ -1,2 +1,2 @@
 ﻿task_id,iteration,measured_depth_um,measured_Sa_um,processing_time_s,roughness_feedback,depth_feedback,efficiency_feedback,numeric_feedback_used,qualitative_rules_used,note,created_at
-SiC_20260628_001,1,,,,较大,适中,适中,False,True,Surface roughness is relatively large.,2026-06-28T09:42:15Z
+SiC_20260628_001,1,,,,很大,适中,很小,False,True,"Roughness is very large, while efficiency is very small.",2026-06-28T10:59:22Z

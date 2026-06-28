@@ -93,10 +93,12 @@ def apply_qualitative_feedback_rules(
     scored: pd.DataFrame,
     feedback: dict[str, Any] | None,
     previous_parameters: dict[str, Any] | None,
-) -> tuple[pd.DataFrame, str]:
+    objective_mode: str = "balanced",
+) -> tuple[pd.DataFrame, str, dict[str, Any]]:
     """Adjust candidate scores using qualitative feedback without creating labels."""
     if not feedback:
-        return scored, "No qualitative feedback rule applied."
+        metadata = feedback_interpretation({}, objective_mode)
+        return scored, "No qualitative feedback rule applied.", metadata
     out = scored.copy()
     out["rule_adjustment"] = 0.0
     notes: list[str] = []
@@ -106,11 +108,13 @@ def apply_qualitative_feedback_rules(
     roughness_level = LEVEL_SCORE.get(roughness)
     depth_level = LEVEL_SCORE.get(depth)
     efficiency_level = LEVEL_SCORE.get(efficiency)
+    metadata = feedback_interpretation(feedback, objective_mode)
+    weights = metadata["feedback_rule_component"]["direction_weights"]
     previous_d = _previous_d_proxy(previous_parameters)
     d_proxy = pd.to_numeric(out.get("D_proxy"), errors="coerce")
 
     if roughness_level is not None and roughness_level > 0:
-        strength = float(roughness_level)
+        strength = float(roughness_level) * float(weights["decrease"])
         if previous_d is not None:
             out.loc[d_proxy > previous_d, "rule_adjustment"] -= strength * (2.0 + (d_proxy[d_proxy > previous_d] - previous_d).fillna(0))
             out.loc[d_proxy <= previous_d, "rule_adjustment"] += 0.8 * strength
@@ -120,14 +124,14 @@ def apply_qualitative_feedback_rules(
         notes.append(f"Roughness feedback was {roughness}; lower D_proxy, fewer passes, higher scan speed, and wider hatch spacing were favored with level-dependent strength.")
 
     if roughness_level is not None and roughness_level < 0:
-        strength = float(abs(roughness_level))
+        strength = float(abs(roughness_level)) * float(weights["increase"])
         if previous_d is not None:
             out.loc[d_proxy >= previous_d, "rule_adjustment"] += 0.35 * strength
         out["rule_adjustment"] += out["predicted_depth_um"].rank(pct=True).fillna(0) * 0.15 * strength
         notes.append(f"Roughness feedback was {roughness}; the surface margin allows slightly more depth/efficiency-oriented candidates.")
 
     if depth_level is not None and depth_level < 0:
-        strength = float(abs(depth_level))
+        strength = float(abs(depth_level)) * float(weights["increase"])
         if previous_d is not None:
             out.loc[d_proxy < previous_d, "rule_adjustment"] -= strength * (2.0 + (previous_d - d_proxy[d_proxy < previous_d]).fillna(0))
             out.loc[d_proxy >= previous_d, "rule_adjustment"] += 0.8 * strength
@@ -137,7 +141,7 @@ def apply_qualitative_feedback_rules(
         notes.append(f"Depth feedback was {depth}; higher D_proxy candidates were favored with level-dependent strength.")
 
     if depth_level is not None and depth_level > 0:
-        strength = float(depth_level)
+        strength = float(depth_level) * float(weights["decrease"])
         if previous_d is not None:
             out.loc[d_proxy > previous_d, "rule_adjustment"] -= 1.5 * strength
             out.loc[d_proxy <= previous_d, "rule_adjustment"] += 0.5 * strength
@@ -145,16 +149,28 @@ def apply_qualitative_feedback_rules(
         notes.append(f"Depth feedback was {depth}; lower energy accumulation candidates were favored.")
 
     if efficiency_level is not None and efficiency_level < 0:
-        strength = float(abs(efficiency_level))
-        out["rule_adjustment"] += out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.35 * strength
-        out["rule_adjustment"] -= out["passes"].rank(pct=True).fillna(0) * 0.35 * strength
-        notes.append(f"Efficiency feedback was {efficiency}; faster scan speed and fewer passes were favored when constraints allowed.")
+        strength = float(abs(efficiency_level)) * float(weights["increase"])
+        if previous_d is not None:
+            out.loc[d_proxy < previous_d, "rule_adjustment"] -= strength * (1.2 + (previous_d - d_proxy[d_proxy < previous_d]).fillna(0))
+            out.loc[d_proxy >= previous_d, "rule_adjustment"] += 0.45 * strength
+        out["rule_adjustment"] += out["predicted_depth_um"].rank(pct=True).fillna(0) * 0.2 * strength
+        notes.append(f"Efficiency feedback was {efficiency}; higher removal intensity candidates were favored with level-dependent strength.")
 
     if efficiency_level is not None and efficiency_level > 0:
-        strength = float(efficiency_level)
+        strength = float(efficiency_level) * float(weights["decrease"])
         out["rule_adjustment"] -= out["scan_speed_mm_s"].rank(pct=True).fillna(0) * 0.12 * strength
         out["rule_adjustment"] += out["predicted_Sa_um"].rank(pct=True, ascending=False).fillna(0) * 0.12 * strength
         notes.append(f"Efficiency feedback was {efficiency}; the search can spend some efficiency margin on quality or depth robustness.")
+
+    direction = metadata["feedback_interpretation"]["suggested_direction"]
+    if previous_d is not None and direction["conflict"] and direction["resolution"].startswith("quality_first") and roughness_level is not None and roughness_level > 0:
+        out.loc[d_proxy >= previous_d, "rule_adjustment"] -= 3.0 * float(roughness_level)
+        out.loc[d_proxy < previous_d, "rule_adjustment"] += 1.0 * float(roughness_level)
+        notes.append("Conflict resolved under quality_first: candidates below the previous D_proxy received priority over efficiency pressure.")
+    if previous_d is not None and direction["conflict"] and direction["resolution"].startswith("efficiency_first") and efficiency_level is not None and efficiency_level < 0:
+        out.loc[d_proxy <= previous_d, "rule_adjustment"] -= 2.0 * float(abs(efficiency_level))
+        out.loc[d_proxy > previous_d, "rule_adjustment"] += 1.0 * float(abs(efficiency_level))
+        notes.append("Conflict resolved under efficiency_first: candidates above the previous D_proxy received priority while roughness remains in the objective penalty.")
 
     if roughness == "适中" and depth == "适中":
         if previous_d is not None:
@@ -166,8 +182,108 @@ def apply_qualitative_feedback_rules(
 
     if "acquisition_score" in out:
         out["acquisition_score"] = out["acquisition_score"] + out["rule_adjustment"]
+    metadata["feedback_rule_component"]["penalty_or_bias"] = {
+        "rule_adjustment_min": _json_float(out["rule_adjustment"].min()),
+        "rule_adjustment_max": _json_float(out["rule_adjustment"].max()),
+        "rule_adjustment_mean": _json_float(out["rule_adjustment"].mean()),
+    }
     reason = " ".join(notes) if notes else "Qualitative feedback did not match a directional rule."
-    return out, reason
+    return out, reason, metadata
+
+
+def feedback_interpretation(feedback: dict[str, Any], objective_mode: str) -> dict[str, Any]:
+    """Interpret five-level feedback into directional BO score adjustment metadata."""
+    roughness = str(feedback.get("roughness", "unknown") or "unknown")
+    depth = str(feedback.get("depth", "unknown") or "unknown")
+    efficiency = str(feedback.get("efficiency", "unknown") or "unknown")
+    roughness_score = LEVEL_SCORE.get(roughness)
+    depth_score = LEVEL_SCORE.get(depth)
+    efficiency_score = LEVEL_SCORE.get(efficiency)
+    decrease_strength = 0
+    increase_strength = 0
+    reasons: list[str] = []
+
+    if roughness_score is not None and roughness_score > 0:
+        decrease_strength += roughness_score
+        reasons.append("roughness_large_decrease_D_proxy")
+    if roughness_score is not None and roughness_score < 0:
+        increase_strength += abs(roughness_score)
+        reasons.append("roughness_small_allows_higher_D_proxy")
+    if depth_score is not None and depth_score < 0:
+        increase_strength += abs(depth_score)
+        reasons.append("depth_small_increase_D_proxy")
+    if depth_score is not None and depth_score > 0:
+        decrease_strength += depth_score
+        reasons.append("depth_large_decrease_D_proxy")
+    if efficiency_score is not None and efficiency_score < 0:
+        increase_strength += abs(efficiency_score)
+        reasons.append("efficiency_small_increase_D_proxy")
+    if efficiency_score is not None and efficiency_score > 0:
+        decrease_strength += efficiency_score
+        reasons.append("efficiency_large_allows_lower_D_proxy")
+
+    conflict = decrease_strength > 0 and increase_strength > 0
+    if conflict and objective_mode == "quality_first":
+        resolution = "quality_first_prioritize_roughness_depth_constraint"
+        weights = {"decrease": 1.25, "increase": 0.65}
+    elif conflict and objective_mode == "efficiency_first":
+        resolution = "efficiency_first_prioritize_removal_subject_to_roughness_constraint"
+        weights = {"decrease": 0.75, "increase": 1.25}
+    elif conflict:
+        resolution = "balanced_tradeoff"
+        weights = {"decrease": 0.9, "increase": 0.9}
+    else:
+        resolution = "single_direction"
+        weights = {"decrease": 1.0, "increase": 1.0}
+
+    if decrease_strength and increase_strength:
+        direction = "decrease_for_quality_but_increase_for_removal_or_efficiency"
+    elif decrease_strength:
+        direction = "decrease"
+    elif increase_strength:
+        direction = "increase"
+    else:
+        direction = "local_exploitation_or_no_directional_change"
+
+    return {
+        "feedback_interpretation": {
+            "roughness_level": roughness,
+            "roughness_score": roughness_score,
+            "depth_level": depth,
+            "depth_score": depth_score,
+            "efficiency_level": efficiency,
+            "efficiency_score": efficiency_score,
+            "level_mapping": LEVEL_SCORE,
+            "metric_direction_notes": {
+                "roughness": "positive scores mean worse quality and push D_proxy downward",
+                "depth": "negative scores mean insufficient removal and push D_proxy upward",
+                "efficiency": "negative scores mean insufficient efficiency and push D_proxy upward",
+            },
+            "suggested_direction": {
+                "D_proxy": direction,
+                "conflict": conflict,
+                "resolution": resolution,
+                "raw_reasons": reasons,
+            },
+        },
+        "feedback_rule_component": {
+            "applied": any(score not in (None, 0) for score in [roughness_score, depth_score, efficiency_score]),
+            "rule_strength": int(max(decrease_strength, increase_strength, 0)),
+            "decrease_strength": int(decrease_strength),
+            "increase_strength": int(increase_strength),
+            "direction_weights": weights,
+            "penalty_or_bias": {},
+        },
+    }
+
+
+def _json_float(value: Any) -> float | None:
+    """Return a JSON-safe float."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
 
 
 def _previous_d_proxy(params: dict[str, Any] | None) -> float | None:

@@ -94,6 +94,8 @@ bo_mode: constrained_depth
 
 ## Interactive Bayesian Optimization Demo
 
+See [INTERFACE.md](INTERFACE.md) for the stable JSON schema, feedback-level mapping, compatibility rules, and third-party test contract.
+
 The interactive module adds a closed-loop recommendation workflow:
 
 select material -> choose objective -> recommend one process setting -> submit feedback -> update task state -> recommend the next setting.
