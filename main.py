@@ -29,6 +29,10 @@ from src.preprocessing import build_data_quality_report, clean_material_table, c
 from src.report import generate_modeling_report
 
 
+MILLING_TARGETS = ["depth_um", "Sa_um"]
+CUTTING_TARGETS = ["cut_through", "kerf_top_width_um", "kerf_taper_deg", "cut_edge_Sa_um", "chipping_um"]
+
+
 def run(config_path: str | Path) -> None:
     """Execute the reproducible modeling workflow from a config file."""
     root = Path(config_path).resolve().parent
@@ -62,11 +66,12 @@ def run(config_path: str | Path) -> None:
     random_seed = int(config.get("random_seed", 42))
     cv_max_folds = int(config.get("cv_max_folds", 5))
     all_results = []
-    for material, group in featured.groupby("material"):
+    for (process_type, material), group in featured.groupby(["process_type", "material"]):
         feature_columns = available_feature_columns(group)
-        for target in ["depth_um", "Sa_um"]:
+        targets = CUTTING_TARGETS if process_type == "cutting" else MILLING_TARGETS
+        for target in targets:
             if group[target].notna().sum() == 0:
-                logger.warning("Skipping %s / %s: target has no valid samples", material, target)
+                logger.warning("Skipping %s / %s / %s: target has no valid samples", process_type, material, target)
                 continue
             all_results.extend(
                 fit_models_for_target(
@@ -77,6 +82,7 @@ def run(config_path: str | Path) -> None:
                     random_seed=random_seed,
                     cv_max_folds=cv_max_folds,
                     logger=logger,
+                    process_type=process_type,
                 )
             )
 

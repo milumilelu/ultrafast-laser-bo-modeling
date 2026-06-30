@@ -84,3 +84,50 @@ def test_bo_recommendations_schema_with_fitted_gpr():
     recs, _ = recommend_bo(df, results, {"bo_n_recommendations": 5, "bo_candidate_grid_size": 64, "random_seed": 42}, logger)
     assert list(recs.columns) == BO_COLUMNS
     assert len(recs) >= 1
+
+
+def test_offline_bo_does_not_mix_process_type_candidate_levels():
+    logger = logging.getLogger("test")
+    milling_rows = []
+    for i in range(12):
+        milling_rows.append(
+            {
+                "process_type": "milling",
+                "material": "T",
+                "pulse_width_ps": [0.5, 1.0, 2.0][i % 3],
+                "frequency_kHz": [2, 10, 20][i % 3],
+                "hatch_spacing_um": [2, 4][i % 2],
+                "passes": [1, 2, 3][i % 3],
+                "scan_speed_mm_s": [5, 10, 15, 20][i % 4],
+                "depth_um": float(i + 1),
+                "Sa_um": float(0.1 * (i + 1)),
+                "valid_flag": True,
+            }
+        )
+    cutting_rows = []
+    for i in range(12):
+        cutting_rows.append(
+            {
+                "process_type": "cutting",
+                "material": "T",
+                "pulse_width_ps": 9.0,
+                "frequency_kHz": 400.0,
+                "hatch_spacing_um": 99.0,
+                "passes": 20,
+                "scan_speed_mm_s": 999.0,
+                "laser_power_W": 18.0,
+                "depth_um": np.nan,
+                "Sa_um": np.nan,
+                "cut_through": True,
+                "valid_flag": True,
+            }
+        )
+    df = add_engineered_features(pd.DataFrame(milling_rows + cutting_rows))
+    features = ["pulse_width_ps", "frequency_kHz", "hatch_spacing_um", "passes", "scan_speed_mm_s", "D_proxy"]
+    milling = df[df["process_type"] == "milling"]
+    results = fit_models_for_target(milling, "T", "depth_um", features, 42, 3, logger, process_type="milling")
+    recs, candidates = recommend_bo(df, results, {"bo_n_recommendations": 5, "bo_candidate_grid_size": 64, "random_seed": 42}, logger)
+    assert set(recs["process_type"]) == {"milling"}
+    assert 999.0 not in set(recs["scan_speed_mm_s"])
+    assert "milling/T" in candidates
+    assert "cutting/T" not in candidates

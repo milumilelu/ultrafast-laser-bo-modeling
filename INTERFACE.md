@@ -238,7 +238,8 @@ The state stores:
 
 ## 9. Model Status
 
-Valid sample count is computed by `process_type + material + target context`.
+Interactive `model_status` is computed by valid sample count scoped to `process_type + material`.
+Target-specific surrogate availability is checked separately when fitting each model target.
 
 | valid samples | status |
 |---:|---|
@@ -249,6 +250,13 @@ Valid sample count is computed by `process_type + material + target context`.
 Current limitation: this repository has no valid cutting data. Cutting recommendations therefore return `model_status = "rule_based_cold_start"`. They are not trained BO predictions. After cutting data are accumulated, the same interface can switch to `hybrid_rule_bo` or `data_driven_bo`.
 
 ## 10. Recommendation Logic
+
+Offline modeling and offline BO:
+
+1. Group data by `process_type + material`.
+2. For `milling`, fit only milling targets such as `depth_um` and `Sa_um`.
+3. For `cutting`, use cutting targets such as `cut_through`, kerf geometry, edge roughness, and chipping when real cutting rows exist.
+4. Generate offline BO candidate grids inside the same `process_type + material` group. Cutting candidates keep cutting parameters such as `laser_power_W`, `layer_step_um`, `focus_offset_um`, and `fill_pattern` separate from milling candidates.
 
 Milling:
 
@@ -275,6 +283,8 @@ python main.py feedback --task-id SiC_YYYYMMDD_001 --iteration 1 --roughness 很
 python main.py feedback --feedback inputs/feedback.json
 python main.py recommend-next --task-id SiC_YYYYMMDD_001
 ```
+
+Cutting feedback should use `feedback-json` or `feedback --feedback inputs/feedback.json`; the plain `feedback` flags are kept for milling compatibility.
 
 ## 12. Third-Party Test Flow
 

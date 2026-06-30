@@ -29,6 +29,8 @@ python -m pip install -r requirements.txt
 python main.py --config config.yaml
 ```
 
+Offline modeling and offline BO are grouped by `process_type + material`. Milling and cutting rows are never fitted into the same target model. Current milling targets are `depth_um` and `Sa_um`; cutting targets are prepared as `cut_through`, `kerf_top_width_um`, `kerf_taper_deg`, `cut_edge_Sa_um`, and `chipping_um`, but no cutting surrogate is trained until real cutting rows exist.
+
 Main outputs:
 
 - `data/processed/unified_experiments.csv`
@@ -107,6 +109,8 @@ python main.py feedback-json --feedback inputs/feedback.json
 
 Old commands without `--process-type` default to `milling`.
 
+For cutting feedback, use the JSON interface (`feedback-json` or `feedback --feedback`) because the plain feedback CLI flags only cover the legacy milling fields `roughness/depth/efficiency`.
+
 ## UI
 
 ```bash
@@ -140,7 +144,7 @@ Chinese fill-pattern labels map to internal enums:
 - `hybrid_rule_bo`: 10 to 29 valid samples
 - `data_driven_bo`: at least 30 valid samples
 
-The count is scoped by `process_type + material`. Cutting currently returns `rule_based_cold_start` because no cutting data are present.
+The interactive task status count is scoped by `process_type + material`. Target-specific surrogate availability is checked separately during model fitting. Cutting currently returns `rule_based_cold_start` because no cutting data are present.
 
 ## Feedback
 

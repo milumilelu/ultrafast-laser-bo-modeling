@@ -20,7 +20,7 @@ def generate_modeling_report(
     unified: pd.DataFrame,
     quality: pd.DataFrame,
     performance: pd.DataFrame,
-    best_models: dict[tuple[str, str], FitResult],
+    best_models: dict[tuple[str, str, str], FitResult],
     importance: pd.DataFrame,
     recommendations: pd.DataFrame,
 ) -> None:
@@ -32,7 +32,7 @@ def generate_modeling_report(
         "",
         f"- 统一后总样本数：{len(unified)}",
         f"- 材料数：{unified['material'].nunique() if not unified.empty else 0}",
-        "- 原始数据按材料分别建模，未将所有材料直接混合为一个主模型。",
+        "- 原始数据按 process_type + material 分组建模，避免铣削和切割数据混入同一目标函数。",
         "",
         _md_table(quality),
         "",
@@ -41,12 +41,13 @@ def generate_modeling_report(
         "- 缺失字段保留为 NaN；未对关键工艺参数做均值填补。",
         "- 标记为 fs 或数值尺度明显为飞秒的脉宽字段已转换为 ps。",
         "- 标记为 mm 或数值尺度明显为毫米的填充间距字段已转换为 um。",
-        "- 若缺少 power_W、Sq_um、Sz_um，记录保留，派生能量代理特征保持 NaN。",
+        "- 若缺少 laser_power_W、power_W、Sq_um、Sz_um，记录保留，派生功率/能量代理特征保持 NaN。",
         "",
         "## 特征工程",
         "",
         "- 构造 log_pulse_width、log_frequency、log_hatch_spacing、log_passes、log_scan_speed。",
         "- 构造 D_proxy = frequency_kHz * passes / (scan_speed_mm_s * hatch_spacing_um)。",
+        "- 构造 pulse_energy_uJ、areal_energy_proxy、line_energy_proxy、pulse_spacing_um 等功率和切割相关代理特征。",
         "- D_proxy 是单位面积累计脉冲作用密度的统计代理量，不是严格能量密度。",
         "- power_W 可用时才构造 pulse_energy_proxy 与 energy_density_proxy；当前缺失时不强行估计。",
         "",
@@ -56,12 +57,12 @@ def generate_modeling_report(
         "",
         "## 每种材料的最佳模型",
         "",
-        "| material | target | best_model | CV_RMSE | CV_R2 | n_samples |",
-        "|---|---|---:|---:|---:|---:|",
+        "| process_type | material | target | best_model | CV_RMSE | CV_R2 | n_samples |",
+        "|---|---|---|---:|---:|---:|---:|",
     ]
-    for (material, target), result in best_models.items():
+    for (process_type, material, target), result in best_models.items():
         lines.append(
-            f"| {material} | {target} | {result.model_name} | {result.metrics.get('CV_RMSE', float('nan')):.4g} | "
+            f"| {process_type} | {material} | {target} | {result.model_name} | {result.metrics.get('CV_RMSE', float('nan')):.4g} | "
             f"{result.metrics.get('CV_R2', float('nan')):.4g} | {result.metrics.get('n_samples', 0)} |"
         )
     lines.extend(

@@ -33,6 +33,7 @@ class FitResult:
     feature_columns: list[str]
     metrics: dict[str, float]
     predictions: pd.DataFrame
+    process_type: str = "milling"
 
 
 def _xgb_or_fallback(random_seed: int) -> tuple[str, Any]:
@@ -117,15 +118,19 @@ def fit_models_for_target(
     cv_max_folds: int,
     logger: logging.Logger,
     min_samples: int = 8,
+    process_type: str = "milling",
 ) -> list[FitResult]:
-    """Fit requested models for one material-target pair."""
-    subset = data.loc[data[target].notna() & data["valid_flag"].astype(bool)].copy()
+    """Fit requested models for one process/material/target group."""
+    target_values = pd.to_numeric(data[target], errors="coerce")
+    subset = data.loc[target_values.notna() & data["valid_flag"].astype(bool)].copy()
+    if not subset.empty:
+        subset[target] = target_values.loc[subset.index]
     if len(subset) < min_samples:
-        logger.warning("Skipping %s / %s: only %s valid samples; minimum is %s", material, target, len(subset), min_samples)
+        logger.warning("Skipping %s / %s / %s: only %s valid samples; minimum is %s", process_type, material, target, len(subset), min_samples)
         return []
     usable_features = [c for c in feature_columns if c in subset.columns and subset[c].notna().any()]
     if not usable_features:
-        logger.warning("Skipping %s / %s: no usable features", material, target)
+        logger.warning("Skipping %s / %s / %s: no usable features", process_type, material, target)
         return []
 
     x = subset[usable_features]
@@ -153,6 +158,7 @@ def fit_models_for_target(
             pred_df = pd.DataFrame(
                 {
                     "material": material,
+                    "process_type": process_type,
                     "target": target,
                     "model": model_name,
                     "row_index": subset.index,
@@ -161,9 +167,9 @@ def fit_models_for_target(
                     "y_pred_cv": cv_pred,
                 }
             )
-            results.append(FitResult(material, target, model_name, fitted, usable_features, metrics, pred_df))
+            results.append(FitResult(material, target, model_name, fitted, usable_features, metrics, pred_df, process_type=process_type))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Skipping model %s for %s / %s: %s", model_name, material, target, exc)
+            logger.warning("Skipping model %s for %s / %s / %s: %s", model_name, process_type, material, target, exc)
     return results
 
 
@@ -171,18 +177,18 @@ def summarize_performance(results: list[FitResult]) -> pd.DataFrame:
     """Convert fitted model results to a performance table."""
     rows = []
     for result in results:
-        row = {"material": result.material, "target": result.target, "model": result.model_name}
+        row = {"process_type": result.process_type, "material": result.material, "target": result.target, "model": result.model_name}
         row.update(result.metrics)
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-def select_best_models(results: list[FitResult]) -> dict[tuple[str, str], FitResult]:
-    """Select the best model for each material-target pair by CV_RMSE, excluding MLP when alternatives exist."""
-    best: dict[tuple[str, str], FitResult] = {}
-    grouped: dict[tuple[str, str], list[FitResult]] = {}
+def select_best_models(results: list[FitResult]) -> dict[tuple[str, str, str], FitResult]:
+    """Select the best model for each process/material/target group by CV_RMSE."""
+    best: dict[tuple[str, str, str], FitResult] = {}
+    grouped: dict[tuple[str, str, str], list[FitResult]] = {}
     for result in results:
-        grouped.setdefault((result.material, result.target), []).append(result)
+        grouped.setdefault((result.process_type, result.material, result.target), []).append(result)
     for key, items in grouped.items():
         candidates = [r for r in items if r.model_name != "MLP"] or items
         candidates = sorted(candidates, key=lambda r: (np.inf if pd.isna(r.metrics.get("CV_RMSE")) else r.metrics["CV_RMSE"], r.metrics["RMSE"]))

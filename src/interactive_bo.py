@@ -74,18 +74,20 @@ def init_task(
         raise ValueError(f"Unsupported objective_mode: {objective_mode}")
     process_type = normalize_process_type(process_type)
     data = load_experiment_data(config)
-    if material not in set(data["material"].dropna().astype(str)):
+    known_material = material in set(data["material"].dropna().astype(str))
+    allow_unknown_cutting = process_type == "cutting" and bool(parameter_bounds)
+    if not known_material and not allow_unknown_cutting:
         available = sorted(data["material"].dropna().astype(str).unique())
         raise ValueError(f"Material {material!r} not found. Available materials: {available}")
 
-    material_data = _material_data(data, material, process_type)
+    material_data = data.iloc[0:0].copy() if not known_material else _material_data(data, material, process_type)
     bounds = resolve_parameter_bounds(material_data, parameter_bounds, process_type)
     output_path = _output_dir(config)
-    output_value = str(config.get("output_dir", "outputs"))
+    output_value = _posix_path_string(config.get("output_dir", "outputs"))
     if Path(output_value).is_absolute():
-        data_value = str(_data_path(config))
+        data_value = _posix_path_string(_data_path(config))
     else:
-        data_value = str(config.get("data_path", Path("data") / "processed" / "updated_experiments.csv"))
+        data_value = _posix_path_string(config.get("data_path", "data/processed/updated_experiments.csv"))
     task_id_prefix = material if process_type == "milling" else f"{process_type}_{material}"
     task_id = generate_task_id(task_id_prefix, output_path)
     depth_available = _model_available(material_data, "depth_um")
@@ -95,9 +97,11 @@ def init_task(
     if process_type == "cutting" and n_valid < 10:
         model_status = "rule_based_cold_start"
     warnings = []
-    if objective_mode == "quality_first" and not sa_available:
+    if not known_material:
+        warnings.append("No historical material data found; cutting task uses rule-based cold-start bounds only.")
+    if process_type == "milling" and objective_mode == "quality_first" and not sa_available:
         warnings.append("Sa model unavailable; quality_first will fall back to conservative depth/D_proxy recommendations.")
-    if objective_mode == "balanced" and not sa_available:
+    if process_type == "milling" and objective_mode == "balanced" and not sa_available:
         warnings.append("Sa model unavailable; balanced mode will use depth target only.")
 
     now = utc_timestamp()
@@ -743,6 +747,11 @@ def _output_dir(config_or_state: dict[str, Any]) -> Path:
     value = config_or_state.get("output_dir", "outputs")
     path = Path(value)
     return path if path.is_absolute() else _project_root(config_or_state) / path
+
+
+def _posix_path_string(value: str | Path) -> str:
+    """Return stable POSIX separators for relative paths stored in JSON."""
+    return str(value).replace("\\", "/")
 
 
 def _last_feedback(task_state: dict[str, Any]) -> dict[str, Any] | None:

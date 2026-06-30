@@ -182,3 +182,25 @@ def test_model_status_thresholds():
     assert model_status_from_sample_count(10) == "hybrid_rule_bo"
     assert model_status_from_sample_count(29) == "hybrid_rule_bo"
     assert model_status_from_sample_count(30) == "data_driven_bo"
+
+
+def test_cutting_unknown_material_allowed_with_bounds(tmp_path):
+    cfg = _config(tmp_path)
+    state = init_task(cfg, "AlN", "quality_first", process_type="cutting", parameter_bounds=_cutting_bounds())
+    rec = recommend_parameters(state, "balanced")
+    assert state["available_historical_samples"] == 0
+    assert state["model_status"] == "rule_based_cold_start"
+    assert "\\" not in state["data_path"]
+    assert state["data_path"].endswith("data/processed/updated_experiments.csv")
+    assert rec["material"] == "AlN"
+    assert rec["prediction"]["cut_through_probability"] is None
+
+
+def test_cutting_unknown_material_without_bounds_rejected(tmp_path):
+    cfg = _config(tmp_path)
+    try:
+        init_task(cfg, "AlN", "quality_first", process_type="cutting")
+    except ValueError as exc:
+        assert "not found" in str(exc)
+    else:
+        raise AssertionError("unknown cutting material without parameter_bounds should be rejected")
