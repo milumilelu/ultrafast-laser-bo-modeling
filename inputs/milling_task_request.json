@@ -1,0 +1,17 @@
+{
+  "process_type": "milling",
+  "material": "SiC",
+  "objective_mode": "quality_first",
+  "target_depth_um": 30,
+  "depth_min_um": 25,
+  "Sa_max_um": 2.0,
+  "recommendation_type": "balanced",
+  "parameter_bounds": {
+    "pulse_width_ps": [0.3, 10],
+    "frequency_kHz": [2, 50],
+    "hatch_spacing_um": [2, 20],
+    "passes": [1, 10],
+    "scan_speed_mm_s": [20, 200],
+    "laser_power_W": [1, 20]
+  }
+}

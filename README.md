@@ -1,13 +1,19 @@
-# Ultrafast Laser Process Modeling and BO Recommendation
+# Ultrafast Laser Multi-Process BO Recommendation
 
-This project builds a reproducible workflow for:
+This repository builds a reproducible code framework for ultrafast-laser process parameter modeling and recommendation.
 
-1. input data cleaning and schema unification
-2. feature engineering
-3. per-material machine learning models
-4. key parameter identification
-5. offline Bayesian optimization recommendations
-6. exportable tables, figures and Markdown reports
+Current supported workflow:
+
+```text
+process_type -> material -> objective_mode -> process_parameters -> recommend -> feedback -> recommend-next
+```
+
+Supported process types:
+
+- `milling`: existing data-driven or hybrid Bayesian optimization workflow for face/milling process data.
+- `cutting`: schema, interface, UI, cold-start rule recommendation, and feedback loop.
+
+Important limitation: the current repository has no cutting experiment data. Cutting recommendations are therefore `rule_based_cold_start`, not trained BO model predictions. Cutting prediction fields remain `null` until valid cutting data are collected.
 
 ## Install
 
@@ -15,201 +21,166 @@ This project builds a reproducible workflow for:
 python -m pip install -r requirements.txt
 ```
 
-`xgboost` is optional. If it is not installed, the workflow automatically uses `HistGradientBoostingRegressor`.
+`xgboost` is optional. If unavailable, the offline modeling pipeline falls back to `HistGradientBoostingRegressor`.
 
-## Run
+## Offline Modeling Pipeline
 
 ```bash
 python main.py --config config.yaml
 ```
 
-## Input Data
-
-The default `config.yaml` reads:
-
-- `AlSiC.csv`
-- `CFRP.csv`
-- `SiC.csv`
-- `ZrO2.csv`
-- `金刚石实验结果.xlsx`
-
-CSV files are read with robust encoding fallback. Excel files are read with `openpyxl`.
-
-The unified schema is:
-
-- `material`
-- `pulse_width_ps`
-- `frequency_kHz`
-- `hatch_spacing_um`
-- `passes`
-- `scan_speed_mm_s`
-- `power_W`
-- `depth_um`
-- `Sa_um`
-- `Sq_um`
-- `Sz_um`
-- `source_file`
-- `valid_flag`
-- `note`
-
-Missing fields are retained as `NaN`. Critical process parameters are not filled by arbitrary means.
-
-## Outputs
+Main outputs:
 
 - `data/processed/unified_experiments.csv`
-- `data/processed/data_quality_report.csv`
 - `data/processed/unified_experiments_with_features.csv`
-- `outputs/data_schema_summary.md`
+- `data/processed/data_quality_report.csv`
 - `outputs/model_performance_summary.csv`
-- `outputs/prediction_results.csv`
 - `outputs/feature_importance_summary.csv`
-- `outputs/response_curves.csv`
 - `outputs/bo_recommendations.csv`
 - `outputs/modeling_report.md`
 - `figures/*.png`
 
-## Configure Targets and Constraints
+## Unified Schema
 
-Edit `config.yaml`:
+The unified experiment table includes both milling and cutting fields:
 
-```yaml
-target_depth_by_material:
-  AlSiC: 20
-  CFRP: 30
-Sa_max_by_material:
-  AlSiC: 2.0
-  CFRP: 3.0
-bo_mode: target_depth_min_sa
+```text
+record_id, process_type, material,
+pulse_width_ps, frequency_kHz, laser_power_W, scan_speed_mm_s, passes,
+focus_offset_um, fill_pattern, hatch_spacing_um, layer_step_um, path_overlap_um,
+material_thickness_um, cut_length_mm,
+depth_um, Sa_um, Sq_um, Sz_um, removal_rate_um3_s,
+cut_through, kerf_top_width_um, kerf_bottom_width_um, kerf_taper_deg,
+cut_edge_Sa_um, HAZ_width_um, chipping_um,
+objective_mode, source_file, valid_flag, note
 ```
 
-If `target_depth_by_material` is empty, the BO module uses the observed median depth for that material and records this in the recommendation notes. For constrained optimization, set:
+Missing fields are retained as `NaN`. Old data without `laser_power_W` keep power-derived features as `NaN`; the system does not fabricate laser power.
 
-```yaml
-bo_mode: constrained_depth
-```
+## Feature Engineering
 
-## Method Limits
+Legacy pulse-density features are retained:
 
-`D_proxy = frequency_kHz * passes / (scan_speed_mm_s * hatch_spacing_um)` is a cumulative pulse action density proxy, not a strict energy density. If `power_W`, spot diameter, pulse energy and defocus are missing, the models are statistical surrogate models rather than complete physical causal models. BO recommendations are next-experiment candidates and require experimental validation; they are not global optima.
+- `D_proxy`
+- `pulse_density_proxy`
+- log-transformed pulse width, frequency, hatch spacing, passes, and scan speed
 
-## Interactive Bayesian Optimization Demo
+New power and cutting features:
 
-See [INTERFACE.md](INTERFACE.md) for the stable JSON schema, feedback-level mapping, compatibility rules, and third-party test contract.
+- `pulse_energy_uJ = 1000 * laser_power_W / frequency_kHz`
+- `areal_energy_proxy = laser_power_W * passes / (scan_speed_mm_s * hatch_spacing_um)`
+- `line_energy_proxy = laser_power_W / scan_speed_mm_s`
+- `pulse_spacing_um = scan_speed_mm_s / frequency_kHz`
+- `layer_count_proxy = target_depth_um / layer_step_um` when target depth exists
 
-The interactive module adds a closed-loop recommendation workflow:
+After adding `laser_power_W`, `pulse_energy_uJ` and `areal_energy_proxy` are more physically meaningful than using only `D_proxy`.
 
-select material -> choose objective -> recommend one process setting -> submit feedback -> update task state -> recommend the next setting.
+## Interactive CLI
 
-It does not control laser hardware and does not claim that one recommendation is a global optimum.
-
-### CLI
-
-Initialize a task:
+Milling recommendation:
 
 ```bash
-python main.py init-task --config config.yaml --material SiC --objective quality_first --target-depth 30 --sa-max 2.0
+python main.py recommend --process-type milling --material SiC --objective quality_first
 ```
 
-Recommend parameters:
+Cutting cold-start recommendation:
 
 ```bash
-python main.py recommend --task-id SiC_20260101_001 --type balanced
+python main.py recommend --process-type cutting --material SiC --objective quality_first
 ```
 
-Submit feedback with the new five-level qualitative scale:
+Existing task:
 
 ```bash
-python main.py feedback --task-id SiC_20260101_001 --iteration 1 --depth 28.7 --sa 2.4 --roughness 较大 --depth-status 适中
-```
-
-Legacy qualitative values are still accepted for compatibility: `acceptable`, `too_large`, `too_small`, `too_shallow`, `too_deep`, `too_low`, `too_high`, and `unknown`. Internally they are mapped to the five-level scale.
-
-Recommend after feedback:
-
-```bash
-python main.py recommend-next --task-id SiC_20260101_001 --type balanced
-```
-
-Export task logs:
-
-```bash
-python main.py export-task --task-id SiC_20260101_001
+python main.py recommend --task-id SiC_YYYYMMDD_001 --type balanced
+python main.py feedback --task-id SiC_YYYYMMDD_001 --iteration 1 --roughness 很大 --depth-status 适中 --efficiency 很小
+python main.py recommend-next --task-id SiC_YYYYMMDD_001 --type balanced
 ```
 
 JSON interface:
 
 ```bash
 python main.py run-json --task-request inputs/task_request.json
+python main.py feedback --feedback inputs/feedback.json
 python main.py feedback-json --feedback inputs/feedback.json
 ```
 
-### UI
+Old commands without `--process-type` default to `milling`.
 
-Run:
+## UI
 
 ```bash
 python -m streamlit run src/ui_app.py
 ```
 
-The UI contains task settings, parameter recommendation, machining feedback, and task history panels.
+The UI supports:
 
-### JSON Examples
+- process selection: 铣削 / 切割
+- laser power bounds
+- fill pattern selection with stable internal enums
+- hatch spacing and layer-step inputs
+- cutting requirements: material thickness, cut-through requirement, target kerf width, max taper, max edge roughness
+- process-specific feedback forms
 
-`inputs/task_request.json`:
+Chinese fill-pattern labels map to internal enums:
 
-```json
-{
-  "material": "SiC",
-  "objective_mode": "quality_first",
-  "target_depth_um": 30,
-  "depth_min_um": 25,
-  "Sa_max_um": 2.0,
-  "recommendation_type": "balanced",
-  "parameter_bounds": {
-    "pulse_width_ps": [0.3, 10],
-    "frequency_kHz": [2, 50],
-    "hatch_spacing_um": [2, 20],
-    "passes": [1, 10],
-    "scan_speed_mm_s": [20, 200]
-  }
-}
+- 弓字形 -> `zigzag`
+- 回字形/轮廓 -> `contour`
+- 同心圆 -> `concentric`
+- 折线 -> `polyline`
+- 螺旋 -> `spiral`
+- 无填充/单线切割 -> `none`
+- 自定义 -> `custom`
+
+## Model Status
+
+`model_status` is returned in every recommendation:
+
+- `rule_based_cold_start`: fewer than 10 valid samples
+- `hybrid_rule_bo`: 10 to 29 valid samples
+- `data_driven_bo`: at least 30 valid samples
+
+The count is scoped by `process_type + material`. Cutting currently returns `rule_based_cold_start` because no cutting data are present.
+
+## Feedback
+
+Five-level feedback is normalized internally:
+
+```text
+很小 = -2
+较小 = -1
+适中 = 0
+较大 = +1
+很大 = +2
 ```
 
-`inputs/feedback.json`:
+Metric direction is not shared blindly across fields:
 
-```json
-{
-  "task_id": "SiC_20260101_001",
-  "iteration": 1,
-  "measured_result": {
-    "depth_um": 28.7,
-    "Sa_um": 2.4,
-    "processing_time_s": 36.0
-  },
-  "qualitative_feedback": {
-    "roughness": "较大",
-    "depth": "适中",
-    "efficiency": "适中"
-  },
-  "note": "Surface roughness exceeds requirement."
-}
+- Milling roughness too large reduces energy accumulation.
+- Milling depth too small increases removal intensity.
+- Cutting not-through increases cutting intensity.
+- Cutting overburn reduces heat input.
+
+Legacy values remain accepted: `acceptable`, `too_large`, `too_small`, `too_shallow`, `too_deep`, `too_low`, `too_high`, `unknown`.
+
+## Interface Contract
+
+See [INTERFACE.md](INTERFACE.md) for:
+
+1. `task_request.json` schema
+2. `feedback.json` schema
+3. `recommendation.json` schema
+4. `task_state.json` schema
+5. five-level feedback mapping
+6. legacy compatibility rules
+7. BO acquisition plus feedback-direction adjustment
+8. cutting cold-start limitations
+9. third-party test flow
+
+## Tests
+
+```bash
+pytest -q
 ```
 
-### Interactive Outputs
-
-- `outputs/recommendation.json`
-- `outputs/task_state.json`
-- `outputs/recommendation_log.csv`
-- `outputs/feedback_log.csv`
-- `outputs/tasks/*_task_state.json`
-- `data/processed/updated_experiments.csv`
-
-### Interactive Method Limits
-
-If only qualitative feedback is provided, the system does not fabricate numeric labels. Qualitative feedback uses five levels: `很小`, `较小`, `适中`, `较大`, `很大`. Larger roughness favors lower `D_proxy`; smaller depth favors higher `D_proxy`; smaller efficiency favors faster scan speed and fewer passes. The old categorical values remain supported as aliases.
-
-Only measured `depth_um` and/or `Sa_um` are appended to the training table. Missing measured values remain missing.
-
-The current `efficiency_first` objective uses depth as the efficiency proxy. If reliable `processing_time_s` is collected, a future version can use `depth_um / processing_time_s`.
-
-`D_proxy` remains a pulse-action-density proxy, not strict energy density, because power, spot diameter, defocus, and pulse energy may be unavailable. Every recommendation requires experimental validation.
+The tests cover milling backward compatibility, fill-pattern mapping, power feature units, cutting cold-start behavior, cutting feedback direction, and `model_status` thresholds.

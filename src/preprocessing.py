@@ -9,19 +9,39 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .schema import normalize_fill_pattern, normalize_process_type
+
 
 STANDARD_COLUMNS = [
+    "record_id",
+    "process_type",
     "material",
     "pulse_width_ps",
     "frequency_kHz",
-    "hatch_spacing_um",
-    "passes",
+    "laser_power_W",
     "scan_speed_mm_s",
+    "passes",
+    "focus_offset_um",
+    "fill_pattern",
+    "hatch_spacing_um",
+    "layer_step_um",
+    "path_overlap_um",
+    "material_thickness_um",
+    "cut_length_mm",
     "power_W",
     "depth_um",
     "Sa_um",
     "Sq_um",
     "Sz_um",
+    "removal_rate_um3_s",
+    "cut_through",
+    "kerf_top_width_um",
+    "kerf_bottom_width_um",
+    "kerf_taper_deg",
+    "cut_edge_Sa_um",
+    "HAZ_width_um",
+    "chipping_um",
+    "objective_mode",
     "source_file",
     "valid_flag",
     "note",
@@ -30,14 +50,27 @@ STANDARD_COLUMNS = [
 NUMERIC_STANDARD_COLUMNS = [
     "pulse_width_ps",
     "frequency_kHz",
+    "laser_power_W",
     "hatch_spacing_um",
     "passes",
     "scan_speed_mm_s",
     "power_W",
+    "focus_offset_um",
+    "layer_step_um",
+    "path_overlap_um",
+    "material_thickness_um",
+    "cut_length_mm",
     "depth_um",
     "Sa_um",
     "Sq_um",
     "Sz_um",
+    "removal_rate_um3_s",
+    "kerf_top_width_um",
+    "kerf_bottom_width_um",
+    "kerf_taper_deg",
+    "cut_edge_Sa_um",
+    "HAZ_width_um",
+    "chipping_um",
 ]
 
 
@@ -62,7 +95,10 @@ def _infer_standard_column(raw_name: Any, index: int | None = None) -> str | Non
         ("hatch_spacing_um", ("间距", "填充间距", "hatch", "spacing")),
         ("passes", ("重复加工次数", "加工次数", "passes", "pass")),
         ("scan_speed_mm_s", ("速度", "扫描速度", "scanspeed", "scan_speed", "speed")),
-        ("power_W", ("功率", "power")),
+        ("laser_power_W", ("激光功率", "功率", "laserpower", "laser_power", "power")),
+        ("focus_offset_um", ("离焦", "focusoffset", "focus_offset", "defocus")),
+        ("layer_step_um", ("层间距", "layerstep", "layer_step")),
+        ("fill_pattern", ("填充方式", "fillpattern", "fill_pattern")),
         ("depth_um", ("mean_depth_um", "深度", "depth")),
         ("Sa_um", ("sa_um", "粗糙度", "sa")),
         ("Sq_um", ("sq_um", "sq")),
@@ -85,6 +121,8 @@ def _unit_transform(raw_name: Any, standard: str, values: pd.Series) -> pd.Serie
     if standard == "hatch_spacing_um":
         if "mm" in norm or numeric.dropna().median() < 0.1:
             return numeric * 1000.0
+    if standard in {"laser_power_W", "focus_offset_um", "layer_step_um"}:
+        return numeric
     return numeric
 
 
@@ -107,14 +145,22 @@ def clean_material_table(
             continue
         if standard == "note":
             mapped[standard] = df[col].astype("string")
+        elif standard == "fill_pattern":
+            mapped[standard] = df[col].astype("string")
         elif standard not in mapped:
             mapped[standard] = _unit_transform(col, standard, df[col])
         column_map[str(col)] = standard
 
     out = pd.DataFrame(index=df.index)
+    out["record_id"] = [f"{metadata.get('source_file')}:{i}" for i in range(len(df))]
+    out["process_type"] = normalize_process_type(metadata.get("process_type", "milling"))
     out["material"] = material
     for col in NUMERIC_STANDARD_COLUMNS:
         out[col] = mapped.get(col, pd.Series(np.nan, index=df.index, dtype="float64"))
+    out["power_W"] = out["laser_power_W"]
+    out["fill_pattern"] = mapped.get("fill_pattern", pd.Series("none", index=df.index)).map(normalize_fill_pattern)
+    out["cut_through"] = pd.Series(np.nan, index=df.index)
+    out["objective_mode"] = pd.Series(pd.NA, index=df.index)
     out["source_file"] = metadata.get("source_file")
 
     row_notes = []

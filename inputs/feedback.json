@@ -1,15 +1,17 @@
 {
-  "task_id": "SiC_20260101_001",
+  "task_id": "cutting_SiC_YYYYMMDD_001",
   "iteration": 1,
   "measured_result": {
-    "depth_um": 28.7,
-    "Sa_um": 2.4,
-    "processing_time_s": 36.0
+    "cut_through": false,
+    "kerf_top_width_um": null,
+    "kerf_bottom_width_um": null,
+    "cut_edge_Sa_um": null,
+    "chipping_um": null
   },
   "qualitative_feedback": {
-    "roughness": "较大",
-    "depth": "适中",
-    "efficiency": "适中"
+    "cut_through_level": "未切透",
+    "edge_roughness_level": "适中",
+    "efficiency_level": "较小"
   },
-  "note": "Surface roughness exceeds requirement."
+  "note": "Example only: replace task_id with the generated cutting task id before running feedback-json."
 }

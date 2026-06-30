@@ -1,15 +1,24 @@
 {
+  "process_type": "cutting",
   "material": "SiC",
   "objective_mode": "quality_first",
-  "target_depth_um": 30,
-  "depth_min_um": 25,
-  "Sa_max_um": 2.0,
-  "recommendation_type": "balanced",
+  "requirements": {
+    "material_thickness_um": 500,
+    "cut_through_required": true,
+    "target_kerf_width_um": 30,
+    "max_taper_deg": 3,
+    "max_edge_Sa_um": 2.0
+  },
   "parameter_bounds": {
     "pulse_width_ps": [0.3, 10],
-    "frequency_kHz": [2, 50],
-    "hatch_spacing_um": [2, 20],
-    "passes": [1, 10],
-    "scan_speed_mm_s": [20, 200]
-  }
+    "frequency_kHz": [50, 500],
+    "laser_power_W": [1, 20],
+    "scan_speed_mm_s": [10, 1000],
+    "passes": [1, 30],
+    "focus_offset_um": [-100, 100],
+    "layer_step_um": [1, 20],
+    "hatch_spacing_um": [1, 20],
+    "fill_pattern": ["none", "contour", "polyline"]
+  },
+  "recommendation_type": "balanced"
 }

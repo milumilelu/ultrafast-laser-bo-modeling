@@ -121,6 +121,7 @@ def parse_args() -> argparse.Namespace:
 
     init_parser = subparsers.add_parser("init-task", help="Initialize an interactive BO task")
     init_parser.add_argument("--config", default="config.yaml")
+    init_parser.add_argument("--process-type", default="milling", choices=["milling", "cutting"])
     init_parser.add_argument("--material", required=True)
     init_parser.add_argument("--objective", required=True, choices=["quality_first", "efficiency_first", "balanced"])
     init_parser.add_argument("--target-depth", type=float)
@@ -128,12 +129,17 @@ def parse_args() -> argparse.Namespace:
     init_parser.add_argument("--sa-max", type=float)
 
     rec_parser = subparsers.add_parser("recommend", help="Recommend parameters for an existing task")
-    rec_parser.add_argument("--task-id", required=True)
+    rec_parser.add_argument("--config", default="config.yaml")
+    rec_parser.add_argument("--task-id")
+    rec_parser.add_argument("--process-type", default="milling", choices=["milling", "cutting"])
+    rec_parser.add_argument("--material")
+    rec_parser.add_argument("--objective", choices=["quality_first", "efficiency_first", "balanced"])
     rec_parser.add_argument("--type", default="balanced", choices=["exploitation", "exploration", "balanced"])
 
     fb_parser = subparsers.add_parser("feedback", help="Submit feedback for a task iteration")
-    fb_parser.add_argument("--task-id", required=True)
-    fb_parser.add_argument("--iteration", type=int, required=True)
+    fb_parser.add_argument("--task-id")
+    fb_parser.add_argument("--feedback")
+    fb_parser.add_argument("--iteration", type=int)
     fb_parser.add_argument("--depth", type=float)
     fb_parser.add_argument("--sa", type=float)
     fb_parser.add_argument("--processing-time", type=float)
@@ -164,7 +170,9 @@ def _task_init_response(state: dict) -> dict:
     """Return the public initialization response."""
     return {
         "task_id": state["task_id"],
+        "process_type": state.get("process_type", "milling"),
         "material": state["material"],
+        "model_status": state.get("model_status"),
         "objective_mode": state["objective_mode"],
         "available_historical_samples": state["available_historical_samples"],
         "depth_model_available": state["depth_model_available"],
@@ -186,6 +194,7 @@ if __name__ == "__main__":
                 cfg,
                 material=args.material,
                 objective_mode=args.objective,
+                process_type=args.process_type,
                 target_depth_um=args.target_depth,
                 depth_min_um=args.depth_min,
                 Sa_max_um=args.sa_max,
@@ -193,10 +202,23 @@ if __name__ == "__main__":
             save_task_state(state)
             print(json.dumps(_task_init_response(state), ensure_ascii=False, indent=2))
         elif args.command == "recommend":
-            state = load_task_state(args.task_id)
+            if args.task_id:
+                state = load_task_state(args.task_id)
+            else:
+                if not args.material or not args.objective:
+                    raise ValueError("recommend requires --task-id or both --material and --objective")
+                cfg = load_config(args.config)
+                cfg["_root"] = str(Path(args.config).resolve().parent)
+                state = init_task(cfg, material=args.material, objective_mode=args.objective, process_type=args.process_type)
             rec = recommend_parameters(state, args.type)
             print(json.dumps(rec, ensure_ascii=False, indent=2))
         elif args.command == "feedback":
+            if args.feedback:
+                rec = feedback_json(args.feedback)
+                print(json.dumps(rec, ensure_ascii=False, indent=2))
+                raise SystemExit(0)
+            if not args.task_id or args.iteration is None:
+                raise ValueError("feedback requires --feedback or both --task-id and --iteration")
             state = load_task_state(args.task_id)
             feedback = {
                 "task_id": args.task_id,

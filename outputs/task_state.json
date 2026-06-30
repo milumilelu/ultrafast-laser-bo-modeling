@@ -1,37 +1,64 @@
 {
-  "task_id": "SiC_20260628_001",
-  "created_at": "2026-06-28T10:59:17Z",
-  "updated_at": "2026-06-28T10:59:25Z",
+  "task_id": "cutting_SiC_20260630_004",
+  "created_at": "2026-06-30T02:35:22Z",
+  "updated_at": "2026-06-30T02:35:22Z",
   "material": "SiC",
+  "process_type": "cutting",
   "objective_mode": "quality_first",
-  "target_depth_um": 30.0,
+  "requirements": {
+    "material_thickness_um": 500,
+    "cut_through_required": true,
+    "target_kerf_width_um": 30,
+    "max_taper_deg": 3,
+    "max_edge_Sa_um": 2.0
+  },
+  "target_depth_um": null,
   "depth_min_um": null,
-  "Sa_max_um": 2.0,
+  "Sa_max_um": null,
   "parameter_bounds": {
     "pulse_width_ps": [
-      0.223,
-      4.0
+      0.3,
+      10
     ],
     "frequency_kHz": [
-      2.0,
-      40.0
+      50,
+      500
     ],
-    "hatch_spacing_um": [
-      2.0,
-      10.0
-    ],
-    "passes": [
-      1.0,
-      5.0
+    "laser_power_W": [
+      1,
+      20
     ],
     "scan_speed_mm_s": [
-      10.0,
-      50.0
+      10,
+      1000
+    ],
+    "passes": [
+      1,
+      30
+    ],
+    "focus_offset_um": [
+      -100,
+      100
+    ],
+    "layer_step_um": [
+      1,
+      20
+    ],
+    "hatch_spacing_um": [
+      1,
+      20
+    ],
+    "fill_pattern": [
+      "none",
+      "contour",
+      "polyline"
     ]
   },
-  "available_historical_samples": 120,
-  "depth_model_available": true,
-  "roughness_model_available": true,
+  "available_historical_samples": 0,
+  "n_valid_process_material_samples": 0,
+  "model_status": "rule_based_cold_start",
+  "depth_model_available": false,
+  "roughness_model_available": false,
   "output_dir": "outputs",
   "data_path": "data\\processed\\updated_experiments.csv",
   "lambda_sa": 0.25,
@@ -41,178 +68,70 @@
     {
       "iteration": 1,
       "recommendation": {
-        "task_id": "SiC_20260628_001",
+        "task_id": "cutting_SiC_20260630_004",
         "iteration": 1,
+        "process_type": "cutting",
         "material": "SiC",
         "objective_mode": "quality_first",
+        "model_status": "rule_based_cold_start",
         "recommended_parameters": {
-          "pulse_width_ps": 0.5,
-          "frequency_kHz": 40,
-          "hatch_spacing_um": 2,
-          "passes": 4,
-          "scan_speed_mm_s": 40
+          "pulse_width_ps": 5.15,
+          "frequency_kHz": 275.0,
+          "laser_power_W": 10.5,
+          "scan_speed_mm_s": 505.0,
+          "passes": 30,
+          "focus_offset_um": 0.0,
+          "layer_step_um": 10.5,
+          "hatch_spacing_um": null,
+          "fill_pattern": "none"
         },
         "prediction": {
-          "depth_um": 32.45325124071141,
-          "depth_std_um": 19.651715728526312,
-          "Sa_um": 1.920235179611032,
-          "Sa_std_um": 2.2817332322267725
+          "cut_through_probability": null,
+          "kerf_top_width_um": null,
+          "kerf_bottom_width_um": null,
+          "kerf_taper_deg": null,
+          "cut_edge_Sa_um": null,
+          "HAZ_width_um": null,
+          "chipping_um": null
         },
         "acquisition": {
           "type": "balanced",
-          "score": -0.646982427049846
+          "score": null
         },
         "bo_component": {
-          "surrogate_model": "GPR",
-          "acquisition": "balanced",
-          "objective_value": 0.8380546953115866,
-          "raw_acquisition_score": -0.646982427049846,
-          "predicted_mean": {
-            "depth_um": 32.45325124071141,
-            "Sa_um": 1.920235179611032
-          },
-          "predicted_std": {
-            "depth_um": 19.651715728526312,
-            "Sa_um": 2.2817332322267725
+          "surrogate_model": null,
+          "acquisition": null,
+          "predicted_mean": {},
+          "predicted_std": {},
+          "note": "No cutting surrogate is trained because there are not enough valid cutting samples."
+        },
+        "feedback_interpretation": {
+          "suggested_direction": {
+            "cutting_intensity": "cold_start_conservative",
+            "conflict": false,
+            "resolution": "no_feedback_initial_recommendation",
+            "raw_reasons": []
           }
         },
-        "feedback_interpretation": {},
         "feedback_rule_component": {
           "applied": false,
           "rule_strength": 0,
-          "penalty_or_bias": {
-            "selected_rule_adjustment": null,
-            "score_before_feedback": -0.646982427049846,
-            "score_after_feedback": -0.646982427049846
-          }
+          "penalty_or_bias": {}
         },
-        "final_selection_reason": "Candidate selected by BO acquisition score without qualitative feedback adjustment.",
-        "roughness_model_available": true,
+        "final_selection_reason": "Rule-based cold-start candidate selected; BO will be enabled after enough cutting data are available.",
+        "roughness_model_available": false,
         "within_observed_range": true,
-        "D_proxy": 2,
-        "reason": "Candidate selected by balanced acquisition under quality_first objective.",
-        "created_at": "2026-06-28T10:59:20Z"
-      },
-      "feedback": {
-        "iteration": 1,
-        "measured_result": {
-          "depth_um": null,
-          "Sa_um": null,
-          "processing_time_s": null
-        },
-        "qualitative_feedback": {
-          "roughness": "很大",
-          "depth": "适中",
-          "efficiency": "很小"
-        },
-        "note": "Roughness is very large, while efficiency is very small.",
-        "numeric_feedback_used": false,
-        "qualitative_rules_used": true,
-        "created_at": "2026-06-28T10:59:22Z"
-      },
-      "numeric_feedback_used": false,
-      "qualitative_rules_used": true,
-      "next_recommendation_reason": "Candidate selected by balanced acquisition under quality_first objective.",
-      "created_at": "2026-06-28T10:59:20Z"
-    },
-    {
-      "iteration": 2,
-      "recommendation": {
-        "task_id": "SiC_20260628_001",
-        "iteration": 2,
-        "material": "SiC",
-        "objective_mode": "quality_first",
-        "recommended_parameters": {
-          "pulse_width_ps": 0.223,
-          "frequency_kHz": 40,
-          "hatch_spacing_um": 2,
-          "passes": 4,
-          "scan_speed_mm_s": 50
-        },
-        "prediction": {
-          "depth_um": 16.577746397531673,
-          "depth_std_um": 20.623236078983606,
-          "Sa_um": 1.9201583333333334,
-          "Sa_std_um": 2.281733232554093
-        },
-        "acquisition": {
-          "type": "balanced",
-          "score": 0.8523889869051264
-        },
-        "bo_component": {
-          "surrogate_model": "GPR",
-          "acquisition": "balanced",
-          "objective_value": 1.7328380638634735,
-          "raw_acquisition_score": -1.5328380638761234,
-          "predicted_mean": {
-            "depth_um": 16.577746397531673,
-            "Sa_um": 1.9201583333333334
-          },
-          "predicted_std": {
-            "depth_um": 20.623236078983606,
-            "Sa_um": 2.281733232554093
-          }
-        },
-        "feedback_interpretation": {
-          "roughness_level": "很大",
-          "roughness_score": 2,
-          "depth_level": "适中",
-          "depth_score": 0,
-          "efficiency_level": "很小",
-          "efficiency_score": -2,
-          "level_mapping": {
-            "很小": -2,
-            "较小": -1,
-            "适中": 0,
-            "较大": 1,
-            "很大": 2
-          },
-          "metric_direction_notes": {
-            "roughness": "positive scores mean worse quality and push D_proxy downward",
-            "depth": "negative scores mean insufficient removal and push D_proxy upward",
-            "efficiency": "negative scores mean insufficient efficiency and push D_proxy upward"
-          },
-          "suggested_direction": {
-            "D_proxy": "decrease_for_quality_but_increase_for_removal_or_efficiency",
-            "conflict": true,
-            "resolution": "quality_first_prioritize_roughness_depth_constraint",
-            "raw_reasons": [
-              "roughness_large_decrease_D_proxy",
-              "efficiency_small_increase_D_proxy"
-            ]
-          }
-        },
-        "feedback_rule_component": {
-          "applied": true,
-          "rule_strength": 2,
-          "decrease_strength": 2,
-          "increase_strength": 2,
-          "direction_weights": {
-            "decrease": 1.25,
-            "increase": 0.65
-          },
-          "penalty_or_bias": {
-            "rule_adjustment_min": -30.62212646484375,
-            "rule_adjustment_max": 2.38522705078125,
-            "rule_adjustment_mean": -0.39267861328125003,
-            "selected_rule_adjustment": 2.38522705078125,
-            "score_before_feedback": -1.5328380638761234,
-            "score_after_feedback": 0.8523889869051264
-          }
-        },
-        "final_selection_reason": "Candidate selected by BO acquisition score after feedback-direction adjustment.",
-        "roughness_model_available": true,
-        "within_observed_range": true,
-        "D_proxy": 1.6,
-        "reason": "Candidate selected by balanced acquisition under quality_first objective. Roughness feedback was 很大; lower D_proxy, fewer passes, higher scan speed, and wider hatch spacing were favored with level-dependent strength. Efficiency feedback was 很小; higher removal intensity candidates were favored with level-dependent strength. Conflict resolved under quality_first: candidates below the previous D_proxy received priority over efficiency pressure.",
-        "created_at": "2026-06-28T10:59:25Z"
+        "reason": "No valid cutting data available. Recommendation generated by conservative cold-start rules within user-defined bounds.",
+        "created_at": "2026-06-30T02:35:22Z"
       },
       "feedback": {},
       "numeric_feedback_used": false,
-      "qualitative_rules_used": true,
-      "next_recommendation_reason": "Candidate selected by balanced acquisition under quality_first objective. Roughness feedback was 很大; lower D_proxy, fewer passes, higher scan speed, and wider hatch spacing were favored with level-dependent strength. Efficiency feedback was 很小; higher removal intensity candidates were favored with level-dependent strength. Conflict resolved under quality_first: candidates below the previous D_proxy received priority over efficiency pressure.",
-      "created_at": "2026-06-28T10:59:25Z"
+      "qualitative_rules_used": false,
+      "next_recommendation_reason": "No valid cutting data available. Recommendation generated by conservative cold-start rules within user-defined bounds.",
+      "created_at": "2026-06-30T02:35:22Z"
     }
   ],
-  "warnings": []
+  "warnings": [
+    "Sa model unavailable; quality_first will fall back to conservative depth/D_proxy recommendations."
+  ]
 }

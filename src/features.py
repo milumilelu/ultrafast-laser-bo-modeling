@@ -12,7 +12,10 @@ BASE_FEATURES = [
     "hatch_spacing_um",
     "passes",
     "scan_speed_mm_s",
+    "laser_power_W",
     "power_W",
+    "focus_offset_um",
+    "layer_step_um",
 ]
 
 DERIVED_FEATURES = [
@@ -22,6 +25,12 @@ DERIVED_FEATURES = [
     "log_passes",
     "log_scan_speed",
     "D_proxy",
+    "pulse_density_proxy",
+    "pulse_energy_uJ",
+    "areal_energy_proxy",
+    "line_energy_proxy",
+    "pulse_spacing_um",
+    "layer_count_proxy",
     "pulse_energy_proxy",
     "energy_density_proxy",
 ]
@@ -48,9 +57,23 @@ def safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add log and proxy density features without introducing infinite values."""
     out = df.copy()
-    for required in ["pulse_width_ps", "frequency_kHz", "hatch_spacing_um", "passes", "scan_speed_mm_s", "power_W"]:
+    for required in [
+        "pulse_width_ps",
+        "frequency_kHz",
+        "hatch_spacing_um",
+        "passes",
+        "scan_speed_mm_s",
+        "power_W",
+        "laser_power_W",
+        "focus_offset_um",
+        "layer_step_um",
+        "target_depth_um",
+    ]:
         if required not in out.columns:
             out[required] = np.nan
+    out["laser_power_W"] = pd.to_numeric(out["laser_power_W"], errors="coerce")
+    missing_laser_power = out["laser_power_W"].isna()
+    out.loc[missing_laser_power, "laser_power_W"] = pd.to_numeric(out.loc[missing_laser_power, "power_W"], errors="coerce")
     out["log_pulse_width"] = safe_log(out["pulse_width_ps"])
     out["log_frequency"] = safe_log(out["frequency_kHz"])
     out["log_hatch_spacing"] = safe_log(out["hatch_spacing_um"])
@@ -58,8 +81,14 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
     out["log_scan_speed"] = safe_log(out["scan_speed_mm_s"])
     denom = out["scan_speed_mm_s"] * out["hatch_spacing_um"]
     out["D_proxy"] = safe_divide(out["frequency_kHz"] * out["passes"], denom)
-    out["pulse_energy_proxy"] = safe_divide(out["power_W"], out["frequency_kHz"])
-    out["energy_density_proxy"] = safe_divide(out["power_W"] * out["passes"], denom)
+    out["pulse_density_proxy"] = out["D_proxy"]
+    out["pulse_energy_uJ"] = 1000.0 * safe_divide(out["laser_power_W"], out["frequency_kHz"])
+    out["areal_energy_proxy"] = safe_divide(out["laser_power_W"] * out["passes"], denom)
+    out["line_energy_proxy"] = safe_divide(out["laser_power_W"], out["scan_speed_mm_s"])
+    out["pulse_spacing_um"] = safe_divide(out["scan_speed_mm_s"], out["frequency_kHz"])
+    out["layer_count_proxy"] = safe_divide(out["target_depth_um"], out["layer_step_um"])
+    out["pulse_energy_proxy"] = safe_divide(out["laser_power_W"], out["frequency_kHz"])
+    out["energy_density_proxy"] = out["areal_energy_proxy"]
     for col in DERIVED_FEATURES:
         out[col] = pd.to_numeric(out[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
     return out
