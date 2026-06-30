@@ -312,7 +312,7 @@ def _parameter_table(params: dict[str, Any]) -> pd.DataFrame:
     rows = []
     for field, value in params.items():
         display_value = _display_fill_pattern(value) if field == "fill_pattern" else value
-        rows.append({"参数": PARAMETER_LABELS.get(field, field), "内部字段": field, "推荐值": _format_value(display_value)})
+        rows.append({"参数": PARAMETER_LABELS.get(field, field), "推荐值": _format_value(display_value)})
     return pd.DataFrame(rows)
 
 
