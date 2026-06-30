@@ -28,6 +28,38 @@ from src.schema import FILL_PATTERN_DISPLAY  # noqa: E402
 
 CONFIG_PATH = ROOT / "config.yaml"
 PROCESS_LABELS = {"铣削": "milling", "切割": "cutting"}
+PROCESS_TYPE_DISPLAY = {"milling": "铣削", "cutting": "切割"}
+MODEL_STATUS_DISPLAY = {
+    "rule_based_cold_start": "规则冷启动",
+    "hybrid_rule_bo": "规则 + BO 混合",
+    "data_driven_bo": "数据驱动 BO",
+}
+RECOMMENDATION_TYPE_DISPLAY = {"exploitation": "利用", "exploration": "探索", "balanced": "平衡"}
+PARAMETER_LABELS = {
+    "pulse_width_ps": "脉冲宽度 ps",
+    "frequency_kHz": "重复频率 kHz",
+    "laser_power_W": "激光功率 W",
+    "scan_speed_mm_s": "扫描速度 mm/s",
+    "passes": "加工次数",
+    "focus_offset_um": "离焦量 um",
+    "layer_step_um": "层间距 um",
+    "hatch_spacing_um": "填充间距 um",
+    "fill_pattern": "填充方式",
+    "power_W": "功率 W",
+}
+PREDICTION_LABELS = {
+    "depth_um": "预测深度 um",
+    "depth_std_um": "深度不确定度 um",
+    "Sa_um": "预测 Sa um",
+    "Sa_std_um": "Sa 不确定度 um",
+    "cut_through_probability": "切透概率",
+    "kerf_top_width_um": "切缝上宽 um",
+    "kerf_bottom_width_um": "切缝下宽 um",
+    "kerf_taper_deg": "切缝锥度 deg",
+    "cut_edge_Sa_um": "断面粗糙度 Sa um",
+    "HAZ_width_um": "热影响区宽度 um",
+    "chipping_um": "崩边 um",
+}
 LEVEL_OPTIONS = ["很小", "较小", "适中", "较大", "很大", "unknown"]
 CUT_THROUGH_OPTIONS = ["未切透", "勉强切透", "适中", "过烧蚀", "严重过烧蚀", "unknown"]
 
@@ -53,42 +85,42 @@ def task_history_table(task_state: dict[str, Any] | None) -> pd.DataFrame:
         measured = fb.get("measured_result", {})
         qual = fb.get("qualitative_feedback", {})
         row = {
-            "iteration": item.get("iteration"),
-            "process_type": process_type,
-            "model_status": rec.get("model_status"),
-            "pulse_width_ps": params.get("pulse_width_ps"),
-            "frequency_kHz": params.get("frequency_kHz"),
-            "laser_power_W": params.get("laser_power_W"),
-            "scan_speed_mm_s": params.get("scan_speed_mm_s"),
-            "passes": params.get("passes"),
-            "focus_offset_um": params.get("focus_offset_um"),
-            "layer_step_um": params.get("layer_step_um"),
-            "hatch_spacing_um": params.get("hatch_spacing_um"),
-            "fill_pattern": params.get("fill_pattern"),
-            "efficiency_feedback": qual.get("efficiency") or qual.get("efficiency_level"),
-            "reason": rec.get("reason"),
+            "轮次": item.get("iteration"),
+            "工艺场景": PROCESS_TYPE_DISPLAY.get(process_type, process_type),
+            "模型状态": MODEL_STATUS_DISPLAY.get(rec.get("model_status"), rec.get("model_status")),
+            "脉冲宽度 ps": params.get("pulse_width_ps"),
+            "重复频率 kHz": params.get("frequency_kHz"),
+            "激光功率 W": params.get("laser_power_W"),
+            "扫描速度 mm/s": params.get("scan_speed_mm_s"),
+            "加工次数": params.get("passes"),
+            "离焦量 um": params.get("focus_offset_um"),
+            "层间距 um": params.get("layer_step_um"),
+            "填充间距 um": params.get("hatch_spacing_um"),
+            "填充方式": _display_fill_pattern(params.get("fill_pattern")),
+            "效率反馈": qual.get("efficiency") or qual.get("efficiency_level"),
+            "推荐说明": rec.get("reason"),
         }
         if process_type == "cutting":
             row.update(
                 {
-                    "cut_through_probability": pred.get("cut_through_probability"),
-                    "cut_through": measured.get("cut_through"),
-                    "cut_through_level": qual.get("cut_through_level"),
-                    "kerf_width_level": qual.get("kerf_width_level"),
-                    "edge_roughness_level": qual.get("edge_roughness_level"),
-                    "taper_level": qual.get("taper_level"),
-                    "chipping_level": qual.get("chipping_level"),
+                    "切透概率": pred.get("cut_through_probability"),
+                    "实测切透": measured.get("cut_through"),
+                    "切透状态反馈": qual.get("cut_through_level"),
+                    "切缝宽度反馈": qual.get("kerf_width_level"),
+                    "断面粗糙度反馈": qual.get("edge_roughness_level"),
+                    "锥度反馈": qual.get("taper_level"),
+                    "崩边反馈": qual.get("chipping_level"),
                 }
             )
         else:
             row.update(
                 {
-                    "predicted_depth_um": pred.get("depth_um"),
-                    "predicted_Sa_um": pred.get("Sa_um"),
-                    "measured_depth_um": measured.get("depth_um"),
-                    "measured_Sa_um": measured.get("Sa_um"),
-                    "roughness_feedback": qual.get("roughness"),
-                    "depth_feedback": qual.get("depth"),
+                    "预测深度 um": pred.get("depth_um"),
+                    "预测 Sa um": pred.get("Sa_um"),
+                    "实测深度 um": measured.get("depth_um"),
+                    "实测 Sa um": measured.get("Sa_um"),
+                    "粗糙度反馈": qual.get("roughness"),
+                    "深度反馈": qual.get("depth"),
                 }
             )
         rows.append(row)
@@ -124,7 +156,12 @@ def run_app() -> None:
                 "balanced": "质量效率折中",
             }[value],
         )
-        recommendation_type = st.selectbox("推荐类型", ["exploitation", "exploration", "balanced"], index=2)
+        recommendation_type = st.selectbox(
+            "推荐类型",
+            ["exploitation", "exploration", "balanced"],
+            index=2,
+            format_func=lambda value: RECOMMENDATION_TYPE_DISPLAY[value],
+        )
     with c3:
         laser_power_bounds = _range_inputs(st, "激光功率 W", 1.0, 20.0, 0.5)
         fill_pattern = st.selectbox(
@@ -166,12 +203,17 @@ def run_app() -> None:
             Sa_max_um = st.number_input("最大 Sa um", min_value=0.0, value=2.0, step=0.1)
 
     material_data = data[(data["material"].astype(str) == material) & (data["process_type"].fillna("milling") == process_type)]
-    st.write(
-        {
-            "process_type": process_type,
-            "historical_samples": int(len(material_data)),
-            "valid_samples": int(material_data.get("valid_flag", pd.Series(dtype=bool)).fillna(False).astype(bool).sum()) if not material_data.empty else 0,
-        }
+    valid_count = int(material_data.get("valid_flag", pd.Series(dtype=bool)).fillna(False).astype(bool).sum()) if not material_data.empty else 0
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"项目": "工艺场景", "数值": PROCESS_TYPE_DISPLAY[process_type]},
+                {"项目": "历史样本数", "数值": str(int(len(material_data)))},
+                {"项目": "有效样本数", "数值": str(valid_count)},
+            ]
+        ),
+        hide_index=True,
+        use_container_width=True,
     )
 
     if st.button("初始化任务", type="primary"):
@@ -188,11 +230,11 @@ def run_app() -> None:
         )
         st.session_state.task_state = state
         st.session_state.last_recommendation = None
-        st.success(f"task_id: {state['task_id']} | model_status: {state['model_status']}")
+        st.success(f"任务 ID：{state['task_id']} | 模型状态：{MODEL_STATUS_DISPLAY.get(state['model_status'], state['model_status'])}")
 
     if st.session_state.task_state:
         st.subheader("当前搜索范围")
-        st.json(st.session_state.task_state["parameter_bounds"])
+        st.dataframe(_bounds_table(st.session_state.task_state["parameter_bounds"]), hide_index=True, use_container_width=True)
         if st.session_state.task_state.get("warnings"):
             st.warning(" | ".join(st.session_state.task_state["warnings"]))
 
@@ -207,8 +249,13 @@ def run_app() -> None:
 
     rec = st.session_state.last_recommendation
     if rec:
-        st.dataframe(pd.DataFrame([rec["recommended_parameters"]]), use_container_width=True)
-        st.json(rec)
+        st.subheader("推荐工艺参数")
+        st.dataframe(_parameter_table(rec["recommended_parameters"]), hide_index=True, use_container_width=True)
+        st.subheader("预测与推荐依据")
+        st.dataframe(_prediction_table(rec.get("prediction", {}), rec.get("acquisition", {}), rec.get("model_status")), hide_index=True, use_container_width=True)
+        st.info(rec.get("reason", ""))
+        with st.expander("查看原始推荐 JSON"):
+            st.json(rec)
 
     st.header("3. 实验反馈")
     if st.session_state.task_state and st.session_state.task_state.get("process_type") == "cutting":
@@ -228,7 +275,7 @@ def run_app() -> None:
             st.session_state.task_state = load_task_state(new["task_id"])
             st.session_state.last_recommendation = new
             st.subheader("上一组与下一组参数")
-            st.dataframe(pd.DataFrame([old["recommended_parameters"], new["recommended_parameters"]], index=["previous", "next"]), use_container_width=True)
+            st.dataframe(_comparison_table(old["recommended_parameters"], new["recommended_parameters"]), hide_index=True, use_container_width=True)
             st.info(new["reason"])
 
     st.header("4. 任务历史")
@@ -255,10 +302,64 @@ def run_app() -> None:
 def _range_inputs(st: Any, label: str, default_min: float, default_max: float, step: float) -> list[float]:
     lo, hi = st.columns(2)
     with lo:
-        lower = st.number_input(f"{label} min", value=default_min, step=step)
+        lower = st.number_input(f"{label} 下限", value=default_min, step=step)
     with hi:
-        upper = st.number_input(f"{label} max", value=default_max, step=step)
+        upper = st.number_input(f"{label} 上限", value=default_max, step=step)
     return [float(lower), float(upper)]
+
+
+def _parameter_table(params: dict[str, Any]) -> pd.DataFrame:
+    rows = []
+    for field, value in params.items():
+        display_value = _display_fill_pattern(value) if field == "fill_pattern" else value
+        rows.append({"参数": PARAMETER_LABELS.get(field, field), "内部字段": field, "推荐值": _format_value(display_value)})
+    return pd.DataFrame(rows)
+
+
+def _prediction_table(prediction: dict[str, Any], acquisition: dict[str, Any], model_status: str | None) -> pd.DataFrame:
+    rows = [{"项目": "模型状态", "字段": "model_status", "数值": _format_value(MODEL_STATUS_DISPLAY.get(model_status, model_status))}]
+    for field, value in prediction.items():
+        rows.append({"项目": PREDICTION_LABELS.get(field, field), "字段": field, "数值": "暂无预测" if value is None else _format_value(value)})
+    rows.append({"项目": "采集函数类型", "字段": "acquisition.type", "数值": _format_value(RECOMMENDATION_TYPE_DISPLAY.get(acquisition.get("type"), acquisition.get("type")))})
+    rows.append({"项目": "采集函数得分", "字段": "acquisition.score", "数值": "暂无" if acquisition.get("score") is None else _format_value(acquisition.get("score"))})
+    return pd.DataFrame(rows)
+
+
+def _bounds_table(bounds: dict[str, Any]) -> pd.DataFrame:
+    rows = []
+    for field, value in bounds.items():
+        if field == "fill_pattern":
+            display_value = "、".join(_display_fill_pattern(item) for item in value)
+            rows.append({"参数": PARAMETER_LABELS.get(field, field), "内部字段": field, "下限": "", "上限": "", "可选值": display_value})
+        elif isinstance(value, list) and len(value) == 2:
+            rows.append({"参数": PARAMETER_LABELS.get(field, field), "内部字段": field, "下限": _format_value(value[0]), "上限": _format_value(value[1]), "可选值": ""})
+        else:
+            rows.append({"参数": PARAMETER_LABELS.get(field, field), "内部字段": field, "下限": "", "上限": "", "可选值": _format_value(value)})
+    return pd.DataFrame(rows)
+
+
+def _comparison_table(previous: dict[str, Any], current: dict[str, Any]) -> pd.DataFrame:
+    fields = list(dict.fromkeys(list(previous) + list(current)))
+    rows = []
+    for field in fields:
+        prev_value = _display_fill_pattern(previous.get(field)) if field == "fill_pattern" else previous.get(field)
+        cur_value = _display_fill_pattern(current.get(field)) if field == "fill_pattern" else current.get(field)
+        rows.append({"参数": PARAMETER_LABELS.get(field, field), "内部字段": field, "上一组": _format_value(prev_value), "下一组": _format_value(cur_value)})
+    return pd.DataFrame(rows)
+
+
+def _display_fill_pattern(value: Any) -> Any:
+    if value in FILL_PATTERN_DISPLAY:
+        return FILL_PATTERN_DISPLAY[value]
+    return value
+
+
+def _format_value(value: Any) -> str:
+    if value is None:
+        return "暂无"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
 
 
 def _milling_feedback_form(st: Any) -> dict[str, Any]:
