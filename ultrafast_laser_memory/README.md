@@ -76,6 +76,14 @@ python -m uvicorn ultrafast_memory.app.api:app --reload --host 127.0.0.1 --port 
 
 ## PowerShell TUI 启动器
 
+一键完成本地配置并启动 TUI：
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File scripts/setup_and_start_tui.ps1
+```
+
+该脚本会执行 `pip install -e .`、初始化数据库、扫描 `examples`、导出 BO CSV，然后进入 TUI。它不会自动生成或保存 API Key；LLM 密钥仍需通过 TUI 交互输入或由环境变量提供。
+
 启动命令：
 
 ```powershell
@@ -94,7 +102,16 @@ pwsh -ExecutionPolicy Bypass -File scripts/start_agent_tui.ps1 -SkipLlmConfig
 pwsh -ExecutionPolicy Bypass -File scripts/start_agent_tui.ps1 -NoSave
 ```
 
-启动器支持选择 OpenAI、DeepSeek、Anthropic、Moonshot/Kimi、Qwen、GLM 和本地 OpenAI-Compatible 服务。默认模型列表只是启动器默认值，实际可用模型以用户 API 服务商账户权限为准。API Base URL 可在 TUI 中修改，默认地址也可能随服务商调整。
+启动器支持选择 OpenAI、DeepSeek、Anthropic、Moonshot/Kimi、Qwen、GLM 和本地 OpenAI-Compatible 服务。默认模型列表已按 2026-07-07 官方文档更新：
+
+- OpenAI：`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.4-nano`
+- DeepSeek：`deepseek-v4-pro`、`deepseek-v4-flash`
+- Anthropic：`claude-fable-5`、`claude-opus-4-8`、`claude-sonnet-5`、`claude-haiku-4-5`
+- Moonshot/Kimi：`kimi-k2.7-code`、`kimi-k2.7-code-highspeed`、`kimi-k2.6`、`moonshot-v1-128k`
+- Qwen：`qwen3.7-max`、`qwen3.7-plus`、`qwen3.6-flash`
+- GLM/Z.ai：`glm-5.2`、`glm-5.1`、`glm-5`、`glm-5-turbo`
+
+默认模型列表只是启动器默认值，实际可用模型以用户 API 服务商账户权限为准。API Base URL 可在 TUI 中修改，默认地址也可能随服务商调整。
 
 API Key 使用 `Read-Host -AsSecureString` 输入，不明文回显。默认只写入当前 PowerShell 进程环境变量，并保存不含明文 key 的 `configs/llm.local.json`。该文件已加入 `.gitignore`。Windows Credential Manager 持久密钥存储仅预留 stub，MVP 暂未启用。
 

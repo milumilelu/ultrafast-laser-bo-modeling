@@ -22,9 +22,9 @@ PROVIDER_BASE_URL = {
     "openai": "https://api.openai.com/v1",
     "deepseek": "https://api.deepseek.com",
     "anthropic": "https://api.anthropic.com",
-    "moonshot": "https://api.moonshot.cn/v1",
+    "moonshot": "https://api.moonshot.ai/v1",
     "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "glm": "https://open.bigmodel.cn/api/paas/v4",
+    "glm": "https://api.z.ai/api/paas/v4",
     "local": "",
 }
 

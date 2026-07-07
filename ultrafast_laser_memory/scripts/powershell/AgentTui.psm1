@@ -1,12 +1,12 @@
 $script:RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
 $script:Providers = @{
-    "1" = @{ Id = "openai"; Name = "OpenAI"; Env = "OPENAI_API_KEY"; Base = "https://api.openai.com/v1"; Models = @("gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini") }
-    "2" = @{ Id = "deepseek"; Name = "DeepSeek"; Env = "DEEPSEEK_API_KEY"; Base = "https://api.deepseek.com"; Models = @("deepseek-chat", "deepseek-reasoner") }
-    "3" = @{ Id = "anthropic"; Name = "Anthropic"; Env = "ANTHROPIC_API_KEY"; Base = "https://api.anthropic.com"; Models = @("claude-3-5-sonnet-latest", "claude-3-5-haiku-latest") }
-    "4" = @{ Id = "moonshot"; Name = "Moonshot / Kimi"; Env = "MOONSHOT_API_KEY"; Base = "https://api.moonshot.cn/v1"; Models = @("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k") }
-    "5" = @{ Id = "qwen"; Name = "通义千问 Qwen"; Env = "DASHSCOPE_API_KEY"; Base = "https://dashscope.aliyuncs.com/compatible-mode/v1"; Models = @("qwen-plus", "qwen-max", "qwen-turbo") }
-    "6" = @{ Id = "glm"; Name = "智谱 GLM"; Env = "ZHIPUAI_API_KEY"; Base = "https://open.bigmodel.cn/api/paas/v4"; Models = @("glm-4", "glm-4-air", "glm-4-flash") }
+    "1" = @{ Id = "openai"; Name = "OpenAI"; Env = "OPENAI_API_KEY"; Base = "https://api.openai.com/v1"; Models = @("gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano") }
+    "2" = @{ Id = "deepseek"; Name = "DeepSeek"; Env = "DEEPSEEK_API_KEY"; Base = "https://api.deepseek.com"; Models = @("deepseek-v4-pro", "deepseek-v4-flash") }
+    "3" = @{ Id = "anthropic"; Name = "Anthropic"; Env = "ANTHROPIC_API_KEY"; Base = "https://api.anthropic.com"; Models = @("claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5") }
+    "4" = @{ Id = "moonshot"; Name = "Moonshot / Kimi"; Env = "MOONSHOT_API_KEY"; Base = "https://api.moonshot.ai/v1"; Models = @("kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "moonshot-v1-128k") }
+    "5" = @{ Id = "qwen"; Name = "通义千问 Qwen"; Env = "DASHSCOPE_API_KEY"; Base = "https://dashscope.aliyuncs.com/compatible-mode/v1"; Models = @("qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash") }
+    "6" = @{ Id = "glm"; Name = "智谱 GLM / Z.ai"; Env = "ZHIPUAI_API_KEY"; Base = "https://api.z.ai/api/paas/v4"; Models = @("glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo") }
     "7" = @{ Id = "local"; Name = "本地 OpenAI-Compatible 服务"; Env = "OPENAI_API_KEY"; Base = ""; Models = @("__custom__") }
 }
 
@@ -28,10 +28,11 @@ function Show-ProviderMenu {
         Write-Host "[3] Anthropic"
         Write-Host "[4] Moonshot / Kimi"
         Write-Host "[5] 通义千问 Qwen"
-        Write-Host "[6] 智谱 GLM"
+        Write-Host "[6] 智谱 GLM / Z.ai"
         Write-Host "[7] 本地 OpenAI-Compatible 服务"
         Write-Host "[8] 跳过 LLM 配置，仅启动数据闭环服务"
         $choice = Read-Host "请选择服务商"
+        if ([string]::IsNullOrWhiteSpace($choice) -and [Console]::IsInputRedirected) { return "skip" }
         if ($choice -eq "8") { return "skip" }
         if ($script:Providers.ContainsKey($choice)) { return $script:Providers[$choice].Id }
         Write-Host "无效选择，请重新输入。"
@@ -59,6 +60,7 @@ function Show-ModelMenu {
     }
     while ($true) {
         $choice = Read-Host "请选择模型"
+        if ([string]::IsNullOrWhiteSpace($choice) -and [Console]::IsInputRedirected) { return $info.Models[0] }
         $index = 0
         $parsed = [int]::TryParse($choice, [ref]$index)
         if ($parsed -and $index -ge 1 -and $index -le $info.Models.Count) {
@@ -204,6 +206,13 @@ function Export-AgentBoDataset {
     try { python -m ultrafast_memory.app.cli export-bo } finally { Pop-Location }
 }
 
+function Initialize-AgentLocalBootstrap {
+    if (-not (Test-AgentPythonEnvironment)) { return }
+    Initialize-AgentDatabase
+    Invoke-AgentScan
+    Export-AgentBoDataset
+}
+
 function Show-AgentConfig {
     Write-Host ("Provider: {0}" -f $env:ULTRAFAST_LLM_PROVIDER)
     Write-Host ("Model: {0}" -f $env:ULTRAFAST_LLM_MODEL)
@@ -216,27 +225,31 @@ function Show-AgentConfig {
 function Show-AgentMainMenu {
     while ($true) {
         Write-Host ""
-        Write-Host "[1] 初始化数据库"
-        Write-Host "[2] 扫描示例数据"
-        Write-Host "[3] 启动 FastAPI 服务"
-        Write-Host "[4] 导出 BO 数据集"
-        Write-Host "[5] 查看配置"
-        Write-Host "[6] 清除本地 LLM 配置"
-        Write-Host "[7] 退出"
+        Write-Host "[1] 一键初始化本地数据闭环"
+        Write-Host "[2] 初始化数据库"
+        Write-Host "[3] 扫描示例数据"
+        Write-Host "[4] 启动 FastAPI 服务"
+        Write-Host "[5] 导出 BO 数据集"
+        Write-Host "[6] 查看配置"
+        Write-Host "[7] 清除本地 LLM 配置"
+        Write-Host "[8] 退出"
         $choice = Read-Host "请选择操作"
+        if ([string]::IsNullOrWhiteSpace($choice) -and [Console]::IsInputRedirected) { return }
         if ($choice -eq "1") {
-            Initialize-AgentDatabase
+            Initialize-AgentLocalBootstrap
         } elseif ($choice -eq "2") {
-            Invoke-AgentScan
+            Initialize-AgentDatabase
         } elseif ($choice -eq "3") {
-            Start-AgentApiServer
+            Invoke-AgentScan
         } elseif ($choice -eq "4") {
-            Export-AgentBoDataset
+            Start-AgentApiServer
         } elseif ($choice -eq "5") {
-            Show-AgentConfig
+            Export-AgentBoDataset
         } elseif ($choice -eq "6") {
-            Clear-AgentLlmConfig
+            Show-AgentConfig
         } elseif ($choice -eq "7") {
+            Clear-AgentLlmConfig
+        } elseif ($choice -eq "8") {
             return
         } else {
             Write-Host "无效选择，请重新输入。"
@@ -244,4 +257,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Invoke-AgentScan, Start-AgentApiServer, Export-AgentBoDataset, Test-AgentPythonEnvironment, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Invoke-AgentScan, Start-AgentApiServer, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
