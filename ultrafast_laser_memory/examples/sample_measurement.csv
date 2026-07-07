@@ -1,0 +1,3 @@
+run_id,metric_name,metric_value,metric_unit,measurement_method,instrument_id,region_of_interest,measured_at
+run_023,Ra,520,nm,white_light_interferometry,wli_01,CRL_center,2026-07-07 11:00:00
+run_023,form_error,8.2,um,profile_measurement,profiler_01,CRL_full,2026-07-07 11:10:00

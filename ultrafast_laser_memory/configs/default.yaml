@@ -1,0 +1,28 @@
+database:
+  url: "sqlite:///data/ultrafast_memory.db"
+
+paths:
+  watch_dirs:
+    - "data/watch_dirs/recipes"
+    - "data/watch_dirs/logs"
+    - "data/watch_dirs/measurements"
+    - "data/watch_dirs/notes"
+  raw_artifacts: "data/raw_artifacts"
+  exports: "data/exports"
+
+ingestion:
+  archive_originals: true
+  skip_duplicate_sha256: true
+
+parsers:
+  recipe_json:
+    enabled: true
+  simple_log:
+    enabled: true
+  measurement_csv:
+    enabled: true
+  operator_note:
+    enabled: true
+
+bo:
+  export_filename: "bo_training_samples.csv"

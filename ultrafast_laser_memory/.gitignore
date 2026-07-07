@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.pyc
+*.egg-info/
+data/ultrafast_memory.db
+data/raw_artifacts/**
+data/exports/*.csv
+configs/llm.local.json
+.env
+*.key

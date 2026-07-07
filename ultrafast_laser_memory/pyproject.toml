@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ultrafast-laser-memory"
+version = "0.1.0"
+description = "Auditable ultrafast laser process memory MVP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.100",
+  "pandas>=2.0",
+  "pydantic>=2.0",
+  "pyyaml>=6.0",
+  "sqlalchemy>=2.0",
+  "typer>=0.9",
+  "uvicorn>=0.22",
+  "watchdog>=3.0"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.25", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

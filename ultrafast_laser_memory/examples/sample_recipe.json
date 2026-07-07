@@ -1,0 +1,33 @@
+{
+  "task_id": "task_diamond_crl_001",
+  "component_type": "diamond_CRL",
+  "material": "diamond",
+  "process_type": "surface_micromachining",
+  "geometry": {
+    "curvature_radius_mm": 1.0,
+    "thickness_mm": 1.0,
+    "aperture_mm": 0.9849,
+    "parabola_spacing_um": 30
+  },
+  "target": {
+    "Ra_nm_max": 460,
+    "focal_length_m": 9.8,
+    "photon_energy_keV": 10,
+    "lens_count": 7
+  },
+  "laser": {
+    "wavelength_nm": 1030,
+    "pulse_width_fs": 300,
+    "power_W": 5.0,
+    "frequency_kHz": 200
+  },
+  "scan": {
+    "scan_speed_mm_s": 500,
+    "passes": 3,
+    "hatch_spacing_um": 5,
+    "layer_step_um": 2,
+    "focus_offset_um": 0,
+    "fill_pattern": "bidirectional",
+    "path_strategy": "layered_surface"
+  }
+}
