@@ -21,7 +21,7 @@ Audit date: 2026-07-11 (Asia/Shanghai). Evidence is the current worktree, execut
 | 15 | End-to-end TGV demo | pass | Equipment → RAG → approval → real BO → five-point 3×3 trial → pass → formal ready → report |
 | 16 | Complete task report | pass | Markdown/JSON, content hash, citations/evidence/trial/source/clipping/review/BO/risks/timings tests |
 | 17 | Performance P50/P95 | pass | P50/P95/P99 report; 12/12 budget/baseline checks pass |
-| 18 | All tests pass | pass | Agent 150 passed; repository 182 passed |
+| 18 | All tests pass | pass | Agent 150 passed; repository 182 passed; GitHub push/PR workflow repeats tests and Demo replay |
 | 19 | Rollback supported | pass | Pre-refactor tag, online DB/config backups, safe explicit rollback script/tests |
 | 20 | README matches implementation | pass | Single status matrix; limitations and offline/read-only fallbacks stated |
 

@@ -23,3 +23,7 @@ Doctor:
 
 Performance:
   reports/final_performance.json acceptance: pass (12/12 checks)
+
+Continuous verification:
+  .github/workflows/refactor-verification.yml runs the complete suite and
+  deterministic offline Demo replay on every push and pull request.
