@@ -1,6 +1,9 @@
 param(
     [switch]$NoSave,
-    [switch]$SkipLlmConfig
+    [switch]$SkipLlmConfig,
+    [switch]$ShowMenu,
+    [switch]$Reconfigure,
+    [switch]$ForceInitialize
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,17 +13,9 @@ Import-Module $ModulePath -Force -DisableNameChecking
 
 Show-AgentBanner
 
-if (-not $SkipLlmConfig) {
-    $provider = Show-ProviderMenu
-    if ($provider -ne "skip") {
-        $model = Show-ModelMenu -Provider $provider
-        $apiKeyInfo = Read-AgentApiKey -Provider $provider
-        Set-AgentEnvironment -Provider $provider -Model $model -ApiKeyInfo $apiKeyInfo
-
-        if (-not $NoSave) {
-            Save-AgentLlmConfig -Provider $provider -Model $model -ApiKeyInfo $apiKeyInfo
-        }
-    }
+if ($ShowMenu) {
+    Show-AgentMainMenu
+    return
 }
 
-Show-AgentMainMenu
+Start-AgentDeepSeekAutoLaunch -NoSave:$NoSave -SkipLlmConfig:$SkipLlmConfig -Reconfigure:$Reconfigure -ForceInitialize:$ForceInitialize

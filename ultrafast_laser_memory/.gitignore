@@ -4,9 +4,13 @@ __pycache__/
 .venv/
 *.pyc
 *.egg-info/
-data/ultrafast_memory.db
-data/raw_artifacts/**
-data/exports/*.csv
+# Local databases, archived PDFs, generated reports, exports, and runtime inputs.
+data/**
+
+# Private/local literature corpus and structured deliverables.
+超快智能体文献检索/**
+
 configs/llm.local.json
+configs/secrets/
 .env
 *.key

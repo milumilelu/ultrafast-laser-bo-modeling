@@ -2,7 +2,9 @@ param(
     [switch]$NoSave,
     [switch]$SkipLlmConfig,
     [switch]$NoExampleData,
-    [switch]$NoBoExport
+    [switch]$NoBoExport,
+    [switch]$Reconfigure,
+    [switch]$ForceInitialize
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,17 +41,14 @@ try {
         Write-Host "[4/5] 跳过 BO 导出"
     }
 
-    Write-Host "[5/5] 启动 TUI"
+    Write-Host "[5/5] 启动 DeepSeek 聊天 TUI"
     $tuiScript = Join-Path $PSScriptRoot "start_agent_tui.ps1"
-    if ($NoSave -and $SkipLlmConfig) {
-        & $tuiScript -NoSave -SkipLlmConfig
-    } elseif ($NoSave) {
-        & $tuiScript -NoSave
-    } elseif ($SkipLlmConfig) {
-        & $tuiScript -SkipLlmConfig
-    } else {
-        & $tuiScript
-    }
+    $args = @()
+    if ($NoSave) { $args += "-NoSave" }
+    if ($SkipLlmConfig) { $args += "-SkipLlmConfig" }
+    if ($Reconfigure) { $args += "-Reconfigure" }
+    if ($ForceInitialize) { $args += "-ForceInitialize" }
+    & $tuiScript @args
 } finally {
     Pop-Location
 }

@@ -10,6 +10,14 @@ $script:Providers = @{
     "7" = @{ Id = "local"; Name = "本地 OpenAI-Compatible 服务"; Env = "OPENAI_API_KEY"; Base = ""; Models = @("__custom__") }
 }
 
+$script:DeepSeekProvider = "deepseek"
+$script:DeepSeekModels = @(
+    @{ Label = "Flash"; Model = "deepseek-v4-flash" },
+    @{ Label = "Pro"; Model = "deepseek-v4-pro" }
+)
+$script:AgentStreamMode = $false
+$script:AgentDisplayMode = "research"
+
 function Show-AgentBanner {
     try {
         Clear-Host
@@ -70,6 +78,26 @@ function Show-ModelMenu {
     }
 }
 
+function Show-DeepSeekModelMenu {
+    Write-Host "DeepSeek 模型选择"
+    for ($i = 0; $i -lt $script:DeepSeekModels.Count; $i++) {
+        $item = $script:DeepSeekModels[$i]
+        Write-Host ("[{0}] {1} ({2})" -f ($i + 1), $item.Label, $item.Model)
+    }
+    while ($true) {
+        $choice = Read-Host "请选择模型"
+        if ([string]::IsNullOrWhiteSpace($choice) -and [Console]::IsInputRedirected) {
+            return $script:DeepSeekModels[0].Model
+        }
+        $index = 0
+        $parsed = [int]::TryParse($choice, [ref]$index)
+        if ($parsed -and $index -ge 1 -and $index -le $script:DeepSeekModels.Count) {
+            return $script:DeepSeekModels[$index - 1].Model
+        }
+        Write-Host "无效选择，请重新输入。"
+    }
+}
+
 function ConvertFrom-AgentSecureString {
     param([securestring]$SecureString)
     if ($null -eq $SecureString -or $SecureString.Length -eq 0) { return "" }
@@ -82,17 +110,31 @@ function ConvertFrom-AgentSecureString {
 }
 
 function Read-AgentApiKey {
-    param([string]$Provider)
+    param(
+        [string]$Provider,
+        [switch]$ForcePrompt
+    )
     $info = Get-AgentProviderInfo -Provider $Provider
+    $savedSecret = Get-AgentSecret -Name $info.Env
     $existing = [Environment]::GetEnvironmentVariable($info.Env, "Process")
-    if ($existing) {
-        $useExisting = Read-Host ("检测到环境变量 {0}，直接使用？(Y/n)" -f $info.Env)
-        if ($useExisting -ne "n") {
-            return @{ EnvName = $info.Env; Source = "env"; HasKey = $true; Key = "" }
-        }
+
+    if (-not $ForcePrompt -and $savedSecret) {
+        $plainSaved = ConvertFrom-AgentSecureString -SecureString $savedSecret
+        return @{ EnvName = $info.Env; Source = "secret"; HasKey = $true; Key = $plainSaved }
     }
+    if (-not $ForcePrompt -and $existing) {
+        return @{ EnvName = $info.Env; Source = "env"; HasKey = $true; Key = $existing }
+    }
+
     $secure = Read-Host ("请输入 API Key，留空则跳过 ({0})" -f $info.Env) -AsSecureString
     $plain = ConvertFrom-AgentSecureString -SecureString $secure
+    if ([string]::IsNullOrWhiteSpace($plain) -and $savedSecret) {
+        $plainSaved = ConvertFrom-AgentSecureString -SecureString $savedSecret
+        return @{ EnvName = $info.Env; Source = "secret"; HasKey = $true; Key = $plainSaved }
+    }
+    if ([string]::IsNullOrWhiteSpace($plain) -and $existing) {
+        return @{ EnvName = $info.Env; Source = "env"; HasKey = $true; Key = $existing }
+    }
     return @{ EnvName = $info.Env; Source = "session"; HasKey = -not [string]::IsNullOrWhiteSpace($plain); Key = $plain }
 }
 
@@ -116,19 +158,94 @@ function Set-AgentEnvironment {
     }
 }
 
+function Set-AgentDeepSeekEnvironment {
+    param([string]$Model, [hashtable]$ApiKeyInfo)
+    $env:ULTRAFAST_LLM_PROVIDER = "deepseek"
+    $env:ULTRAFAST_LLM_MODEL = $Model
+    $env:ULTRAFAST_LLM_API_BASE = "https://api.deepseek.com"
+    $env:ULTRAFAST_LLM_API_KEY_ENV = "DEEPSEEK_API_KEY"
+    if ($ApiKeyInfo.HasKey -and $ApiKeyInfo.Key) {
+        $env:DEEPSEEK_API_KEY = $ApiKeyInfo.Key
+    }
+}
+
+function Use-AgentSavedDeepSeekConfig {
+    $local = Load-AgentLlmConfig
+    if (-not $local) { return $false }
+    if ($local.provider -ne $script:DeepSeekProvider) { return $false }
+    if ([string]::IsNullOrWhiteSpace($local.model)) { return $false }
+
+    $env:ULTRAFAST_LLM_PROVIDER = "deepseek"
+    $env:ULTRAFAST_LLM_MODEL = $local.model
+    $env:ULTRAFAST_LLM_API_BASE = $(if ($local.api_base) { $local.api_base } else { "https://api.deepseek.com" })
+    $env:ULTRAFAST_LLM_API_KEY_ENV = $(if ($local.api_key_env) { $local.api_key_env } else { "DEEPSEEK_API_KEY" })
+
+    $secret = Get-AgentSecret -Name $env:ULTRAFAST_LLM_API_KEY_ENV
+    if ($secret) {
+        $env:DEEPSEEK_API_KEY = ConvertFrom-AgentSecureString -SecureString $secret
+        Write-Host ("已加载已有 DeepSeek 配置：{0}" -f $env:ULTRAFAST_LLM_MODEL)
+        return $true
+    }
+    if ([Environment]::GetEnvironmentVariable($env:ULTRAFAST_LLM_API_KEY_ENV, "Process")) {
+        Write-Host ("已加载已有 DeepSeek 配置：{0}" -f $env:ULTRAFAST_LLM_MODEL)
+        return $true
+    }
+    Write-Host ("已加载已有 DeepSeek 模型配置：{0}；未找到已保存 API Key。" -f $env:ULTRAFAST_LLM_MODEL)
+    return $false
+}
+
+function Initialize-AgentDeepSeekConfig {
+    param(
+        [switch]$NoSave,
+        [switch]$Reconfigure
+    )
+    if (-not $Reconfigure) {
+        if (Use-AgentSavedDeepSeekConfig) { return }
+        $local = Load-AgentLlmConfig
+        if ($local -and $local.provider -eq $script:DeepSeekProvider -and $local.model) {
+            Write-Host "只需补充 DeepSeek API Key；模型配置将复用已有设置。"
+            $apiKeyInfo = Read-AgentApiKey -Provider $script:DeepSeekProvider
+            Set-AgentDeepSeekEnvironment -Model $local.model -ApiKeyInfo $apiKeyInfo
+            if (-not $NoSave) {
+                Save-AgentLlmConfig -Provider $script:DeepSeekProvider -Model $local.model -ApiKeyInfo $apiKeyInfo
+            }
+            return
+        }
+    }
+
+    Write-Host "供应商：DeepSeek"
+    $model = Show-DeepSeekModelMenu
+    $apiKeyInfo = Read-AgentApiKey -Provider $script:DeepSeekProvider -ForcePrompt:$Reconfigure
+    Set-AgentDeepSeekEnvironment -Model $model -ApiKeyInfo $apiKeyInfo
+    if (-not $NoSave) {
+        Save-AgentLlmConfig -Provider $script:DeepSeekProvider -Model $model -ApiKeyInfo $apiKeyInfo
+    }
+}
+
 function Save-AgentSecret {
     param([string]$Name, [securestring]$Secret)
-    throw "Windows Credential Manager persistence is reserved for a later version."
+    if ($null -eq $Secret -or $Secret.Length -eq 0) { return }
+    $secretDir = Join-Path $script:RepoRoot "configs\secrets"
+    New-Item -ItemType Directory -Force -Path $secretDir | Out-Null
+    $path = Join-Path $secretDir ("{0}.dpapi" -f $Name)
+    $Secret | ConvertFrom-SecureString | Set-Content -Path $path -Encoding UTF8 -NoNewline
 }
 
 function Get-AgentSecret {
     param([string]$Name)
-    return $null
+    $path = Join-Path $script:RepoRoot ("configs\secrets\{0}.dpapi" -f $Name)
+    if (-not (Test-Path $path)) { return $null }
+    try {
+        return (Get-Content -Path $path -Raw).Trim() | ConvertTo-SecureString
+    } catch {
+        return $null
+    }
 }
 
 function Remove-AgentSecret {
     param([string]$Name)
-    return $null
+    $path = Join-Path $script:RepoRoot ("configs\secrets\{0}.dpapi" -f $Name)
+    if (Test-Path $path) { Remove-Item -Path $path -Force }
 }
 
 function Save-AgentLlmConfig {
@@ -148,6 +265,10 @@ function Save-AgentLlmConfig {
         updated_at = $now
     }
     $data | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
+    if ($ApiKeyInfo.HasKey -and $ApiKeyInfo.Key) {
+        $secure = ConvertTo-SecureString $ApiKeyInfo.Key -AsPlainText -Force
+        Save-AgentSecret -Name $ApiKeyInfo.EnvName -Secret $secure
+    }
     Write-Host "已保存 LLM 配置；API Key 未写入配置文件。"
 }
 
@@ -160,6 +281,7 @@ function Load-AgentLlmConfig {
 function Clear-AgentLlmConfig {
     $path = Join-Path $script:RepoRoot "configs\llm.local.json"
     if (Test-Path $path) { Remove-Item -Path $path -Force }
+    Remove-AgentSecret -Name "DEEPSEEK_API_KEY"
     Write-Host "本地 LLM 配置已清除。"
 }
 
@@ -188,6 +310,12 @@ function Initialize-AgentDatabase {
     try { python -m ultrafast_memory.app.cli init-db } finally { Pop-Location }
 }
 
+function Update-AgentDatabaseSchemaQuiet {
+    if (-not (Test-AgentPythonEnvironment)) { return }
+    Push-Location $script:RepoRoot
+    try { python -m ultrafast_memory.app.cli init-db | Out-Null } finally { Pop-Location }
+}
+
 function Invoke-AgentScan {
     if (-not (Test-AgentPythonEnvironment)) { return }
     Push-Location $script:RepoRoot
@@ -206,11 +334,31 @@ function Export-AgentBoDataset {
     try { python -m ultrafast_memory.app.cli export-bo } finally { Pop-Location }
 }
 
+function Test-AgentExampleDataImported {
+    $rawDir = Join-Path $script:RepoRoot "data\raw_artifacts"
+    return (Test-Path $rawDir) -and ((Get-ChildItem -Path $rawDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1) -ne $null)
+}
+
+function Test-AgentBoDatasetExported {
+    $path = Join-Path $script:RepoRoot "data\exports\bo_training_samples.csv"
+    return Test-Path $path
+}
+
 function Initialize-AgentLocalBootstrap {
+    param([switch]$Force)
     if (-not (Test-AgentPythonEnvironment)) { return }
-    Initialize-AgentDatabase
-    Invoke-AgentScan
-    Export-AgentBoDataset
+    Write-Host "检查本地数据库 schema..."
+    Update-AgentDatabaseSchemaQuiet
+    if ($Force -or -not (Test-AgentExampleDataImported)) {
+        Invoke-AgentScan
+    } else {
+        Write-Host "示例数据已存在，跳过扫描。"
+    }
+    if ($Force -or -not (Test-AgentBoDatasetExported)) {
+        Export-AgentBoDataset
+    } else {
+        Write-Host "BO 数据集已存在，跳过导出。"
+    }
 }
 
 function Show-AgentConfig {
@@ -220,6 +368,757 @@ function Show-AgentConfig {
     Write-Host ("API Key Env: {0}" -f $env:ULTRAFAST_LLM_API_KEY_ENV)
     $local = Load-AgentLlmConfig
     if ($local) { Write-Host "Local config: configs/llm.local.json" } else { Write-Host "Local config: none" }
+}
+
+function Test-AgentApiServer {
+    param(
+        [string]$BaseUrl = "http://127.0.0.1:8000",
+        [switch]$Quiet
+    )
+    try {
+        $resp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/health" -TimeoutSec 3
+        return ($resp.status -eq "ok")
+    } catch {
+        if (-not $Quiet) {
+            Write-Host "FastAPI 后端未启动。"
+            Write-Host "请先在主菜单选择“启动 FastAPI 服务”，并保持该服务运行。"
+            Write-Host "如果在 TUI 中配置了 API Key，必须从同一个 TUI 会话中启动 FastAPI，后端进程才会继承环境变量。"
+        }
+        return $false
+    }
+}
+
+function Test-AgentEquipmentApiServer {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    try {
+        Invoke-RestMethod -Method Get -Uri "$BaseUrl/equipment/active" -TimeoutSec 3 | Out-Null
+        $schema = Invoke-RestMethod -Method Get -Uri "$BaseUrl/equipment/schema" -TimeoutSec 3
+        return ($schema.schema_version -ge 2 -and ($schema.required_setup_fields -contains "actual_max_power_W") -and ($schema.required_setup_fields -contains "pulse_width_min_fs"))
+    } catch {
+        return $false
+    }
+}
+
+function Format-AgentRestError {
+    param($ErrorRecord)
+    $message = $ErrorRecord.Exception.Message
+    $detail = $null
+    if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace($ErrorRecord.ErrorDetails.Message)) {
+        $detail = $ErrorRecord.ErrorDetails.Message
+    }
+    if (-not $detail -and $ErrorRecord.Exception.Response) {
+        try {
+            $stream = $ErrorRecord.Exception.Response.GetResponseStream()
+            if ($stream) {
+                $reader = [System.IO.StreamReader]::new($stream)
+                $detail = $reader.ReadToEnd()
+                $reader.Dispose()
+            }
+        } catch {
+            $detail = $null
+        }
+    }
+    if ($detail) { return "$message Detail: $detail" }
+    return $message
+}
+
+function Test-AgentTcpPortAvailable {
+    param([int]$Port)
+    $listener = $null
+    try {
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
+        $listener.Start()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($listener) { $listener.Stop() }
+    }
+}
+
+function Start-AgentApiServerBackground {
+    param(
+        [int]$PreferredPort = 8000,
+        [int]$MaxPort = 8010
+    )
+    if (-not (Test-AgentPythonEnvironment)) { return $false }
+    for ($port = $PreferredPort; $port -le $MaxPort; $port++) {
+        $baseUrl = "http://127.0.0.1:$port"
+        if (Test-AgentApiServer -BaseUrl $baseUrl -Quiet) {
+            if (Test-AgentEquipmentApiServer -BaseUrl $baseUrl) {
+                Write-Host ("FastAPI 后端已运行：{0}" -f $baseUrl)
+                return $baseUrl
+            }
+            Write-Host ("端口 {0} 已有后端运行，但缺少设备配置接口，尝试下一个端口。" -f $port) -ForegroundColor Yellow
+            continue
+        }
+        if (-not (Test-AgentTcpPortAvailable -Port $port)) {
+            Write-Host ("端口 {0} 已被占用，尝试下一个端口。" -f $port)
+            continue
+        }
+        Write-Host ("正在后台启动 FastAPI 后端：{0} ..." -f $baseUrl)
+        $process = Start-Process -FilePath "python" `
+            -ArgumentList @("-m", "uvicorn", "ultrafast_memory.app.api:app", "--host", "127.0.0.1", "--port", "$port") `
+            -WorkingDirectory $script:RepoRoot `
+            -WindowStyle Hidden `
+            -PassThru
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Milliseconds 500
+            if (Test-AgentApiServer -BaseUrl $baseUrl -Quiet) {
+                if (-not (Test-AgentEquipmentApiServer -BaseUrl $baseUrl)) {
+                    Write-Host ("FastAPI 后端在端口 {0} 启动后缺少设备配置接口，尝试下一个端口。" -f $port) -ForegroundColor Yellow
+                    if ($process -and -not $process.HasExited) {
+                        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                    }
+                    break
+                }
+                Write-Host ("FastAPI 后端已启动。PID: {0}; URL: {1}" -f $process.Id, $baseUrl)
+                return $baseUrl
+            }
+            if ($process.HasExited) {
+                Write-Host ("FastAPI 后端在端口 {0} 启动失败，尝试下一个端口。" -f $port)
+                break
+            }
+        }
+    }
+    Write-Host ("FastAPI 后端启动失败。请检查 {0}-{1} 端口是否被占用，或手动运行 python -m uvicorn ultrafast_memory.app.api:app --host 127.0.0.1 --port <port>" -f $PreferredPort, $MaxPort)
+    return $false
+}
+
+function New-AgentChatSession {
+    param(
+        [string]$BaseUrl = "http://127.0.0.1:8000",
+        [string]$Title = "PowerShell TUI chat"
+    )
+    $body = @{
+        title = $Title
+        mode = "agent"
+    } | ConvertTo-Json
+    return Invoke-RestMethod -Method Post -Uri "$BaseUrl/chat/sessions" -ContentType "application/json; charset=utf-8" -Body $body
+}
+
+function Send-AgentChatMessage {
+    param(
+        [string]$SessionId,
+        [string]$Message,
+        [string]$BaseUrl = "http://127.0.0.1:8000"
+    )
+    $body = @{
+        session_id = $SessionId
+        message = $Message
+        mode = "agent"
+        use_skills = $true
+        stream = $false
+    } | ConvertTo-Json
+    return Invoke-RestMethod -Method Post -Uri "$BaseUrl/chat" -ContentType "application/json; charset=utf-8" -Body $body
+}
+
+function Get-AgentStreamMode {
+    return $script:AgentStreamMode
+}
+
+function Set-AgentStreamMode {
+    param([bool]$Enabled)
+    $script:AgentStreamMode = $Enabled
+}
+
+function Get-AgentDisplayMode {
+    return $script:AgentDisplayMode
+}
+
+function Set-AgentDisplayMode {
+    param([string]$Mode)
+    if ($Mode -notin @("normal", "research", "debug")) {
+        Write-Host "无效模式。可选：normal, research, debug" -ForegroundColor Yellow
+        return
+    }
+    $script:AgentDisplayMode = $Mode
+    Write-Host ("显示模式已切换为：{0}" -f $Mode) -ForegroundColor Green
+}
+
+function Show-AgentProgressBar {
+    param(
+        [double]$Percent,
+        [string]$Stage,
+        [string]$Message
+    )
+    if ((Get-AgentDisplayMode) -eq "normal") { return }
+    $width = 20
+    $filled = [Math]::Floor($Percent / 100 * $width)
+    $empty = $width - $filled
+    $bar = ("#" * $filled) + ("-" * $empty)
+    Write-Host ("[任务进度] [{0}] {1}%  {2}" -f $bar, [Math]::Round($Percent), $Stage) -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        Write-Host $Message -ForegroundColor DarkGray
+    }
+}
+
+function Show-AgentThinkingStatus {
+    param(
+        [string]$Title,
+        [string]$Summary
+    )
+    if ((Get-AgentDisplayMode) -eq "normal") { return }
+    Write-Host ("[状态] {0}: {1}" -f $Title, $Summary) -ForegroundColor DarkCyan
+}
+
+function Show-AgentTraceEvent {
+    param($Event)
+    if ($null -eq $Event) { return }
+    $mode = Get-AgentDisplayMode
+    if ($mode -eq "normal") { return }
+    $mark = switch ($Event.status) {
+        "completed" { "✓" }
+        "failed" { "!" }
+        "error" { "!" }
+        default { "·" }
+    }
+    $label = if ($Event.title) { $Event.title } else { $Event.event_type }
+    $summary = if ($Event.summary) { $Event.summary } else { "" }
+    Write-Host ("{0} {1}: {2}" -f $mark, $label, $summary) -ForegroundColor DarkCyan
+    if ($mode -eq "debug") {
+        if ($Event.tool) { Write-Host ("  tool: {0}" -f $Event.tool) -ForegroundColor DarkGray }
+        if ($Event.skill) { Write-Host ("  skill: {0}" -f $Event.skill) -ForegroundColor DarkGray }
+        if ($Event.stage) { Write-Host ("  stage: {0}" -f $Event.stage) -ForegroundColor DarkGray }
+        if ($Event.input_summary) { Write-Host ("  input: {0}" -f $Event.input_summary) -ForegroundColor DarkGray }
+        if ($Event.output_summary) { Write-Host ("  output: {0}" -f $Event.output_summary) -ForegroundColor DarkGray }
+    }
+}
+
+function Show-AgentWorkflowState {
+    param($WorkflowState)
+    if ((Get-AgentDisplayMode) -eq "normal") { return }
+    if ($null -eq $WorkflowState) { return }
+    if ($WorkflowState.equipment_profile_used) {
+        Write-Host ("[设备] {0} ({1})" -f $WorkflowState.equipment_profile_used.profile_name, $WorkflowState.equipment_profile_used.revision_id) -ForegroundColor DarkGray
+    }
+    if ($WorkflowState.missing_slots -and $WorkflowState.missing_slots.Count -gt 0) {
+        Write-Host ("[缺失字段] {0}" -f (($WorkflowState.missing_slots | ForEach-Object { "$_" }) -join ", ")) -ForegroundColor DarkGray
+    }
+}
+
+function Read-AgentNullableDouble {
+    param([string]$Prompt)
+    $value = Read-Host $Prompt
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return [double]$value
+}
+
+function Read-AgentNullableDoubleDefault {
+    param(
+        [string]$Prompt,
+        $Default = $null
+    )
+    $label = $Prompt
+    if ($null -ne $Default -and -not [string]::IsNullOrWhiteSpace([string]$Default)) {
+        $label = "$Prompt [$Default]"
+    }
+    $value = Read-Host $label
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return [double]$value
+}
+
+function Read-AgentNullableRange {
+    param([string]$Prompt)
+    $value = Read-Host $Prompt
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    $normalized = $value.Replace("，", ",")
+    $parts = $normalized.Split(",") | ForEach-Object { $_.Trim() }
+    if ($parts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($parts[0]) -or [string]::IsNullOrWhiteSpace($parts[1])) {
+        throw "请输入范围格式：最小值,最大值，例如 500,8000"
+    }
+    $min = [double]$parts[0]
+    $max = [double]$parts[1]
+    if ($min -gt $max) {
+        throw "范围最小值不能大于最大值。"
+    }
+    return @($min, $max)
+}
+
+function Read-AgentNullableRangeDefault {
+    param(
+        [string]$Prompt,
+        $DefaultMin = $null,
+        $DefaultMax = $null
+    )
+    $label = $Prompt
+    if ($null -ne $DefaultMin -and $null -ne $DefaultMax) {
+        $label = "$Prompt [$DefaultMin,$DefaultMax]"
+    }
+    return Read-AgentNullableRange $label
+}
+
+function Get-AgentMachineBounds {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    return Invoke-RestMethod -Method Get -Uri "$BaseUrl/equipment/active/machine-bounds"
+}
+
+function Start-EquipmentSetupWizard {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    if (-not (Test-AgentApiServer -BaseUrl $BaseUrl)) { return }
+    Write-Host ""
+    Write-Host "=== 设备参数配置向导 ===" -ForegroundColor Cyan
+    Write-Host "不确定字段可直接回车跳过；系统会记录为空，不会编造。" -ForegroundColor DarkGray
+    $profileName = Read-Host "设备名称"
+    if ([string]::IsNullOrWhiteSpace($profileName)) {
+        Write-Host "设备名称不能为空。"
+        return
+    }
+    $machineId = Read-Host "machine_id"
+    $wavelength = Read-AgentNullableDouble "波长 nm"
+    $pulseRange = Read-AgentNullableRange "脉宽范围fs（示例：500,8000）"
+    $ratedMaxPower = Read-AgentNullableDouble "额定最大功率 W"
+    $actualMaxPower = Read-AgentNullableDouble "实际最大功率 W"
+    $frequencyRange = Read-AgentNullableRange "重复频率范围kHz（示例：50,1000）"
+    $scanRange = Read-AgentNullableRange "扫描速度范围mm/s（示例：10,3000）"
+    $spot = Read-AgentNullableDouble "光斑直径 um"
+    $activeChoice = Read-Host "是否设为当前 active 设备？Y/N"
+    $body = @{
+        profile_name = $profileName
+        machine_id = $(if ([string]::IsNullOrWhiteSpace($machineId)) { $null } else { $machineId })
+        laser_source = @{
+            wavelength_nm = $wavelength
+            pulse_width_min_fs = $(if ($null -ne $pulseRange) { $pulseRange[0] } else { $null })
+            pulse_width_max_fs = $(if ($null -ne $pulseRange) { $pulseRange[1] } else { $null })
+            rated_max_power_W = $ratedMaxPower
+            actual_max_power_W = $actualMaxPower
+            frequency_min_kHz = $(if ($null -ne $frequencyRange) { $frequencyRange[0] } else { $null })
+            frequency_max_kHz = $(if ($null -ne $frequencyRange) { $frequencyRange[1] } else { $null })
+        }
+        optical_setup = @{
+            spot_diameter_um = $spot
+        }
+        motion_system = @{
+            scan_speed_min_mm_s = $(if ($null -ne $scanRange) { $scanRange[0] } else { $null })
+            scan_speed_max_mm_s = $(if ($null -ne $scanRange) { $scanRange[1] } else { $null })
+        }
+        process_capability = @{}
+        set_active = ($activeChoice -match "^(y|Y)")
+    } | ConvertTo-Json -Depth 8
+    try {
+        $result = Invoke-RestMethod -Method Post -Uri "$BaseUrl/equipment/profiles" -ContentType "application/json; charset=utf-8" -Body $body
+        Write-Host ("已创建设备配置：{0}" -f $result.equipment_profile_id) -ForegroundColor Green
+        Write-Host ("Revision: {0}, Active: {1}" -f $result.revision_id, $result.is_active)
+    } catch {
+        Write-Host ("设备配置失败：{0}" -f (Format-AgentRestError $_)) -ForegroundColor Red
+    }
+}
+
+function Update-ActiveEquipmentProfileWizard {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    if (-not (Test-AgentApiServer -BaseUrl $BaseUrl)) { return }
+    $active = Invoke-RestMethod -Method Get -Uri "$BaseUrl/equipment/active"
+    if (-not $active.active) {
+        Write-Host "当前尚未配置 active 设备，先进入新建设备配置向导。" -ForegroundColor Yellow
+        Start-EquipmentSetupWizard -BaseUrl $BaseUrl
+        return
+    }
+    Write-Host ""
+    Write-Host "=== 修改当前 active 设备参数 ===" -ForegroundColor Cyan
+    Write-Host "直接回车表示保留原值。" -ForegroundColor DarkGray
+    $wavelength = Read-AgentNullableDoubleDefault "波长 nm" $active.laser_source.wavelength_nm
+    $pulseRange = Read-AgentNullableRangeDefault "脉宽范围fs（示例：500,8000）" $active.laser_source.pulse_width_min_fs $active.laser_source.pulse_width_max_fs
+    $ratedMaxPower = Read-AgentNullableDoubleDefault "额定最大功率 W" $active.laser_source.rated_max_power_W
+    $actualMaxPower = Read-AgentNullableDoubleDefault "实际最大功率 W" $active.laser_source.actual_max_power_W
+    $frequencyRange = Read-AgentNullableRangeDefault "重复频率范围kHz（示例：50,1000）" $active.laser_source.frequency_min_kHz $active.laser_source.frequency_max_kHz
+    $scanRange = Read-AgentNullableRangeDefault "扫描速度范围mm/s（示例：10,3000）" $active.motion_system.scan_speed_min_mm_s $active.motion_system.scan_speed_max_mm_s
+    $spot = Read-AgentNullableDoubleDefault "光斑直径 um" $active.optical_setup.spot_diameter_um
+    $laserSource = @{}
+    if ($null -ne $wavelength) { $laserSource.wavelength_nm = $wavelength }
+    if ($null -ne $pulseRange) {
+        $laserSource.pulse_width_min_fs = $pulseRange[0]
+        $laserSource.pulse_width_max_fs = $pulseRange[1]
+    }
+    if ($null -ne $ratedMaxPower) { $laserSource.rated_max_power_W = $ratedMaxPower }
+    if ($null -ne $actualMaxPower) { $laserSource.actual_max_power_W = $actualMaxPower }
+    if ($null -ne $frequencyRange) {
+        $laserSource.frequency_min_kHz = $frequencyRange[0]
+        $laserSource.frequency_max_kHz = $frequencyRange[1]
+    }
+    $motionSystem = @{}
+    if ($null -ne $scanRange) {
+        $motionSystem.scan_speed_min_mm_s = $scanRange[0]
+        $motionSystem.scan_speed_max_mm_s = $scanRange[1]
+    }
+    $opticalSetup = @{}
+    if ($null -ne $spot) { $opticalSetup.spot_diameter_um = $spot }
+    if ($laserSource.Count -eq 0 -and $motionSystem.Count -eq 0 -and $opticalSetup.Count -eq 0) {
+        Write-Host "没有修改任何设备参数。"
+        return
+    }
+    $bodyHash = @{}
+    if ($laserSource.Count -gt 0) { $bodyHash.laser_source = $laserSource }
+    if ($motionSystem.Count -gt 0) { $bodyHash.motion_system = $motionSystem }
+    if ($opticalSetup.Count -gt 0) { $bodyHash.optical_setup = $opticalSetup }
+    $body = $bodyHash | ConvertTo-Json -Depth 8
+    try {
+        $result = Invoke-RestMethod -Method Patch -Uri "$BaseUrl/equipment/profiles/$($active.equipment_profile_id)" -ContentType "application/json; charset=utf-8" -Body $body
+        Write-Host ("设备参数已更新。Revision: {0}" -f $result.revision_id) -ForegroundColor Green
+    } catch {
+        Write-Host ("设备参数修改失败：{0}" -f (Format-AgentRestError $_)) -ForegroundColor Red
+    }
+}
+
+function Show-ActiveEquipmentProfile {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    if (-not (Test-AgentApiServer -BaseUrl $BaseUrl)) { return }
+    $active = Invoke-RestMethod -Method Get -Uri "$BaseUrl/equipment/active"
+    if (-not $active.active) {
+        Write-Host "当前尚未配置 active 设备。"
+        return
+    }
+    $bounds = Get-AgentMachineBounds -BaseUrl $BaseUrl
+    Write-Host ""
+    Write-Host "当前 active 设备：" -ForegroundColor Cyan
+    Write-Host ("Profile: {0}" -f $active.profile_name)
+    Write-Host ("Equipment ID: {0}" -f $active.equipment_profile_id)
+    Write-Host ("Wavelength: {0} nm" -f $active.laser_source.wavelength_nm)
+    Write-Host ("Pulse width: {0}-{1} fs" -f $active.laser_source.pulse_width_min_fs, $active.laser_source.pulse_width_max_fs)
+    Write-Host ("Rated max power: {0} W" -f $active.laser_source.rated_max_power_W)
+    Write-Host ("Actual max power: {0} W" -f $active.laser_source.actual_max_power_W)
+    Write-Host ("Frequency: {0}-{1} kHz" -f $active.laser_source.frequency_min_kHz, $active.laser_source.frequency_max_kHz)
+    Write-Host ("Scan speed: {0}-{1} mm/s" -f $active.motion_system.scan_speed_min_mm_s, $active.motion_system.scan_speed_max_mm_s)
+    Write-Host ("Spot diameter: {0} um" -f $active.optical_setup.spot_diameter_um)
+    Write-Host ("Revision: {0}" -f $active.revision_id)
+    Write-Host "Machine bounds:"
+    Write-Host ($bounds.machine_bounds | ConvertTo-Json -Depth 8)
+}
+
+function Select-ActiveEquipmentProfile {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    if (-not (Test-AgentApiServer -BaseUrl $BaseUrl)) { return }
+    $profiles = Invoke-RestMethod -Method Get -Uri "$BaseUrl/equipment/profiles"
+    if (-not $profiles -or $profiles.Count -eq 0) {
+        Write-Host "暂无设备配置。"
+        return
+    }
+    Write-Host "equipment_profile_id | active | profile_name"
+    foreach ($profile in $profiles) {
+        Write-Host ("{0} | {1} | {2}" -f $profile.equipment_profile_id, $profile.is_active, $profile.profile_name)
+    }
+    $id = Read-Host "请输入要设为 active 的 equipment_profile_id"
+    if ([string]::IsNullOrWhiteSpace($id)) { return }
+    try {
+        $result = Invoke-RestMethod -Method Post -Uri "$BaseUrl/equipment/profiles/$id/activate"
+        Write-Host ("已切换 active 设备：{0}, revision: {1}" -f $result.equipment_profile_id, $result.revision_id) -ForegroundColor Green
+    } catch {
+        Write-Host "切换失败：$($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Send-AgentChatStream {
+    param(
+        [string]$SessionId,
+        [string]$Message,
+        [string]$BaseUrl = "http://127.0.0.1:8000"
+    )
+    $body = @{
+        session_id = $SessionId
+        message = $Message
+        mode = "agent"
+        use_skills = $true
+        stream = $true
+    } | ConvertTo-Json -Depth 8
+
+    $client = [System.Net.Http.HttpClient]::new()
+    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, "$BaseUrl/chat/stream_ndjson")
+    $request.Content = [System.Net.Http.StringContent]::new($body, [System.Text.Encoding]::UTF8, "application/json")
+    $response = $null
+    $reader = $null
+    try {
+        $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        $response.EnsureSuccessStatusCode() | Out-Null
+        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+
+        Write-Host ""
+        $traceHeaderShown = $false
+        $answerHeaderShown = $false
+        while (-not $reader.EndOfStream) {
+            $line = $reader.ReadLine()
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try {
+                $event = $line | ConvertFrom-Json
+            } catch {
+                Write-Host ""
+                Write-Host "[stream parse warning] $line" -ForegroundColor Yellow
+                continue
+            }
+            if ($event.type -eq "meta") {
+                Write-Host ("[stream: {0}/{1}]" -f $event.provider, $event.model) -ForegroundColor DarkGray
+            } elseif ($event.type -eq "progress") {
+                Show-AgentProgressBar -Percent $event.progress_percent -Stage $event.stage -Message $event.message
+            } elseif ($event.type -eq "thinking_status") {
+                Show-AgentThinkingStatus -Title $event.title -Summary $event.summary
+            } elseif ($event.type -eq "agent_trace") {
+                if ((Get-AgentDisplayMode) -ne "normal" -and -not $traceHeaderShown) {
+                    Write-Host "▼ 执行轨迹" -ForegroundColor Cyan
+                    $traceHeaderShown = $true
+                }
+                Show-AgentTraceEvent -Event $event
+            } elseif ($event.type -eq "workflow_state") {
+                Show-AgentWorkflowState -WorkflowState $event
+            } elseif ($event.type -eq "route") {
+                if ($event.primary_skill) {
+                    Write-Host ("[skill: {0}, source: {1}, confidence: {2}]" -f $event.primary_skill, $event.route_source, $event.confidence) -ForegroundColor DarkGray
+                }
+            } elseif ($event.type -eq "delta") {
+                if (-not $answerHeaderShown) {
+                    Write-Host ""
+                    Write-Host "智能体：" -ForegroundColor Cyan
+                    $answerHeaderShown = $true
+                }
+                Write-Host -NoNewline $event.content
+            } elseif ($event.type -eq "warning") {
+                Write-Host ""
+                Write-Host ("[warning] {0}" -f $event.message) -ForegroundColor Yellow
+            } elseif ($event.type -eq "error") {
+                Write-Host ""
+                Write-Host ("[error] {0}" -f $event.message) -ForegroundColor Red
+            } elseif ($event.type -eq "done") {
+                Write-Host ""
+            }
+        }
+        Write-Host ""
+    } finally {
+        if ($reader) { $reader.Dispose() }
+        if ($response) { $response.Dispose() }
+        $request.Dispose()
+        $client.Dispose()
+    }
+}
+
+function Show-AgentReviewTasks {
+    param(
+        [string]$BaseUrl = "http://127.0.0.1:8000",
+        [string]$Status = "pending_review"
+    )
+    $tasks = Invoke-RestMethod -Method Get -Uri "$BaseUrl/knowledge/review/tasks?status=$Status"
+    if (-not $tasks -or $tasks.Count -eq 0) {
+        Write-Host "没有匹配的审核任务。"
+        return
+    }
+    Write-Host "review_id | risk_level | suggested_action"
+    foreach ($task in $tasks) {
+        Write-Host ("{0} | {1} | {2}" -f $task.review_id, $task.risk_level, $task.auto_suggestion)
+    }
+}
+
+function Show-AgentReviewTaskDetail {
+    param(
+        [string]$ReviewId,
+        [string]$BaseUrl = "http://127.0.0.1:8000"
+    )
+    $detail = Invoke-RestMethod -Method Get -Uri "$BaseUrl/knowledge/review/tasks/$ReviewId"
+    Write-Host ("Review: {0}" -f $detail.review_id)
+    Write-Host ("Status: {0}" -f $detail.review_status)
+    Write-Host ("Risk: {0}" -f $detail.risk_level)
+    if ($detail.candidate) {
+        Write-Host ("Claim: {0}" -f $detail.candidate.claim)
+        Write-Host ("Material: {0}" -f $detail.candidate.material)
+        Write-Host ("Process: {0}" -f $detail.candidate.process_type)
+    }
+    if ($detail.source) {
+        Write-Host ("Source: {0}" -f $detail.source.title)
+        Write-Host ("URL: {0}" -f $detail.source.url)
+    }
+}
+
+function Invoke-AgentKnowledgeBootstrapMenu {
+    $baseUrl = "http://127.0.0.1:8000"
+    if (-not (Test-AgentApiServer -BaseUrl $baseUrl)) { return }
+    $question = Read-Host "请输入问题"
+    $material = Read-Host "material"
+    $processType = Read-Host "process_type"
+    $componentType = Read-Host "component_type"
+    $taskSpec = @{
+        material = $material
+        process_type = $processType
+        component_type = $componentType
+    }
+    $gapBody = @{
+        task_spec = $taskSpec
+        question = $question
+        internal_hits = @()
+    } | ConvertTo-Json -Depth 8
+    $gap = Invoke-RestMethod -Method Post -Uri "$baseUrl/knowledge/evidence-gap" -ContentType "application/json; charset=utf-8" -Body $gapBody
+    Write-Host ("evidence_score: {0}, recommended_action: {1}" -f $gap.evidence_score, $gap.recommended_action)
+    if ($gap.recommended_action -eq "web_bootstrap") {
+        $confirm = Read-Host "内部证据不足，是否执行 mock web bootstrap？(y/N)"
+        if ($confirm -eq "y") {
+            $body = @{
+                task_spec = $taskSpec
+                question = $question
+                query_intent = "find_literature_prior"
+                max_sources = 5
+                review_required = $true
+            } | ConvertTo-Json -Depth 8
+            $result = Invoke-RestMethod -Method Post -Uri "$baseUrl/knowledge/bootstrap-web" -ContentType "application/json; charset=utf-8" -Body $body
+            Write-Host ("生成 sources: {0}, candidates: {1}, review_tasks: {2}" -f $result.sources.Count, $result.knowledge_candidates.Count, $result.review_tasks.Count)
+        }
+    }
+}
+
+function Invoke-AgentReviewQueueMenu {
+    $baseUrl = "http://127.0.0.1:8000"
+    if (-not (Test-AgentApiServer -BaseUrl $baseUrl)) { return }
+    while ($true) {
+        Write-Host ""
+        Write-Host "[1] 查看待审核任务"
+        Write-Host "[2] 查看任务详情"
+        Write-Host "[3] 接收入 RAG"
+        Write-Host "[4] 接收为文献证据"
+        Write-Host "[5] 拒绝"
+        Write-Host "[6] 标记需要更多证据"
+        Write-Host "[7] 返回"
+        $choice = Read-Host "请选择操作"
+        if ($choice -eq "1") {
+            Show-AgentReviewTasks -BaseUrl $baseUrl
+        } elseif ($choice -eq "2") {
+            Show-AgentReviewTaskDetail -BaseUrl $baseUrl -ReviewId (Read-Host "review_id")
+        } elseif ($choice -in @("3", "4", "5", "6")) {
+            $reviewId = Read-Host "review_id"
+            $reviewer = Read-Host "reviewer_id"
+            $comment = Read-Host "comment"
+            $action = @{
+                "3" = "accept_to_rag"
+                "4" = "accept_as_literature_evidence"
+                "5" = "reject"
+                "6" = "needs_more_evidence"
+            }[$choice]
+            $body = @{
+                action = $action
+                reviewer_id = $reviewer
+                comment = $comment
+                target_level = $(if ($action -eq "accept_to_rag") { "LEVEL_1_RAG_BACKGROUND" } else { $null })
+                payload = @{}
+            } | ConvertTo-Json -Depth 8
+            $result = Invoke-RestMethod -Method Post -Uri "$baseUrl/knowledge/review/tasks/$reviewId/action" -ContentType "application/json; charset=utf-8" -Body $body
+            Write-Host ($result | ConvertTo-Json -Depth 8)
+        } elseif ($choice -eq "7") {
+            return
+        }
+    }
+}
+
+function Start-AgentChat {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    $baseUrl = $BaseUrl
+    if (-not (Test-AgentApiServer -BaseUrl $baseUrl)) { return }
+
+    $session = New-AgentChatSession -BaseUrl $baseUrl
+    $sessionId = $session.session_id
+    Set-AgentStreamMode -Enabled $true
+
+    Write-Host ""
+    Write-Host "进入超快激光智能体聊天模式。输入 exit 退出。" -ForegroundColor Cyan
+    Write-Host "可用命令：/stream on, /stream off, /mode normal|research|debug, /routes, /state, /reset, /skill <name>, /no_skill, /equipment show, /equipment edit"
+    Write-Host ""
+    Write-Host "已启用实时流式执行轨迹。输入 /stream off 可切换为非流式。" -ForegroundColor DarkGray
+
+    while ($true) {
+        $inputText = Read-Host "你"
+        if ([string]::IsNullOrWhiteSpace($inputText) -and [Console]::IsInputRedirected) { break }
+        if ($inputText -eq "exit") { break }
+        if ([string]::IsNullOrWhiteSpace($inputText)) { continue }
+
+        try {
+            if ($inputText.Trim() -eq "/review tasks") {
+                Show-AgentReviewTasks -BaseUrl $baseUrl
+                continue
+            }
+            if ($inputText.Trim().StartsWith("/review open ")) {
+                $reviewId = $inputText.Trim().Substring("/review open ".Length).Trim()
+                Show-AgentReviewTaskDetail -BaseUrl $baseUrl -ReviewId $reviewId
+                continue
+            }
+            if ($inputText.Trim() -eq "/equipment show") {
+                Show-ActiveEquipmentProfile -BaseUrl $baseUrl
+                continue
+            }
+            if ($inputText.Trim() -eq "/equipment edit") {
+                Update-ActiveEquipmentProfileWizard -BaseUrl $baseUrl
+                continue
+            }
+            if ($inputText.Trim().StartsWith("/mode ")) {
+                Set-AgentDisplayMode -Mode ($inputText.Trim().Substring("/mode ".Length).Trim().ToLowerInvariant())
+                continue
+            }
+            Write-Host "加工助手执行中..." -ForegroundColor DarkCyan
+            if (Get-AgentStreamMode) {
+                Send-AgentChatStream -SessionId $sessionId -Message $inputText -BaseUrl $baseUrl
+            } else {
+                $resp = Send-AgentChatMessage -SessionId $sessionId -Message $inputText -BaseUrl $baseUrl
+                Write-Host ""
+                if ($resp.progress) {
+                    Show-AgentProgressBar -Percent $resp.progress.progress_percent -Stage $resp.progress.current_stage -Message $resp.progress.message
+                }
+                if ($resp.thinking_status) {
+                    foreach ($status in $resp.thinking_status) {
+                        Show-AgentThinkingStatus -Title $status.title -Summary $status.summary
+                    }
+                }
+                if ($resp.execution_trace) {
+                    Write-Host "▼ 执行轨迹" -ForegroundColor Cyan
+                    foreach ($traceEvent in $resp.execution_trace) {
+                        Show-AgentTraceEvent -Event $traceEvent
+                    }
+                }
+                if ($resp.workflow_state) {
+                    Show-AgentWorkflowState -WorkflowState $resp.workflow_state
+                }
+                Write-Host "智能体：" -ForegroundColor Cyan
+                Write-Host $resp.assistant_message
+                Write-Host ""
+                if ($resp.selected_skill) {
+                    if ($resp.route_plan) {
+                        Write-Host ("[skill: {0}, source: {1}, confidence: {2}]" -f $resp.selected_skill, $resp.route_plan.route_source, $resp.route_plan.confidence) -ForegroundColor DarkGray
+                    } else {
+                        Write-Host "[skill: $($resp.selected_skill)]" -ForegroundColor DarkGray
+                    }
+                    Write-Host ""
+                }
+            }
+            if ($inputText.Trim() -eq "/stream on") { Set-AgentStreamMode -Enabled $true }
+            if ($inputText.Trim() -eq "/stream off") { Set-AgentStreamMode -Enabled $false }
+        } catch {
+            Write-Host "聊天请求失败：$($_.Exception.Message)"
+        }
+    }
+}
+
+function Start-AgentDeepSeekAutoLaunch {
+    param(
+        [switch]$NoSave,
+        [switch]$SkipLlmConfig,
+        [switch]$Reconfigure,
+        [switch]$ForceInitialize
+    )
+    if (-not $SkipLlmConfig) {
+        Initialize-AgentDeepSeekConfig -NoSave:$NoSave -Reconfigure:$Reconfigure
+    } else {
+        Write-Host "已跳过 DeepSeek API Key 配置；聊天将使用 MockLLM。"
+    }
+
+    Initialize-AgentLocalBootstrap -Force:$ForceInitialize
+    $baseUrl = Start-AgentApiServerBackground
+    if (-not $baseUrl) { return }
+    try {
+        $activeEquipment = Invoke-RestMethod -Method Get -Uri "$baseUrl/equipment/active"
+        if (-not $activeEquipment.active) {
+            Write-Host "当前尚未配置激光设备参数。" -ForegroundColor Yellow
+            Write-Host "建议先配置设备边界，否则任务解析和 BO 推荐会反复询问设备信息。" -ForegroundColor Yellow
+            $configureEquipment = Read-Host "是否现在配置？[Y/N]"
+            if ($configureEquipment -match "^(y|Y)") {
+                Start-EquipmentSetupWizard -BaseUrl $baseUrl
+            }
+        }
+    } catch {
+        Write-Host "设备配置检查失败：$($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "正在打开设备参数配置向导。" -ForegroundColor Yellow
+        Start-EquipmentSetupWizard -BaseUrl $baseUrl
+    }
+    Start-AgentChat -BaseUrl $baseUrl
 }
 
 function Show-AgentMainMenu {
@@ -233,6 +1132,13 @@ function Show-AgentMainMenu {
         Write-Host "[6] 查看配置"
         Write-Host "[7] 清除本地 LLM 配置"
         Write-Host "[8] 退出"
+        Write-Host "[9] 进入聊天"
+        Write-Host "[10] 知识冷启动"
+        Write-Host "[11] 专家审核队列"
+        Write-Host "[12] 配置设备参数"
+        Write-Host "[13] 查看当前设备配置"
+        Write-Host "[14] 切换当前设备配置"
+        Write-Host "[15] 修改当前设备参数"
         $choice = Read-Host "请选择操作"
         if ([string]::IsNullOrWhiteSpace($choice) -and [Console]::IsInputRedirected) { return }
         if ($choice -eq "1") {
@@ -251,10 +1157,24 @@ function Show-AgentMainMenu {
             Clear-AgentLlmConfig
         } elseif ($choice -eq "8") {
             return
+        } elseif ($choice -eq "9") {
+            Start-AgentChat
+        } elseif ($choice -eq "10") {
+            Invoke-AgentKnowledgeBootstrapMenu
+        } elseif ($choice -eq "11") {
+            Invoke-AgentReviewQueueMenu
+        } elseif ($choice -eq "12") {
+            Start-EquipmentSetupWizard
+        } elseif ($choice -eq "13") {
+            Show-ActiveEquipmentProfile
+        } elseif ($choice -eq "14") {
+            Select-ActiveEquipmentProfile
+        } elseif ($choice -eq "15") {
+            Update-ActiveEquipmentProfileWizard
         } else {
             Write-Host "无效选择，请重新输入。"
         }
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Invoke-AgentScan, Start-AgentApiServer, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentWorkflowState, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret

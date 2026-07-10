@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from ultrafast_memory.chat.schemas import ChatRequest
+from ultrafast_memory.chat.service import handle_chat
+from ultrafast_memory.db.init_db import init_database
+from ultrafast_memory.db.session import get_connection
+from ultrafast_memory.equipment.schemas import EquipmentProfileCreate
+from ultrafast_memory.equipment.service import create_equipment_profile
+
+
+def test_chat_uses_active_equipment_profile_in_workflow_state(isolated_root):
+    init_database()
+    created = create_equipment_profile(
+        EquipmentProfileCreate(
+            profile_name="Lab fs laser 1030nm",
+            laser_source={
+                "wavelength_nm": 1030,
+                "pulse_width_fixed_fs": 300,
+                "average_power_min_W": 0.1,
+                "average_power_max_W": 20,
+                "frequency_min_kHz": 50,
+                "frequency_max_kHz": 1000,
+            },
+            optical_setup={"spot_diameter_um": 20},
+            motion_system={"scan_speed_min_mm_s": 10, "scan_speed_max_mm_s": 3000},
+            set_active=True,
+        )
+    )
+
+    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=True))
+
+    assert response.workflow_state["equipment_profile_used"]["equipment_profile_id"] == created["equipment_profile_id"]
+    assert "laser_system" not in response.workflow_state["missing_slots"]
+    assert response.workflow_state["machine_bounds"]["laser_power_W"] == [0.1, 20]
+    assert any(item["event_type"] == "equipment_profile_loaded" for item in response.thinking_status)
+
+
+def test_chat_only_asks_missing_equipment_field_when_profile_incomplete(isolated_root):
+    init_database()
+    created = create_equipment_profile(
+        EquipmentProfileCreate(
+            profile_name="Lab fs laser incomplete optics",
+            laser_source={
+                "pulse_width_min_fs": 500,
+                "pulse_width_max_fs": 8000,
+                "average_power_min_W": 0.1,
+                "average_power_max_W": 20,
+                "frequency_min_kHz": 50,
+                "frequency_max_kHz": 1000,
+            },
+            motion_system={"scan_speed_min_mm_s": 10, "scan_speed_max_mm_s": 3000},
+            set_active=False,
+        )
+    )
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE equipment_profile SET is_active = 1, status = 'active' WHERE equipment_profile_id = ?",
+            (created["equipment_profile_id"],),
+        )
+        conn.commit()
+
+    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=False))
+
+    assert "laser_system" not in response.workflow_state["missing_slots"]
+    assert "spot_diameter_um" in response.workflow_state["missing_slots"]
+    assert response.workflow_state["missing_equipment_fields"] == ["spot_diameter_um"]

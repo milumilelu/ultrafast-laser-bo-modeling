@@ -26,3 +26,48 @@ parsers:
 
 bo:
   export_filename: "bo_training_samples.csv"
+
+knowledge_bootstrap:
+  auto_web_bootstrap: false
+  require_user_permission: true
+  max_sources_per_chat: 5
+  create_review_tasks: true
+  allow_llm_prior_candidates: true
+  allow_mock_web_search: true
+
+equipment:
+  require_active_profile_for_bo: true
+  warn_if_no_active_profile: true
+  allow_task_level_override: true
+  default_profile_id: null
+
+literature:
+  roots:
+    - "data/literature"
+  archive_dir: "data/literature_archive"
+  prefer_structured_metadata: true
+  pdf_backfill: true
+  detect_duplicates: true
+  include_references_section: false
+  create_candidates_from_raw_pdf: false
+
+rag:
+  default_index_name: "literature_default"
+  chunking:
+    target_tokens: 450
+    min_tokens: 120
+    max_tokens: 700
+    overlap_tokens: 80
+  retrieval:
+    lexical_top_k: 20
+    vector_top_k: 20
+    fusion_top_k: 15
+    rerank_top_k: 8
+    max_chunks_per_paper: 3
+  embedding:
+    provider: "mock"
+    model: "deterministic-mock-v1"
+  vector_store:
+    provider: "sqlite"
+  lexical_index:
+    provider: "sqlite_fts5"
