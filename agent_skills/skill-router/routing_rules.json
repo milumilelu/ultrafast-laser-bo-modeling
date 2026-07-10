@@ -1,0 +1,54 @@
+{
+  "skills": [
+    "task-intake",
+    "crl-task-planning",
+    "rag-literature-retrieval",
+    "bo-recommendation",
+    "process-file-ingestion",
+    "experience-memory-update",
+    "bo-dataset-governance",
+    "report-generation"
+  ],
+  "rules": [
+    {
+      "selected_skill": "task-intake",
+      "keywords": ["加工需求", "加工方案", "任务文件", "参数表", "帮我做方案", "工艺目标", "材料", "不完整"],
+      "required_next_action": "parse_task"
+    },
+    {
+      "selected_skill": "crl-task-planning",
+      "keywords": ["CRL", "compound refractive lens", "金刚石透镜", "X-ray lens", "曲率半径", "焦距", "10 keV", "抛物面"],
+      "required_next_action": "build_crl_task_spec"
+    },
+    {
+      "selected_skill": "rag-literature-retrieval",
+      "keywords": ["查文献", "参考文献", "已有研究", "机制", "损伤", "石墨化", "参数范围"],
+      "required_next_action": "retrieve_evidence"
+    },
+    {
+      "selected_skill": "bo-dataset-governance",
+      "keywords": ["是否能加入 BO", "加入 BO", "样本质量", "训练集", "导出 BO", "valid_for_training"],
+      "required_next_action": "evaluate_training_sample"
+    },
+    {
+      "selected_skill": "process-file-ingestion",
+      "keywords": ["日志", "recipe", "工艺文件", "检测结果", "自动读取", "csv", "xlsx", "gcode", "nc"],
+      "required_next_action": "ingest_files"
+    },
+    {
+      "selected_skill": "experience-memory-update",
+      "keywords": ["经验", "规则", "记忆库", "自学习", "沉淀", "失败描述", "用户确认"],
+      "required_next_action": "create_experience_candidate"
+    },
+    {
+      "selected_skill": "bo-recommendation",
+      "keywords": ["推荐参数", "下一轮实验", "优化", "BO", "贝叶斯", "Bayesian"],
+      "required_next_action": "prepare_bo_input"
+    },
+    {
+      "selected_skill": "report-generation",
+      "keywords": ["生成报告", "执行清单", "任务方案", "实验设计", "失败分析", "优化计划"],
+      "required_next_action": "compose_report"
+    }
+  ]
+}

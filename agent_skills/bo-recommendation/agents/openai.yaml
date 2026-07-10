@@ -1,0 +1,4 @@
+interface:
+  display_name: "BO Recommendation"
+  short_description: "Prepares safe Bayesian optimization recommendations"
+  default_prompt: "Use $bo-recommendation to prepare a safe BO recommendation without inventing parameters."

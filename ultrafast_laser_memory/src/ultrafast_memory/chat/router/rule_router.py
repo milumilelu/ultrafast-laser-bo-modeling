@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ultrafast_memory.chat.router.schemas import BlockedTool, RoutePlan, StateUpdate
 from ultrafast_memory.equipment.bounds import build_machine_bounds
+from ultrafast_agent.skills import get_default_skill_registry
 
 
 def rule_route(message: str, session_state: dict | None = None) -> RoutePlan | None:
@@ -93,6 +94,7 @@ def rule_route(message: str, session_state: dict | None = None) -> RoutePlan | N
     if needs_gap_check:
         if not any(item.tool == "bo_recommendation" for item in blocked_tools) and "bo_recommendation" in matched:
             blocked_tools.append(BlockedTool(tool="bo_recommendation", reason="尚未完成文献证据和工艺先验审核，不能进入参数推荐。"))
+    _validate_registered_skill(primary)
     return RoutePlan(
         primary_skill=primary,
         secondary_skills=secondary + (["knowledge_bootstrap", "expert_review"] if needs_gap_check else []),
@@ -110,6 +112,7 @@ def rule_route(message: str, session_state: dict | None = None) -> RoutePlan | N
         allowed_tools=["evidence_gap_detector", "knowledge_bootstrap"] if needs_gap_check else [],
         blocked_tools=blocked_tools,
         route_source="rule_router",
+        **_compatibility_metadata(primary),
         state_update=StateUpdate(
             active_workflow=_workflow_for(primary),
             active_skill=primary,
@@ -118,6 +121,24 @@ def rule_route(message: str, session_state: dict | None = None) -> RoutePlan | N
             allowed_next_skills=secondary,
         ),
     )
+
+
+def _validate_registered_skill(name: str) -> None:
+    get_default_skill_registry().get(name)
+
+
+def _compatibility_metadata(name: str) -> dict:
+    replacements = {
+        "crl_task_planning": "optical_component_task_workflow",
+        "rag_literature_retrieval": "rag_evidence_retrieval",
+        "experience_memory_update": "knowledge_candidate_generation",
+    }
+    replacement = replacements.get(name)
+    return {
+        "deprecated_skill_used": replacement is not None,
+        "replacement_skill": replacement,
+        "emitted_events": ["deprecated_skill_used"] if replacement else [],
+    }
 
 
 def _hit(text: str, keywords: list[str]) -> bool:

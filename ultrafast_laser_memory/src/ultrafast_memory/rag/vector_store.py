@@ -2,10 +2,24 @@ from __future__ import annotations
 
 import json
 import math
+from collections import OrderedDict
+from threading import Lock
+from typing import Any
+
+import numpy as np
+
 from ultrafast_memory.core.ids import stable_id
+from ultrafast_memory.core.config import get_database_path
 from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.rag.metadata_filter import matches_filters
+
+
+_VECTOR_CORPUS_CACHE: OrderedDict[
+    tuple[str, str, str], tuple[tuple[dict[str, Any], ...], np.ndarray, np.ndarray]
+] = OrderedDict()
+_VECTOR_CORPUS_LOCK = Lock()
+_VECTOR_CORPUS_CACHE_SIZE = 8
 
 
 class BaseVectorStore:
@@ -70,7 +84,43 @@ class SQLiteVectorStore(BaseVectorStore):
         return entries
 
     def query(self, vector: list[float], top_k: int, filters: dict | None = None) -> list[dict]:
+        rows, matrix, norms = self._corpus()
+        if not rows or matrix.size == 0 or matrix.shape[1] != len(vector):
+            return []
+        query = np.asarray(vector, dtype=np.float64)
+        query_norm = float(np.linalg.norm(query))
+        if query_norm == 0:
+            return []
+        denominators = norms * query_norm
+        scores = np.divide(
+            matrix @ query,
+            denominators,
+            out=np.zeros(len(rows), dtype=np.float64),
+            where=denominators != 0,
+        )
+        hits = []
+        for index in np.argsort(scores)[::-1]:
+            item = dict(rows[int(index)])
+            if not matches_filters(item, filters):
+                continue
+            item["score"] = float(scores[int(index)])
+            hits.append(item)
+            if len(hits) >= top_k:
+                break
+        return hits
+
+    def _corpus(self) -> tuple[tuple[dict[str, Any], ...], np.ndarray, np.ndarray]:
         with get_connection() as conn:
+            index = conn.execute(
+                "SELECT updated_at FROM rag_index WHERE index_id=?", (self.index_id,)
+            ).fetchone()
+            revision = str(index["updated_at"] if index else "missing")
+            key = (str(get_database_path()), self.index_id, revision)
+            with _VECTOR_CORPUS_LOCK:
+                cached = _VECTOR_CORPUS_CACHE.get(key)
+                if cached is not None:
+                    _VECTOR_CORPUS_CACHE.move_to_end(key)
+                    return cached
             rows = conn.execute(
                 """
                 SELECT e.chunk_id,e.vector_ref,c.* FROM rag_index_entry e
@@ -79,18 +129,32 @@ class SQLiteVectorStore(BaseVectorStore):
                 """,
                 (self.index_id,),
             ).fetchall()
-        hits = []
+        records: list[dict[str, Any]] = []
+        vectors: list[list[float]] = []
         for row in rows:
             item = dict(row)
             try:
                 stored = json.loads(item.pop("vector_ref") or "[]")
             except json.JSONDecodeError:
                 continue
-            if not matches_filters(item, filters):
+            if not isinstance(stored, list) or not stored:
                 continue
-            item["score"] = cosine_similarity(vector, stored)
-            hits.append(item)
-        return sorted(hits, key=lambda row: row["score"], reverse=True)[:top_k]
+            records.append(item)
+            vectors.append(stored)
+        try:
+            matrix = np.asarray(vectors, dtype=np.float64)
+            if matrix.ndim != 2:
+                raise ValueError("vector corpus is not rectangular")
+        except (TypeError, ValueError):
+            records, vectors = [], []
+            matrix = np.empty((0, 0), dtype=np.float64)
+        value = (tuple(records), matrix, np.linalg.norm(matrix, axis=1))
+        with _VECTOR_CORPUS_LOCK:
+            _VECTOR_CORPUS_CACHE[key] = value
+            _VECTOR_CORPUS_CACHE.move_to_end(key)
+            while len(_VECTOR_CORPUS_CACHE) > _VECTOR_CORPUS_CACHE_SIZE:
+                _VECTOR_CORPUS_CACHE.popitem(last=False)
+        return value
 
     def delete(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:

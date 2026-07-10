@@ -7,7 +7,7 @@ def test_powershell_progress_functions_exist(project_root):
     module = project_root / "scripts" / "powershell" / "AgentTui.psm1"
     script = (
         f"Import-Module -Force '{module}'; "
-        "Get-Command Show-AgentProgressBar,Show-AgentThinkingStatus,Show-AgentTraceEvent,Show-AgentWorkflowState | "
+        "Get-Command Show-AgentProgressBar,Show-AgentThinkingStatus,Show-AgentTraceEvent,Show-AgentWorkflowState,Show-AgentExecutionTrace,Show-AgentToolCall,Show-AgentEvidenceSummary,Show-AgentTrialDecision,Show-AgentApprovalCard,Show-AgentLatencyWaterfall | "
         "Select-Object -ExpandProperty Name"
     )
 
@@ -17,6 +17,12 @@ def test_powershell_progress_functions_exist(project_root):
     assert "Show-AgentThinkingStatus" in result.stdout
     assert "Show-AgentTraceEvent" in result.stdout
     assert "Show-AgentWorkflowState" in result.stdout
+    assert "Show-AgentExecutionTrace" in result.stdout
+    assert "Show-AgentToolCall" in result.stdout
+    assert "Show-AgentEvidenceSummary" in result.stdout
+    assert "Show-AgentTrialDecision" in result.stdout
+    assert "Show-AgentApprovalCard" in result.stdout
+    assert "Show-AgentLatencyWaterfall" in result.stdout
 
 
 def test_powershell_equipment_range_and_waiting_prompt_exist(project_root):
@@ -34,6 +40,11 @@ def test_powershell_agent_trace_mode_contract(project_root):
 
     assert "/mode normal|research|debug" in module_text
     assert "agent_trace" in module_text
+    assert '$script:AgentDisplayMode = "normal"' in module_text
+    assert "duration_ms" in module_text
+    assert "cache_hit" in module_text
+    assert "Show-AgentTrialChoice" in module_text
+    assert "Show-AgentKnowledgeUsageCard" in module_text
     assert "加工助手执行中" in module_text
     assert "加工助手思考中" not in module_text
     assert "Set-AgentStreamMode -Enabled $true" in module_text

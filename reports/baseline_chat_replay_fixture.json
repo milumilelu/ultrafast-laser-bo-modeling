@@ -1,0 +1,111 @@
+{
+  "fixture_version": 1,
+  "head_commit": "cb5094903bb83489bb278f34ae7005973cc21ded",
+  "external_network_allowed": false,
+  "scenarios": [
+    {
+      "name": "tgv_high_aspect_ratio_drilling",
+      "kind": "chat",
+      "request": {
+        "message": "请基于内部文献分析 TGV 高深径比玻璃通孔加工。",
+        "use_skills": true
+      },
+      "baseline_expectation": {
+        "primary_skill": "rag_literature_retrieval",
+        "uses_internal_rag": true
+      }
+    },
+    {
+      "name": "t300_cfrp_texture_or_microhole",
+      "kind": "chat",
+      "request": {
+        "message": "请基于文献分析 T300 CFRP 表面织构或微孔加工。",
+        "use_skills": true
+      },
+      "baseline_expectation": {
+        "primary_skill": "rag_literature_retrieval",
+        "uses_internal_rag": true
+      }
+    },
+    {
+      "name": "diamond_crl",
+      "kind": "chat",
+      "request": {
+        "message": "请规划金刚石 CRL 的超快激光加工。",
+        "use_skills": true
+      },
+      "baseline_expectation": {
+        "primary_skill": "crl_task_planning",
+        "requires_clarification": true
+      }
+    },
+    {
+      "name": "equipment_memory_read",
+      "kind": "api",
+      "request": {
+        "method": "GET",
+        "path": "/equipment/active/machine-bounds"
+      },
+      "baseline_expectation": {
+        "active": true,
+        "source": "SQLite equipment profile"
+      }
+    },
+    {
+      "name": "bo_cold_start",
+      "kind": "legacy_bo",
+      "request": {
+        "process_type": "cutting",
+        "material": "unknown_with_explicit_bounds",
+        "recommendation_type": "balanced"
+      },
+      "baseline_expectation": {
+        "model_status": "rule_based_cold_start",
+        "surrogate_model": null
+      }
+    },
+    {
+      "name": "bo_mixed_mode",
+      "kind": "legacy_bo",
+      "request": {
+        "process_type": "milling",
+        "sample_count_range": [
+          10,
+          29
+        ],
+        "recommendation_type": "balanced"
+      },
+      "baseline_expectation": {
+        "model_status": "hybrid_rule_bo"
+      }
+    },
+    {
+      "name": "rag_query",
+      "kind": "api",
+      "request": {
+        "method": "POST",
+        "path": "/rag/query",
+        "json": {
+          "query": "TGV 高深径比玻璃通孔",
+          "top_k": 8
+        }
+      },
+      "baseline_expectation": {
+        "index_name": "literature_default",
+        "traceable_chunks_only": true
+      }
+    },
+    {
+      "name": "knowledge_candidate_pre_review",
+      "kind": "api",
+      "request": {
+        "method": "GET",
+        "path": "/knowledge/candidates?status=pending_review"
+      },
+      "baseline_expectation": {
+        "status": "pending_review",
+        "must_not_affect_bo": true
+      }
+    }
+  ]
+}

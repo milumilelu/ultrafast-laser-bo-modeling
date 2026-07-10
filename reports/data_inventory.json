@@ -1,0 +1,545 @@
+{
+  "generated_at": "2026-07-10T13:57:13.451504+00:00",
+  "sqlite_databases": [
+    {
+      "path": "ultrafast_laser_memory/data/ultrafast_memory.db",
+      "bytes": 119996416,
+      "status": "implemented",
+      "tables": {
+        "agent_trace_event": 7,
+        "bo_training_sample": 1,
+        "chat_message": 58,
+        "chat_route_trace": 27,
+        "chat_session": 17,
+        "chat_session_state": 12,
+        "chat_skill_trace": 29,
+        "chat_tool_trace": 0,
+        "equipment_config_revision": 1,
+        "equipment_profile": 1,
+        "experience_candidate": 1,
+        "external_source_artifact": 0,
+        "knowledge_candidate": 345,
+        "knowledge_conflict": 0,
+        "knowledge_review_action": 0,
+        "knowledge_review_task": 345,
+        "laser_source_config": 1,
+        "literature_artifact": 340,
+        "literature_chunk": 8512,
+        "literature_chunk_fts": 8512,
+        "literature_chunk_fts_config": 1,
+        "literature_chunk_fts_content": 8512,
+        "literature_chunk_fts_data": 3552,
+        "literature_chunk_fts_docsize": 8512,
+        "literature_chunk_fts_idx": 4657,
+        "literature_evidence": 0,
+        "literature_paper": 225,
+        "literature_paper_source": 309,
+        "literature_section": 293,
+        "measurement_record": 2,
+        "motion_system_config": 1,
+        "optical_setup_config": 1,
+        "process_capability_config": 1,
+        "process_prior": 0,
+        "process_recipe": 1,
+        "process_run": 1,
+        "process_task": 1,
+        "rag_document": 0,
+        "rag_index": 1,
+        "rag_index_entry": 8512,
+        "rag_index_job": 0,
+        "rag_ingestion_job": 5,
+        "rag_query_trace": 4,
+        "raw_artifact": 4,
+        "reasoning_status_trace": 71,
+        "validated_rule": 0,
+        "workflow_progress": 14
+      },
+      "role": "live"
+    },
+    {
+      "path": "ultrafast_laser_memory/data/backups/pre-agent-refactor/cb5094903bb8/database/ultrafast_memory.db",
+      "bytes": 119996416,
+      "status": "implemented",
+      "tables": {
+        "agent_trace_event": 7,
+        "bo_training_sample": 1,
+        "chat_message": 58,
+        "chat_route_trace": 27,
+        "chat_session": 17,
+        "chat_session_state": 12,
+        "chat_skill_trace": 29,
+        "chat_tool_trace": 0,
+        "equipment_config_revision": 1,
+        "equipment_profile": 1,
+        "experience_candidate": 1,
+        "external_source_artifact": 0,
+        "knowledge_candidate": 345,
+        "knowledge_conflict": 0,
+        "knowledge_review_action": 0,
+        "knowledge_review_task": 345,
+        "laser_source_config": 1,
+        "literature_artifact": 340,
+        "literature_chunk": 8512,
+        "literature_chunk_fts": 8512,
+        "literature_chunk_fts_config": 1,
+        "literature_chunk_fts_content": 8512,
+        "literature_chunk_fts_data": 3552,
+        "literature_chunk_fts_docsize": 8512,
+        "literature_chunk_fts_idx": 4657,
+        "literature_evidence": 0,
+        "literature_paper": 225,
+        "literature_paper_source": 309,
+        "literature_section": 293,
+        "measurement_record": 2,
+        "motion_system_config": 1,
+        "optical_setup_config": 1,
+        "process_capability_config": 1,
+        "process_prior": 0,
+        "process_recipe": 1,
+        "process_run": 1,
+        "process_task": 1,
+        "rag_document": 0,
+        "rag_index": 1,
+        "rag_index_entry": 8512,
+        "rag_index_job": 0,
+        "rag_ingestion_job": 5,
+        "rag_query_trace": 4,
+        "raw_artifact": 4,
+        "reasoning_status_trace": 71,
+        "validated_rule": 0,
+        "workflow_progress": 14
+      },
+      "role": "baseline_backup"
+    }
+  ],
+  "primary_database": "ultrafast_laser_memory/data/ultrafast_memory.db",
+  "rag_indexes": {
+    "rag_index_rows": 1,
+    "rag_index_entry_rows": 8512,
+    "fts_chunk_rows": 8512,
+    "status": "implemented"
+  },
+  "literature": {
+    "source_workspace": {
+      "path": "ultrafast_laser_memory/超快智能体文献检索",
+      "exists": true,
+      "file_count": 376,
+      "bytes": 1614282724,
+      "extensions": {
+        ".bib": 4,
+        ".csv": 10,
+        ".json": 90,
+        ".jsonl": 14,
+        ".log": 3,
+        ".md": 20,
+        ".pdf": 230,
+        ".py": 1,
+        ".xlsx": 4
+      }
+    },
+    "archive": {
+      "path": "ultrafast_laser_memory/data/literature_archive",
+      "exists": true,
+      "file_count": 226,
+      "bytes": 1587768575,
+      "extensions": {
+        ".pdf": 226
+      }
+    },
+    "pdf_total_repository": 456,
+    "paper_rows": 225,
+    "section_rows": 293,
+    "chunk_rows": 8512,
+    "artifact_rows": 340
+  },
+  "literature_cards": [
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/TGV 密集孔批量加工：玻璃晶圆高深径比孔、光束整形、良品率与在线监测/deliverables/tgv/literature_cards.jsonl",
+      "bytes": 108944,
+      "rows": 30
+    },
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/tgv/literature_cards.jsonl",
+      "bytes": 4365,
+      "rows": 1
+    },
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/xray_characterization/literature_cards.jsonl",
+      "bytes": 98194,
+      "rows": 30
+    },
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/气膜孔服役性能：力学性能、疲劳、热循环、冷却效率与孔几何关系/deliverables/film_cooling/literature_cards.jsonl",
+      "bytes": 86952,
+      "rows": 24
+    }
+  ],
+  "knowledge_candidates": {
+    "database_rows": 345,
+    "files": [
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/TGV 密集孔批量加工：玻璃晶圆高深径比孔、光束整形、良品率与在线监测/deliverables/tgv/knowledge_candidates.jsonl",
+        "bytes": 214214,
+        "rows": 150
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/tgv/knowledge_candidates.jsonl",
+        "bytes": 8050,
+        "rows": 6
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/xray_characterization/knowledge_candidates.jsonl",
+        "bytes": 118522,
+        "rows": 76
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/气膜孔服役性能：力学性能、疲劳、热循环、冷却效率与孔几何关系/deliverables/film_cooling/knowledge_candidates.jsonl",
+        "bytes": 157106,
+        "rows": 113
+      }
+    ]
+  },
+  "review_tasks": {
+    "database_rows": 345,
+    "review_action_rows": 0
+  },
+  "equipment_profiles": {
+    "profile_rows": 1,
+    "revision_rows": 1,
+    "status": "implemented"
+  },
+  "bo_datasets": {
+    "training_sample_rows": 1,
+    "csv_files": [
+      {
+        "path": "AlSiC.csv",
+        "bytes": 7504,
+        "lines": 121
+      },
+      {
+        "path": "CFRP.csv",
+        "bytes": 7898,
+        "lines": 129
+      },
+      {
+        "path": "SiC.csv",
+        "bytes": 7215,
+        "lines": 121
+      },
+      {
+        "path": "ZrO2.csv",
+        "bytes": 7339,
+        "lines": 121
+      },
+      {
+        "path": "data/processed/data_quality_report.csv",
+        "bytes": 456,
+        "lines": 6
+      },
+      {
+        "path": "data/processed/unified_experiments.csv",
+        "bytes": 60791,
+        "lines": 549
+      },
+      {
+        "path": "data/processed/unified_experiments_with_features.csv",
+        "bytes": 127638,
+        "lines": 549
+      },
+      {
+        "path": "data/processed/updated_experiments.csv",
+        "bytes": 127638,
+        "lines": 549
+      },
+      {
+        "path": "outputs/SiC_20260628_001_feedback_log.csv",
+        "bytes": 363,
+        "lines": 3
+      },
+      {
+        "path": "outputs/SiC_20260628_001_recommendation_log.csv",
+        "bytes": 1649,
+        "lines": 3
+      },
+      {
+        "path": "outputs/bo_recommendations.csv",
+        "bytes": 6565,
+        "lines": 26
+      },
+      {
+        "path": "outputs/feature_importance_summary.csv",
+        "bytes": 21663,
+        "lines": 261
+      },
+      {
+        "path": "outputs/feedback_log.csv",
+        "bytes": 323,
+        "lines": 2
+      },
+      {
+        "path": "outputs/model_performance_summary.csv",
+        "bytes": 7703,
+        "lines": 51
+      },
+      {
+        "path": "outputs/prediction_results.csv",
+        "bytes": 408895,
+        "lines": 5401
+      },
+      {
+        "path": "outputs/recommendation_log.csv",
+        "bytes": 4185,
+        "lines": 9
+      },
+      {
+        "path": "outputs/response_curves.csv",
+        "bytes": 164554,
+        "lines": 2101
+      },
+      {
+        "path": "ultrafast_laser_memory/data/exports/bo_training_samples.csv",
+        "bytes": 379,
+        "lines": 2
+      },
+      {
+        "path": "ultrafast_laser_memory/data/raw_artifacts/2026-07-07/0a3e8af3d96dbf89dea05231f9ae09b2832379d869b8a06b7f74107e5bb48cba_sample_measurement.csv",
+        "bytes": 278,
+        "lines": 3
+      },
+      {
+        "path": "ultrafast_laser_memory/examples/sample_measurement.csv",
+        "bytes": 278,
+        "lines": 3
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/3C 玻璃盖板与超硬透明材料切割：低崩边、低粗糙度、高效率/参数-质量指标表.csv",
+        "bytes": 53130,
+        "lines": 272
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/X 射线光学器件：金刚石SiC CRL、分光晶体的飞秒加工与后处理/参数-质量指标表.csv",
+        "bytes": 70839,
+        "lines": 115
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/TGV 密集孔批量加工：玻璃晶圆高深径比孔、光束整形、良品率与在线监测/deliverables/tgv/paper_table.csv",
+        "bytes": 59394,
+        "lines": 31
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/TGV 密集孔批量加工：玻璃晶圆高深径比孔、光束整形、良品率与在线监测/deliverables/tgv/parameter_table.csv",
+        "bytes": 134490,
+        "lines": 193
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/tgv/paper_table.csv",
+        "bytes": 2750,
+        "lines": 2
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/tgv/parameter_table.csv",
+        "bytes": 32632,
+        "lines": 54
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/xray_characterization/paper_table.csv",
+        "bytes": 53138,
+        "lines": 31
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/xray_characterization/parameter_table.csv",
+        "bytes": 21279,
+        "lines": 30
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/气膜孔服役性能：力学性能、疲劳、热循环、冷却效率与孔几何关系/deliverables/film_cooling/paper_table.csv",
+        "bytes": 46193,
+        "lines": 25
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/气膜孔服役性能：力学性能、疲劳、热循环、冷却效率与孔几何关系/deliverables/film_cooling/parameter_table.csv",
+        "bytes": 24044,
+        "lines": 40
+      }
+    ]
+  },
+  "task_state_files": [
+    {
+      "path": "outputs/SiC_20260628_001_task_state.json",
+      "bytes": 8045
+    },
+    {
+      "path": "outputs/task_state.json",
+      "bytes": 3891
+    },
+    {
+      "path": "outputs/tasks/AlSiC_20260630_001_task_state.json",
+      "bytes": 3102
+    },
+    {
+      "path": "outputs/tasks/AlSiC_20260630_002_task_state.json",
+      "bytes": 3102
+    },
+    {
+      "path": "outputs/tasks/AlSiC_20260630_003_task_state.json",
+      "bytes": 3412
+    },
+    {
+      "path": "outputs/tasks/AlSiC_20260630_004_task_state.json",
+      "bytes": 3412
+    },
+    {
+      "path": "outputs/tasks/SiC_20260628_001_task_state.json",
+      "bytes": 8045
+    }
+  ],
+  "logs": [
+    {
+      "path": "outputs/streamlit_ui.err.log",
+      "bytes": 14674
+    },
+    {
+      "path": "outputs/streamlit_ui.out.log",
+      "bytes": 184
+    },
+    {
+      "path": "ultrafast_laser_memory/data/raw_artifacts/2026-07-07/7fe261c836bfff7b123adb730350d5dc3686ee7192aa36d4dd64dd6331c139d7_sample_run.log",
+      "bytes": 290
+    },
+    {
+      "path": "ultrafast_laser_memory/examples/sample_run.log",
+      "bytes": 290
+    },
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/tgv/extraction_errors.log",
+      "bytes": 0
+    },
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/X 射线光学质量表征：SEM、轮廓、波前、透过率、焦斑与光学性能/deliverables/xray_characterization/extraction_errors.log",
+      "bytes": 0
+    },
+    {
+      "path": "ultrafast_laser_memory/超快智能体文献检索/已提取/气膜孔服役性能：力学性能、疲劳、热循环、冷却效率与孔几何关系/deliverables/film_cooling/extraction_errors.log",
+      "bytes": 0
+    }
+  ],
+  "reports": [
+    {
+      "path": "data/processed/data_quality_report.csv",
+      "bytes": 456
+    },
+    {
+      "path": "outputs/modeling_report.md",
+      "bytes": 42655
+    },
+    {
+      "path": "reports/baseline_api_golden_response.json",
+      "bytes": 7471
+    },
+    {
+      "path": "reports/baseline_chat_replay_fixture.json",
+      "bytes": 2911
+    },
+    {
+      "path": "reports/baseline_cli_outputs.txt",
+      "bytes": 4379
+    },
+    {
+      "path": "reports/baseline_performance.json",
+      "bytes": 9005
+    },
+    {
+      "path": "reports/baseline_performance.md",
+      "bytes": 2085
+    },
+    {
+      "path": "reports/baseline_tests.txt",
+      "bytes": 1228
+    },
+    {
+      "path": "reports/data_inventory.json",
+      "bytes": 17108
+    },
+    {
+      "path": "reports/repository_inventory.json",
+      "bytes": 81184
+    },
+    {
+      "path": "src/report.py",
+      "bytes": 4953
+    },
+    {
+      "path": "ultrafast_laser_memory/data/reports/literature_quality_report.json",
+      "bytes": 362
+    },
+    {
+      "path": "ultrafast_laser_memory/data/reports/literature_quality_report.md",
+      "bytes": 307
+    }
+  ],
+  "data_areas": [
+    {
+      "path": "data",
+      "exists": true,
+      "file_count": 4,
+      "bytes": 316523,
+      "extensions": {
+        ".csv": 4
+      }
+    },
+    {
+      "path": "inputs",
+      "exists": true,
+      "file_count": 4,
+      "bytes": 1893,
+      "extensions": {
+        ".json": 4
+      }
+    },
+    {
+      "path": "outputs",
+      "exists": true,
+      "file_count": 22,
+      "bytes": 715007,
+      "extensions": {
+        ".csv": 9,
+        ".json": 8,
+        ".log": 2,
+        ".md": 2,
+        ".txt": 1
+      }
+    },
+    {
+      "path": "ultrafast_laser_memory/data",
+      "exists": true,
+      "file_count": 238,
+      "bytes": 1827770576,
+      "extensions": {
+        ".csv": 2,
+        ".db": 2,
+        ".json": 4,
+        ".log": 1,
+        ".md": 1,
+        ".pdf": 226,
+        ".txt": 1,
+        ".yaml": 1
+      }
+    }
+  ],
+  "sensitive_artifacts": [
+    {
+      "path": "ultrafast_laser_memory/configs/llm.local.json",
+      "exists": true,
+      "bytes": 254,
+      "content_inspected": false,
+      "git_ignored": true
+    },
+    {
+      "path": "<ignored-secret-store>",
+      "exists": true,
+      "bytes": 590,
+      "content_inspected": false,
+      "git_ignored": true
+    }
+  ]
+}

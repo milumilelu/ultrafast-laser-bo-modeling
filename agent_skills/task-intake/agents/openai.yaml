@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Intake"
+  short_description: "Turns vague machining needs into task specs"
+  default_prompt: "Use $task-intake to convert this machining request into a structured task specification."

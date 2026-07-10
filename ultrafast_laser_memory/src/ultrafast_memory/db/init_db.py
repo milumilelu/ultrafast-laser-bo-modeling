@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 
 from ultrafast_memory.db.session import get_connection
+from ultrafast_memory.core.config import get_database_path
+from ultrafast_shared.db.migrations import apply_migrations
 
 
 SCHEMA_SQL = """
@@ -614,19 +617,27 @@ TABLE_COLUMNS = {
     },
 }
 
+_INITIALIZED_DATABASES: set[Path] = set()
+_INITIALIZATION_LOCK = RLock()
+
 
 def init_database(db_path: str | Path | None = None) -> Path:
-    with get_connection(db_path) as conn:
-        conn.executescript(SCHEMA_SQL)
-        existing = {row["name"] for row in conn.execute("PRAGMA table_info(chat_session_state)").fetchall()}
-        for column, column_type in CHAT_SESSION_STATE_COLUMNS.items():
-            if column not in existing:
-                conn.execute(f"ALTER TABLE chat_session_state ADD COLUMN {column} {column_type}")
-        for table, columns in TABLE_COLUMNS.items():
-            existing_columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-            for column, column_type in columns.items():
-                if column not in existing_columns:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
-        conn.commit()
-        rows = conn.execute("PRAGMA database_list").fetchall()
-    return Path(rows[0][2]).resolve() if rows else Path(db_path or "")
+    path = Path(db_path).resolve() if db_path is not None else get_database_path()
+    with _INITIALIZATION_LOCK:
+        if path in _INITIALIZED_DATABASES and path.exists():
+            return path
+        with get_connection(path) as conn:
+            conn.executescript(SCHEMA_SQL)
+            existing = {row["name"] for row in conn.execute("PRAGMA table_info(chat_session_state)").fetchall()}
+            for column, column_type in CHAT_SESSION_STATE_COLUMNS.items():
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE chat_session_state ADD COLUMN {column} {column_type}")
+            for table, columns in TABLE_COLUMNS.items():
+                existing_columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+                for column, column_type in columns.items():
+                    if column not in existing_columns:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+            apply_migrations(conn)
+            conn.commit()
+        _INITIALIZED_DATABASES.add(path)
+        return path

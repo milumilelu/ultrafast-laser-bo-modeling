@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskIntakeInput",
+  "type": "object",
+  "properties": {
+    "raw_request": {"type": "string"},
+    "files": {"type": "array", "items": {"type": "string"}},
+    "known_context": {"type": "object"}
+  },
+  "required": ["raw_request"],
+  "additionalProperties": true
+}

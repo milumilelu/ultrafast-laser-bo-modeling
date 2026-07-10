@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BoRecommendationInput",
+  "type": "object",
+  "properties": {
+    "material": {"type": "string"},
+    "process_type": {"type": "string"},
+    "objective_mode": {"type": "string"},
+    "machine_bounds": {"type": "object"},
+    "decision_variables": {"type": "object"},
+    "target_metrics": {"type": "object"},
+    "constraints": {"type": "object"},
+    "training_sample_count": {"type": "integer", "minimum": 0}
+  },
+  "required": ["material", "process_type", "objective_mode", "machine_bounds", "decision_variables", "target_metrics", "constraints", "training_sample_count"],
+  "additionalProperties": true
+}

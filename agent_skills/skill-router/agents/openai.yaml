@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Router"
+  short_description: "Routes ultrafast laser requests to workflow skills"
+  default_prompt: "Use $skill-router to route this ultrafast laser request to the correct workflow skill."

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BoDatasetGovernanceOutput",
+  "type": "object",
+  "properties": {
+    "run_id": {"type": "string"},
+    "valid_for_training": {"type": "boolean"},
+    "invalid_reasons": {"type": "array", "items": {"type": "string"}},
+    "x_parameters": {"type": "object"},
+    "y_metrics": {"type": "object"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["run_id", "valid_for_training", "invalid_reasons", "x_parameters", "y_metrics", "warnings"],
+  "additionalProperties": false
+}

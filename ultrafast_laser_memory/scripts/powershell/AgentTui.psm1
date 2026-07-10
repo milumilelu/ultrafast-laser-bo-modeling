@@ -16,7 +16,7 @@ $script:DeepSeekModels = @(
     @{ Label = "Pro"; Model = "deepseek-v4-pro" }
 )
 $script:AgentStreamMode = $false
-$script:AgentDisplayMode = "research"
+$script:AgentDisplayMode = "normal"
 
 function Show-AgentBanner {
     try {
@@ -542,7 +542,10 @@ function Show-AgentProgressBar {
         [string]$Stage,
         [string]$Message
     )
-    if ((Get-AgentDisplayMode) -eq "normal") { return }
+    if ((Get-AgentDisplayMode) -eq "normal") {
+        Write-Host ("[进度 {0}%] {1} {2}" -f [Math]::Round($Percent), $Stage, $Message) -ForegroundColor DarkCyan
+        return
+    }
     $width = 20
     $filled = [Math]::Floor($Percent / 100 * $width)
     $empty = $width - $filled
@@ -558,7 +561,10 @@ function Show-AgentThinkingStatus {
         [string]$Title,
         [string]$Summary
     )
-    if ((Get-AgentDisplayMode) -eq "normal") { return }
+    if ((Get-AgentDisplayMode) -eq "normal") {
+        Write-Host ("[状态] {0}" -f $Title) -ForegroundColor DarkCyan
+        return
+    }
     Write-Host ("[状态] {0}: {1}" -f $Title, $Summary) -ForegroundColor DarkCyan
 }
 
@@ -566,7 +572,7 @@ function Show-AgentTraceEvent {
     param($Event)
     if ($null -eq $Event) { return }
     $mode = Get-AgentDisplayMode
-    if ($mode -eq "normal") { return }
+    if ($mode -eq "normal" -and $Event.event_type -notin @("decision", "decision_gate", "approval_required", "warning", "error", "tool_failed", "workflow_end", "workflow_completed", "workflow_failed", "knowledge_lookup", "device_lookup")) { return }
     $mark = switch ($Event.status) {
         "completed" { "✓" }
         "failed" { "!" }
@@ -577,11 +583,16 @@ function Show-AgentTraceEvent {
     $summary = if ($Event.summary) { $Event.summary } else { "" }
     Write-Host ("{0} {1}: {2}" -f $mark, $label, $summary) -ForegroundColor DarkCyan
     if ($mode -eq "debug") {
-        if ($Event.tool) { Write-Host ("  tool: {0}" -f $Event.tool) -ForegroundColor DarkGray }
+        if ($Event.sequence) { Write-Host ("  sequence: {0}" -f $Event.sequence) -ForegroundColor DarkGray }
+        $toolName = if ($Event.tool_name) { $Event.tool_name } else { $Event.tool }
+        if ($toolName) { Write-Host ("  tool: {0}" -f $toolName) -ForegroundColor DarkGray }
         if ($Event.skill) { Write-Host ("  skill: {0}" -f $Event.skill) -ForegroundColor DarkGray }
         if ($Event.stage) { Write-Host ("  stage: {0}" -f $Event.stage) -ForegroundColor DarkGray }
         if ($Event.input_summary) { Write-Host ("  input: {0}" -f $Event.input_summary) -ForegroundColor DarkGray }
         if ($Event.output_summary) { Write-Host ("  output: {0}" -f $Event.output_summary) -ForegroundColor DarkGray }
+        if ($null -ne $Event.duration_ms) { Write-Host ("  duration_ms: {0}" -f $Event.duration_ms) -ForegroundColor DarkGray }
+        if ($null -ne $Event.cache_hit) { Write-Host ("  cache_hit: {0}" -f $Event.cache_hit) -ForegroundColor DarkGray }
+        if ($Event.attempt) { Write-Host ("  attempt: {0}" -f $Event.attempt) -ForegroundColor DarkGray }
     }
 }
 
@@ -594,6 +605,65 @@ function Show-AgentWorkflowState {
     }
     if ($WorkflowState.missing_slots -and $WorkflowState.missing_slots.Count -gt 0) {
         Write-Host ("[缺失字段] {0}" -f (($WorkflowState.missing_slots | ForEach-Object { "$_" }) -join ", ")) -ForegroundColor DarkGray
+    }
+}
+
+function Show-AgentExecutionTrace {
+    param($Events)
+    if ($null -eq $Events -or (Get-AgentDisplayMode) -eq "normal") { return }
+    Write-Host "▼ 执行轨迹" -ForegroundColor Cyan
+    foreach ($traceEvent in @($Events)) {
+        Show-AgentTraceEvent -Event $traceEvent
+    }
+}
+
+function Show-AgentToolCall {
+    param($Event)
+    if ($null -eq $Event) { return }
+    $mode = Get-AgentDisplayMode
+    if ($mode -eq "normal" -and $Event.status -notin @("failed", "error", "retrying")) { return }
+    $toolName = if ($Event.tool_name) { $Event.tool_name } else { $Event.tool }
+    $duration = if ($null -ne $Event.duration_ms) { "；$($Event.duration_ms) ms" } else { "" }
+    Write-Host ("[工具] {0}：{1}{2}" -f $toolName, $Event.status, $duration) -ForegroundColor DarkCyan
+    if ($mode -eq "debug") {
+        if ($Event.input_summary) { Write-Host ("  input: {0}" -f ($Event.input_summary | ConvertTo-Json -Compress -Depth 6)) -ForegroundColor DarkGray }
+        if ($Event.output_summary) { Write-Host ("  output: {0}" -f ($Event.output_summary | ConvertTo-Json -Compress -Depth 6)) -ForegroundColor DarkGray }
+        if ($Event.attempt) { Write-Host ("  attempt: {0}" -f $Event.attempt) -ForegroundColor DarkGray }
+    }
+}
+
+function Show-AgentEvidenceSummary {
+    param($EvidencePack)
+    if ($null -eq $EvidencePack) { return }
+    $hits = @($EvidencePack.hits).Count
+    $citations = @($EvidencePack.citations).Count
+    Write-Host ("[文献证据] status={0}；chunks={1}；citations={2}" -f $EvidencePack.evidence_status, $hits, $citations) -ForegroundColor DarkCyan
+    if ((Get-AgentDisplayMode) -ne "normal" -and $EvidencePack.missing_evidence) {
+        Write-Host ("  缺失：{0}" -f (@($EvidencePack.missing_evidence) -join "；")) -ForegroundColor DarkGray
+    }
+}
+
+function Show-AgentTrialDecision {
+    param($Decision)
+    if ($null -eq $Decision) { return }
+    $recommended = if ($Decision.recommended_mode) { $Decision.recommended_mode } else { $Decision.trial_mode }
+    Write-Host ("[试切策略] 建议/选择：{0}" -f $recommended) -ForegroundColor DarkCyan
+    if ((Get-AgentDisplayMode) -ne "normal" -and $Decision.reasons) {
+        Write-Host ("  依据：{0}" -f (@($Decision.reasons) -join "；")) -ForegroundColor DarkGray
+    }
+}
+
+function Show-AgentApprovalCard {
+    param($Decision)
+    Show-AgentKnowledgeUsageCard -Decision $Decision
+}
+
+function Show-AgentLatencyWaterfall {
+    param($Waterfall)
+    if ($null -eq $Waterfall -or (Get-AgentDisplayMode) -eq "normal") { return }
+    Write-Host "▼ 延迟 waterfall" -ForegroundColor Cyan
+    foreach ($property in $Waterfall.PSObject.Properties | Sort-Object Name) {
+        Write-Host ("  {0}: {1} ms" -f $property.Name, $property.Value) -ForegroundColor DarkGray
     }
 }
 
@@ -815,7 +885,7 @@ function Send-AgentChatStream {
     $body = @{
         session_id = $SessionId
         message = $Message
-        mode = "agent"
+        mode = (Get-AgentDisplayMode)
         use_skills = $true
         stream = $true
     } | ConvertTo-Json -Depth 8
@@ -855,11 +925,15 @@ function Send-AgentChatStream {
                     Write-Host "▼ 执行轨迹" -ForegroundColor Cyan
                     $traceHeaderShown = $true
                 }
-                Show-AgentTraceEvent -Event $event
+                if ($event.event_type -in @("tool_call", "tool_result", "tool_started", "tool_completed", "tool_failed")) {
+                    Show-AgentToolCall -Event $event
+                } else {
+                    Show-AgentTraceEvent -Event $event
+                }
             } elseif ($event.type -eq "workflow_state") {
                 Show-AgentWorkflowState -WorkflowState $event
             } elseif ($event.type -eq "route") {
-                if ($event.primary_skill) {
+                if ((Get-AgentDisplayMode) -ne "normal" -and $event.primary_skill) {
                     Write-Host ("[skill: {0}, source: {1}, confidence: {2}]" -f $event.primary_skill, $event.route_source, $event.confidence) -ForegroundColor DarkGray
                 }
             } elseif ($event.type -eq "delta") {
@@ -871,10 +945,12 @@ function Send-AgentChatStream {
                 Write-Host -NoNewline $event.content
             } elseif ($event.type -eq "warning") {
                 Write-Host ""
-                Write-Host ("[warning] {0}" -f $event.message) -ForegroundColor Yellow
+                $warningText = if ($event.summary) { $event.summary } else { $event.message }
+                Write-Host ("[warning] {0}" -f $warningText) -ForegroundColor Yellow
             } elseif ($event.type -eq "error") {
                 Write-Host ""
-                Write-Host ("[error] {0}" -f $event.message) -ForegroundColor Red
+                $errorText = if ($event.summary) { $event.summary } else { $event.message }
+                Write-Host ("[error] {0}" -f $errorText) -ForegroundColor Red
             } elseif ($event.type -eq "done") {
                 Write-Host ""
             }
@@ -886,6 +962,36 @@ function Send-AgentChatStream {
         $request.Dispose()
         $client.Dispose()
     }
+}
+
+function Show-AgentTrialChoice {
+    param([string]$RecommendedMode = "simple_trial_cut")
+    $label = switch ($RecommendedMode) {
+        "full_trial_cut" { "完整试切" }
+        "skip_trial" { "跳过试切" }
+        default { "简化试切" }
+    }
+    Write-Host ("系统建议先进行{0}。" -f $label) -ForegroundColor Cyan
+    Write-Host "[1] 简化试切"
+    Write-Host "[2] 完整试切"
+    Write-Host "[3] 跳过试切"
+    $choice = Read-Host "请选择"
+    $selectedMode = switch ($choice) {
+        "2" { "full_trial_cut" }
+        "3" { "skip_trial" }
+        default { "simple_trial_cut" }
+    }
+    return $selectedMode
+}
+
+function Show-AgentKnowledgeUsageCard {
+    param($Decision)
+    if ($null -eq $Decision) { return }
+    Write-Host "需要确认以下知识是否可用于当前决策：" -ForegroundColor Yellow
+    Write-Host ("风险等级：{0}；证据数量：{1}" -f $Decision.risk_level, $Decision.evidence_ids.Count) -ForegroundColor DarkGray
+    Write-Host "[1] 本次允许使用"
+    Write-Host "[2] 批准为长期工艺先验"
+    Write-Host "[3] 不使用"
 }
 
 function Show-AgentReviewTasks {
@@ -1177,4 +1283,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentWorkflowState, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret

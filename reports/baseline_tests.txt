@@ -1,0 +1,23 @@
+Phase 0 baseline test run at 2026-07-10T13:55:42.392073+00:00
+HEAD: cb5094903bb83489bb278f34ae7005973cc21ded
+
+$ <PYTHON> -m pytest -q tests
+cwd: <REPOSITORY_ROOT>
+exit_code: 0
+..............................                                           [100%]
+============================== warnings summary ===============================
+tests/test_interactive_bo.py: 30 warnings
+tests/test_multi_process_cutting.py: 2 warnings
+  <PYTHON_SITE_PACKAGES>\sklearn\gaussian_process\kernels.py:440: ConvergenceWarning: The optimal value found for dimension 0 of parameter k2__noise_level is close to the specified lower bound 1e-05. Decreasing the bound and calling fit again may find a better value.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+30 passed, 32 warnings in 7.44s
+
+
+$ <PYTHON> -m pytest -q
+cwd: <REPOSITORY_ROOT>\ultrafast_laser_memory
+exit_code: 0
+........................................................................ [ 80%]
+.................                                                        [100%]
+89 passed in 23.61s

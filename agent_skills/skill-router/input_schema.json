@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkillRouterInput",
+  "type": "object",
+  "properties": {
+    "user_input": {"type": "string"},
+    "attached_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "current_workflow": {"type": ["string", "null"]}
+  },
+  "required": ["user_input"],
+  "additionalProperties": true
+}

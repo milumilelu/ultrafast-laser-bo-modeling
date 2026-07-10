@@ -38,6 +38,9 @@ class RoutePlan(BaseModel):
     blocked_tools: list[BlockedTool] = Field(default_factory=list)
     state_update: StateUpdate = Field(default_factory=StateUpdate)
     route_source: str = "unknown"
+    deprecated_skill_used: bool = False
+    replacement_skill: str | None = None
+    emitted_events: list[str] = Field(default_factory=list)
 
 
 def fallback_route(reason: str = "Router confidence is low; fallback to task intake.") -> RoutePlan:

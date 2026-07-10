@@ -1,0 +1,83 @@
+$ <PYTHON> main.py --help
+cwd: <REPOSITORY_ROOT>
+exit_code: 0
+usage: main.py [-h] [--config CONFIG]
+               {init-task,recommend,feedback,recommend-next,export-task,run-json,feedback-json}
+               ...
+
+Ultrafast laser process-quality modeling workflow
+
+positional arguments:
+  {init-task,recommend,feedback,recommend-next,export-task,run-json,feedback-json}
+    init-task           Initialize an interactive BO task
+    recommend           Recommend parameters for an existing task
+    feedback            Submit feedback for a task iteration
+    recommend-next      Recommend the next point after feedback
+    export-task         Export task-specific logs
+    run-json            Initialize and recommend from task_request.json
+    feedback-json       Submit feedback from feedback.json and recommend next
+
+options:
+  -h, --help            show this help message and exit
+  --config CONFIG       Path to YAML configuration
+
+
+$ <PYTHON> -m ultrafast_memory.app.cli --help
+cwd: <REPOSITORY_ROOT>\ultrafast_laser_memory
+exit_code: 0
+
+ Usage: python -m ultrafast_memory.app.cli [OPTIONS] COMMAND [ARGS]...
+
++- Options -------------------------------------------------------------------+
+| --install-completion          Install completion for the current shell.     |
+| --show-completion             Show completion for the current shell, to     |
+|                               copy it or customize the installation.        |
+| --help                        Show this message and exit.                   |
++-----------------------------------------------------------------------------+
++- Commands ------------------------------------------------------------------+
+| init-db                                                                     |
+| scan                                                                        |
+| list-artifacts                                                              |
+| list-runs                                                                   |
+| list-candidates                                                             |
+| review-candidate                                                            |
+| export-bo                                                                   |
+| literature         Inventory and ingest literature assets.                  |
+| rag                Create, update, and query literature RAG indexes.        |
++-----------------------------------------------------------------------------+
+
+
+$ <PYTHON> -m ultrafast_memory.app.cli rag status
+cwd: <REPOSITORY_ROOT>\ultrafast_laser_memory
+exit_code: 0
+{
+  "index_id": "rag_index_2923e38d08d8ea89",
+  "index_name": "literature_default",
+  "index_type": "hybrid",
+  "embedding_provider": "mock",
+  "embedding_model": "deterministic-mock-v1",
+  "embedding_dimension": 64,
+  "distance_metric": "cosine",
+  "config_json": "{\"index_name\": \"literature_default\", \"embedding_provider\": \"mock\", \"embedding_model\": \"deterministic-mock-v1\", \"embedding_dimension\": 64, \"retrieval\": {\"lexical_top_k\": 20, \"vector_top_k\": 20, \"fusion_top_k\": 15, \"rerank_top_k\": 8, \"max_chunks_per_paper\": 3}}",
+  "status": "ready",
+  "created_at": "2026-07-10T09:45:47+00:00",
+  "updated_at": "2026-07-10T09:50:10+00:00",
+  "entry_count": 8512
+}
+
+
+$ <PYTHON> -m ultrafast_memory.app.launcher --help
+cwd: <REPOSITORY_ROOT>\ultrafast_laser_memory
+exit_code: 0
+usage: ultrafast [-h] [--no-save] [--skip-llm-config] [--show-menu]
+                 [--reconfigure] [--force-initialize]
+
+Start the Ultrafast Laser Agent PowerShell TUI.
+
+options:
+  -h, --help          show this help message and exit
+  --no-save           Do not save local LLM config or encrypted API key.
+  --skip-llm-config   Skip DeepSeek config and use MockLLM.
+  --show-menu         Open the manual launcher menu.
+  --reconfigure       Force DeepSeek model/API key setup.
+  --force-initialize  Force example scan and BO export.

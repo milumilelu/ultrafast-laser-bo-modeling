@@ -1,0 +1,4 @@
+interface:
+  display_name: "Experience Memory Update"
+  short_description: "Creates reviewable process experience candidates"
+  default_prompt: "Use $experience-memory-update to convert these observations into reviewable experience candidates."

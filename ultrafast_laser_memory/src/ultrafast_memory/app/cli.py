@@ -27,6 +27,8 @@ from ultrafast_memory.rag.index_service import (
     index_pending_chunks,
 )
 from ultrafast_memory.rag.query_service import query_rag
+from ultrafast_memory.demo.service import DemoService
+from ultrafast_memory.doctor.service import DoctorService
 
 app = typer.Typer(no_args_is_help=True)
 literature_app = typer.Typer(no_args_is_help=True, help="Inventory and ingest literature assets.")
@@ -155,6 +157,23 @@ def rag_query(
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(f"invalid --filters JSON: {exc}") from exc
     typer.echo(json.dumps(query_rag({"query": query, "filters": parsed_filters, "top_k": top_k, "purpose": purpose, "index_name": name}), ensure_ascii=False, indent=2))
+
+
+@app.command("doctor")
+def doctor() -> None:
+    result = DoctorService().run()
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["status"] != "healthy":
+        raise typer.Exit(code=1)
+
+
+@app.command("demo-tgv")
+def demo_tgv(
+    approve_review: bool = typer.Option(
+        False, "--approve-review", help="Explicitly approve the demo task review card."
+    ),
+) -> None:
+    typer.echo(json.dumps(DemoService().run_tgv(approve_review), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

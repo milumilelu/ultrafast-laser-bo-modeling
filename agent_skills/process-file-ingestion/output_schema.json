@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProcessFileIngestionOutput",
+  "type": "object",
+  "properties": {
+    "import_summary": {
+      "type": "object",
+      "properties": {
+        "imported_files": {"type": "integer"},
+        "skipped_duplicates": {"type": "integer"},
+        "errors": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["imported_files", "skipped_duplicates", "errors"]
+    },
+    "created_records": {
+      "type": "object",
+      "properties": {
+        "tasks": {"type": "array"},
+        "recipes": {"type": "array"},
+        "runs": {"type": "array"},
+        "measurements": {"type": "array"},
+        "experience_candidates": {"type": "array"}
+      }
+    },
+    "quality_warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["import_summary", "created_records", "quality_warnings"],
+  "additionalProperties": false
+}

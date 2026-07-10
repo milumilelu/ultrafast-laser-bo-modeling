@@ -1,0 +1,4 @@
+interface:
+  display_name: "RAG Literature Retrieval"
+  short_description: "Builds traceable literature evidence packs"
+  default_prompt: "Use $rag-literature-retrieval to retrieve traceable evidence for this ultrafast laser question."

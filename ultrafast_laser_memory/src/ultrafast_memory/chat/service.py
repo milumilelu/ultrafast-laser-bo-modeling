@@ -116,6 +116,18 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
         route_plan = route_message(request.message, session_id, user_message["message_id"])
         selected_skill = route_plan.primary_skill
         _record_route_decision_trace(session_id, user_message["message_id"], request.message, route_plan)
+        if route_plan.deprecated_skill_used:
+            record_agent_trace_event(
+                session_id=session_id,
+                message_id=user_message["message_id"],
+                event_type="warning",
+                stage="route_plan",
+                title="使用兼容 Skill",
+                summary=f"{route_plan.primary_skill} 已弃用，内部迁移目标为 {route_plan.replacement_skill}。",
+                skill=route_plan.primary_skill,
+                tool="route_planner",
+                status="completed",
+            )
         save_skill_trace(
             session_id,
             user_message["message_id"],
@@ -231,7 +243,27 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
         input_summary=f"history_messages={len(history)}; model={cfg.get('model')}",
         status="running",
     )
-    result = client.chat(messages, temperature=0.2)
+    try:
+        result = client.chat(messages, temperature=0.2)
+        llm_status = "success"
+    except Exception as exc:
+        result = {
+            "content": _llm_fallback_message(),
+            "provider": "fallback_template",
+            "model": "deterministic-safe-fallback",
+        }
+        llm_status = "fallback"
+        record_agent_trace_event(
+            session_id=session_id,
+            message_id=user_message["message_id"],
+            event_type="fallback",
+            stage="llm_chat",
+            title="语言模型降级",
+            summary=f"{type(exc).__name__}；已使用不含工艺参数的安全模板。",
+            skill=selected_skill,
+            tool="llm_adapter",
+            status="completed",
+        )
     assistant_content = result.get("content") or ""
     save_message(
         session_id,
@@ -247,7 +279,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     audit_trace.append(
         {
             "step": "llm_chat",
-            "status": "success",
+            "status": llm_status,
             "provider": result.get("provider"),
         }
     )
@@ -395,14 +427,31 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
         yield _agent_trace_event(llm_call_trace)
         chunks: list[str] = []
         done_seen = False
-        for event in client.stream_chat(messages, temperature=0.2):
-            if event.get("type") == "delta":
-                chunks.append(event.get("content", ""))
-                yield event
-            elif event.get("type") == "done":
-                done_seen = True
-            else:
-                yield event
+        stream_failure: Exception | None = None
+        try:
+            for event in client.stream_chat(messages, temperature=0.2):
+                if event.get("type") == "delta":
+                    chunks.append(event.get("content", ""))
+                    yield event
+                elif event.get("type") == "done":
+                    done_seen = True
+                elif event.get("type") == "error":
+                    stream_failure = RuntimeError("LLM stream returned an error event")
+                else:
+                    yield event
+        except Exception as exc:
+            stream_failure = exc
+        if stream_failure is not None and not chunks:
+            fallback_content = _llm_fallback_message()
+            chunks.append(fallback_content)
+            yield {
+                "type": "warning",
+                "event_type": "fallback",
+                "stage": "llm_chat",
+                "status": "completed",
+                "summary": f"{type(stream_failure).__name__}；已使用安全模板。",
+            }
+            yield {"type": "delta", "content": fallback_content}
         assistant_content = "".join(chunks)
         save_message(
             session_id,
@@ -432,6 +481,13 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     except Exception as exc:
         yield {"type": "error", "message": str(exc)}
         yield {"type": "done"}
+
+
+def _llm_fallback_message() -> str:
+    return (
+        "语言模型当前不可用。已保留任务、设备、证据和工作流状态；"
+        "请稍后重试。离线降级不会生成未经验证的工艺参数。"
+    )
 
 
 def _title_from_message(message: str) -> str:

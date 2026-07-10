@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskIntakeOutput",
+  "type": "object",
+  "properties": {
+    "task_type": {"type": "string"},
+    "component": {"type": ["string", "null"]},
+    "material": {"type": ["string", "null"]},
+    "process_candidate": {"type": ["string", "null"]},
+    "known_requirements": {"type": "object"},
+    "missing_slots": {"type": "array", "items": {"type": "string"}},
+    "clarification_questions": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+    "can_continue_to_planning": {"type": "boolean"}
+  },
+  "required": ["task_type", "known_requirements", "missing_slots", "clarification_questions", "can_continue_to_planning"],
+  "additionalProperties": false
+}

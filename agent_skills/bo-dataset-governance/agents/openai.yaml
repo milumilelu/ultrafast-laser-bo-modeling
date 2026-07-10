@@ -1,0 +1,4 @@
+interface:
+  display_name: "BO Dataset Governance"
+  short_description: "Checks BO training sample eligibility"
+  default_prompt: "Use $bo-dataset-governance to decide whether these runs can enter BO training data."

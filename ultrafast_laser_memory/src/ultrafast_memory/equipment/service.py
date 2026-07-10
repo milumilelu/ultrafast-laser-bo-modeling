@@ -274,7 +274,16 @@ def _load_profile(conn, equipment_profile_id: str) -> dict[str, Any] | None:
     for section, table in SECTION_TABLES.items():
         section_row = conn.execute(f"SELECT * FROM {table} WHERE equipment_profile_id = ?", (equipment_profile_id,)).fetchone()
         profile[section] = _section_dict(dict(section_row)) if section_row else {}
-    profile["revision_id"] = latest_revision_id(equipment_profile_id)
+    revision = conn.execute(
+        """
+        SELECT revision_id FROM equipment_config_revision
+        WHERE equipment_profile_id = ?
+        ORDER BY revision_number DESC, changed_at DESC
+        LIMIT 1
+        """,
+        (equipment_profile_id,),
+    ).fetchone()
+    profile["revision_id"] = revision["revision_id"] if revision else None
     return profile
 
 

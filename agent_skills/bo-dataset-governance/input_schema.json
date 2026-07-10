@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BoDatasetGovernanceInput",
+  "type": "object",
+  "properties": {
+    "run": {"type": "object"},
+    "recipe": {"type": "object"},
+    "task": {"type": "object"},
+    "measurements": {"type": "array"},
+    "unit_status": {"type": "object"}
+  },
+  "required": ["run"],
+  "additionalProperties": true
+}

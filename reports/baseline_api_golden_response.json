@@ -1,0 +1,231 @@
+{
+  "head_commit": "cb5094903bb83489bb278f34ae7005973cc21ded",
+  "environment": "isolated temporary database; MockLLM; no external call",
+  "responses": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "request": null,
+      "status_code": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/equipment/schema",
+      "request": null,
+      "status_code": 200,
+      "body": {
+        "schema_version": 2,
+        "required_setup_fields": [
+          "wavelength_nm",
+          "pulse_width_min_fs",
+          "pulse_width_max_fs",
+          "rated_max_power_W",
+          "actual_max_power_W",
+          "frequency_min_kHz",
+          "frequency_max_kHz",
+          "scan_speed_min_mm_s",
+          "scan_speed_max_mm_s",
+          "spot_diameter_um"
+        ],
+        "range_input_format": "min,max"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/llm/test",
+      "request": null,
+      "status_code": 200,
+      "body": {
+        "configured": false,
+        "provider": "mock",
+        "model": "baseline-mock",
+        "api_key_available": false,
+        "external_call_performed": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/chat",
+      "request": {
+        "message": "Phase 0 golden response",
+        "mode": "normal",
+        "use_skills": false,
+        "stream": false
+      },
+      "status_code": 200,
+      "body": {
+        "session_id": "<dynamic>",
+        "assistant_message": "[MockLLM] 已收到：Phase 0 golden response",
+        "selected_skill": null,
+        "route_plan": null,
+        "evidence_gap": null,
+        "knowledge_bootstrap": null,
+        "progress": {
+          "progress_id": "<dynamic>",
+          "session_id": "<dynamic>",
+          "workflow_id": "<dynamic>",
+          "workflow_type": "task_intake",
+          "current_stage": "task_spec_confirmed",
+          "progress_percent": 80.0,
+          "status": "running",
+          "message": "任务关键信息已基本确认。",
+          "completed_steps": [],
+          "pending_steps": [],
+          "missing_slots": [],
+          "updated_at": "<dynamic>"
+        },
+        "thinking_status": [
+          {
+            "trace_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "workflow_id": "<dynamic>",
+            "event_type": "task_parsed",
+            "title": "任务解析",
+            "summary": "尚未识别到足够任务字段。",
+            "visibility": "public",
+            "created_at": "<dynamic>"
+          },
+          {
+            "trace_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "workflow_id": "<dynamic>",
+            "event_type": "slot_check",
+            "title": "缺失字段检查",
+            "summary": "关键字段已基本满足当前阶段要求。",
+            "visibility": "public",
+            "created_at": "<dynamic>"
+          }
+        ],
+        "workflow_state": {
+          "missing_slots": [],
+          "clarification_round": 0,
+          "max_clarification_rounds": 3,
+          "workflow_type": "task_intake",
+          "current_stage": "task_spec_confirmed",
+          "equipment_profile_used": null,
+          "machine_bounds": {},
+          "missing_equipment_fields": [
+            "pulse_width_fs",
+            "laser_power_W",
+            "frequency_kHz",
+            "scan_speed_mm_s",
+            "spot_diameter_um"
+          ]
+        },
+        "execution_trace": [
+          {
+            "event_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "event_type": "tool_result",
+            "stage": "llm_chat",
+            "title": "语言模型返回",
+            "summary": "已生成回复文本。",
+            "progress": null,
+            "skill": null,
+            "tool": "llm_adapter",
+            "input_summary": null,
+            "output_summary": "provider=mock; model=mock; chars=37",
+            "status": "completed",
+            "created_at": "<dynamic>"
+          },
+          {
+            "event_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "event_type": "state_update",
+            "stage": "task_parsed",
+            "title": "任务解析",
+            "summary": "尚未识别到足够任务字段。",
+            "progress": null,
+            "skill": "task_intake",
+            "tool": null,
+            "input_summary": null,
+            "output_summary": null,
+            "status": "completed",
+            "created_at": "<dynamic>"
+          },
+          {
+            "event_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "event_type": "state_update",
+            "stage": "slot_check",
+            "title": "缺失字段检查",
+            "summary": "关键字段已基本满足当前阶段要求。",
+            "progress": null,
+            "skill": "task_intake",
+            "tool": null,
+            "input_summary": null,
+            "output_summary": null,
+            "status": "completed",
+            "created_at": "<dynamic>"
+          },
+          {
+            "event_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "event_type": "workflow_start",
+            "stage": "task_spec_confirmed",
+            "title": "工作流启动",
+            "summary": "进入 task_intake 工作流。",
+            "progress": 80,
+            "skill": "task_intake",
+            "tool": null,
+            "input_summary": null,
+            "output_summary": null,
+            "status": "running",
+            "created_at": "<dynamic>"
+          },
+          {
+            "event_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "event_type": "workflow_progress",
+            "stage": "task_spec_confirmed",
+            "title": "任务进度",
+            "summary": "任务关键信息已基本确认。",
+            "progress": 80,
+            "skill": "task_intake",
+            "tool": null,
+            "input_summary": null,
+            "output_summary": null,
+            "status": "running",
+            "created_at": "<dynamic>"
+          },
+          {
+            "event_id": "<dynamic>",
+            "session_id": "<dynamic>",
+            "message_id": "<dynamic>",
+            "event_type": "tool_call",
+            "stage": "llm_chat",
+            "title": "调用语言模型",
+            "summary": "正在生成面向用户的回复。",
+            "progress": null,
+            "skill": null,
+            "tool": "llm_adapter",
+            "input_summary": "history_messages=1; model=baseline-mock",
+            "output_summary": null,
+            "status": "running",
+            "created_at": "<dynamic>"
+          }
+        ],
+        "tool_calls": [],
+        "audit_trace": [
+          {
+            "step": "llm_chat",
+            "status": "success",
+            "provider": "mock"
+          }
+        ],
+        "rag_evidence": null,
+        "citations": []
+      }
+    }
+  ]
+}

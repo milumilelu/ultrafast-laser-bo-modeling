@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProcessFileIngestionInput",
+  "type": "object",
+  "properties": {
+    "paths": {"type": "array", "items": {"type": "string"}},
+    "watch_directory": {"type": ["string", "null"]},
+    "parser_hints": {"type": "object"},
+    "database_url": {"type": ["string", "null"]}
+  },
+  "anyOf": [
+    {"required": ["paths"]},
+    {"required": ["watch_directory"]}
+  ],
+  "additionalProperties": true
+}

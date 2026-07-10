@@ -1,0 +1,2400 @@
+{
+  "generated_at": "2026-07-10T13:57:12.671962+00:00",
+  "repository_root": "<REPOSITORY_ROOT>",
+  "git": {
+    "remotes": [
+      {
+        "name": "origin",
+        "url": "https://github.com/milumilelu/ultrafast-laser-bo-modeling.git",
+        "direction": "fetch"
+      },
+      {
+        "name": "origin",
+        "url": "https://github.com/milumilelu/ultrafast-laser-bo-modeling.git",
+        "direction": "push"
+      }
+    ],
+    "current_branch": "main",
+    "head_commit": "cb5094903bb83489bb278f34ae7005973cc21ded",
+    "head_summary": "cb50949 Add auditable agent workflows and literature RAG",
+    "local_branches": [
+      "main|cb5094903bb83489bb278f34ae7005973cc21ded|origin/main"
+    ],
+    "remote_branches": [
+      "origin|cb5094903bb83489bb278f34ae7005973cc21ded",
+      "origin/main|cb5094903bb83489bb278f34ae7005973cc21ded"
+    ],
+    "tags": [
+      "pre-agent-refactor"
+    ],
+    "working_tree": {
+      "modified": [],
+      "added": [],
+      "deleted": [],
+      "renamed": [],
+      "untracked": [
+        "SOFTWARE_USAGE_CN.md",
+        "agent_skills/README.md",
+        "agent_skills/bo-dataset-governance/SKILL.md",
+        "agent_skills/bo-dataset-governance/agents/openai.yaml",
+        "agent_skills/bo-dataset-governance/examples.md",
+        "agent_skills/bo-dataset-governance/input_schema.json",
+        "agent_skills/bo-dataset-governance/output_schema.json",
+        "agent_skills/bo-recommendation/SKILL.md",
+        "agent_skills/bo-recommendation/agents/openai.yaml",
+        "agent_skills/bo-recommendation/examples.md",
+        "agent_skills/bo-recommendation/input_schema.json",
+        "agent_skills/bo-recommendation/output_schema.json",
+        "agent_skills/crl-task-planning/SKILL.md",
+        "agent_skills/crl-task-planning/agents/openai.yaml",
+        "agent_skills/crl-task-planning/examples.md",
+        "agent_skills/crl-task-planning/input_schema.json",
+        "agent_skills/crl-task-planning/output_schema.json",
+        "agent_skills/experience-memory-update/SKILL.md",
+        "agent_skills/experience-memory-update/agents/openai.yaml",
+        "agent_skills/experience-memory-update/examples.md",
+        "agent_skills/experience-memory-update/input_schema.json",
+        "agent_skills/experience-memory-update/output_schema.json",
+        "agent_skills/process-file-ingestion/SKILL.md",
+        "agent_skills/process-file-ingestion/agents/openai.yaml",
+        "agent_skills/process-file-ingestion/examples.md",
+        "agent_skills/process-file-ingestion/input_schema.json",
+        "agent_skills/process-file-ingestion/output_schema.json",
+        "agent_skills/rag-literature-retrieval/SKILL.md",
+        "agent_skills/rag-literature-retrieval/agents/openai.yaml",
+        "agent_skills/rag-literature-retrieval/examples.md",
+        "agent_skills/rag-literature-retrieval/input_schema.json",
+        "agent_skills/rag-literature-retrieval/output_schema.json",
+        "agent_skills/report-generation/SKILL.md",
+        "agent_skills/report-generation/agents/openai.yaml",
+        "agent_skills/report-generation/examples.md",
+        "agent_skills/report-generation/input_schema.json",
+        "agent_skills/report-generation/output_schema.json",
+        "agent_skills/skill-router/SKILL.md",
+        "agent_skills/skill-router/agents/openai.yaml",
+        "agent_skills/skill-router/examples.md",
+        "agent_skills/skill-router/input_schema.json",
+        "agent_skills/skill-router/output_schema.json",
+        "agent_skills/skill-router/routing_rules.json",
+        "agent_skills/task-intake/SKILL.md",
+        "agent_skills/task-intake/agents/openai.yaml",
+        "agent_skills/task-intake/examples.md",
+        "agent_skills/task-intake/input_schema.json",
+        "agent_skills/task-intake/output_schema.json",
+        "codex_master_task_ultrafast_agent_refactor_trial_review_trace_skills.md",
+        "docs/architecture/current_git_state.md",
+        "docs/architecture/current_state.md",
+        "docs/architecture/dependency_graph.md",
+        "docs/architecture/implementation_status_matrix.md",
+        "docs/architecture/migration_map.md",
+        "docs/architecture/phase0_risk_register.md",
+        "outputs/tasks/AlSiC_20260630_001_task_state.json",
+        "outputs/tasks/AlSiC_20260630_002_task_state.json",
+        "outputs/tasks/AlSiC_20260630_003_task_state.json",
+        "outputs/tasks/AlSiC_20260630_004_task_state.json",
+        "reports/baseline_api_golden_response.json",
+        "reports/baseline_chat_replay_fixture.json",
+        "reports/baseline_cli_outputs.txt",
+        "reports/baseline_performance.json",
+        "reports/baseline_performance.md",
+        "reports/baseline_tests.txt",
+        "reports/data_inventory.json",
+        "reports/repository_inventory.json",
+        "scripts/phase0_baseline.py",
+        "scripts/phase0_inventory.py",
+        "scripts/phase0_performance.py",
+        "ultrafast_laser_agent_system_overview.md",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_chat_agent_loop.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_knowledge_bootstrap_review.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_knowledge_bootstrap_review_progress_equipment_updated.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_knowledge_bootstrap_review_progress_updated.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_knowledge_bootstrap_review_updated.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_streaming_hybrid_router.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/codex_task_ultrafast_laser_memory_with_powershell_tui.md\"",
+        "\"\\344\\273\\273\\345\\212\\241\\346\\226\\271\\346\\241\\210/\\350\\266\\205\\345\\277\\253\\346\\277\\200\\345\\205\\211\\346\\231\\272\\350\\203\\275\\344\\275\\223 Skill \\350\\256\\276\\350\\256\\241\\346\\226\\271\\346\\241\\210.md\"",
+        "\"\\345\\212\\237\\350\\203\\275\\345\\233\\276.png\"",
+        "\"\\346\\212\\200\\346\\234\\257\\350\\267\\257\\347\\272\\277\\350\\257\\264\\346\\230\\216.png\"",
+        "\"\\346\\250\\241\\345\\236\\213\\350\\257\\264\\346\\230\\216.png\"",
+        "\"\\347\\263\\273\\347\\273\\237\\346\\236\\266\\346\\236\\204.png\"",
+        "\"\\350\\264\\235\\345\\217\\266\\346\\226\\257\\344\\274\\230\\345\\214\\226.png\""
+      ],
+      "other": []
+    },
+    "ignored_key_paths": [
+      {
+        "path": "ultrafast_laser_memory/data",
+        "exists": true,
+        "ignored": false
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索",
+        "exists": true,
+        "ignored": false
+      },
+      {
+        "path": "ultrafast_laser_memory/configs/llm.local.json",
+        "exists": true,
+        "ignored": true
+      },
+      {
+        "path": "ultrafast_laser_memory/configs/secrets",
+        "exists": true,
+        "ignored": true
+      },
+      {
+        "path": "outputs/run_log.txt",
+        "exists": true,
+        "ignored": true
+      },
+      {
+        "path": ".pytest_cache",
+        "exists": true,
+        "ignored": true
+      },
+      {
+        "path": "ultrafast_laser_memory/.pytest_cache",
+        "exists": true,
+        "ignored": true
+      }
+    ]
+  },
+  "project_roots": [
+    {
+      "path": ".",
+      "kind": "legacy_bo_python_project",
+      "evidence": [
+        "main.py",
+        "requirements.txt",
+        "src/",
+        "tests/"
+      ],
+      "status": "implemented"
+    },
+    {
+      "path": "ultrafast_laser_memory",
+      "kind": "packaged_agent_memory_project",
+      "evidence": [
+        "pyproject.toml",
+        "src/ultrafast_memory/",
+        "tests/"
+      ],
+      "status": "implemented"
+    }
+  ],
+  "multiple_project_roots": true,
+  "code_inventory": {
+    "python_files": [
+      {
+        "path": "main.py",
+        "status": "implemented",
+        "bytes": 12993
+      },
+      {
+        "path": "scripts/phase0_baseline.py",
+        "status": "implemented",
+        "bytes": 12792
+      },
+      {
+        "path": "scripts/phase0_inventory.py",
+        "status": "implemented",
+        "bytes": 21517
+      },
+      {
+        "path": "scripts/phase0_performance.py",
+        "status": "implemented",
+        "bytes": 11518
+      },
+      {
+        "path": "src/__init__.py",
+        "status": "implemented",
+        "bytes": 48
+      },
+      {
+        "path": "src/acquisition.py",
+        "status": "implemented",
+        "bytes": 15974
+      },
+      {
+        "path": "src/bayes_opt.py",
+        "status": "implemented",
+        "bytes": 14268
+      },
+      {
+        "path": "src/evaluation.py",
+        "status": "implemented",
+        "bytes": 815
+      },
+      {
+        "path": "src/features.py",
+        "status": "implemented",
+        "bytes": 3774
+      },
+      {
+        "path": "src/importance.py",
+        "status": "implemented",
+        "bytes": 5550
+      },
+      {
+        "path": "src/interactive_bo.py",
+        "status": "implemented",
+        "bytes": 38873
+      },
+      {
+        "path": "src/interface.py",
+        "status": "implemented",
+        "bytes": 2549
+      },
+      {
+        "path": "src/io_utils.py",
+        "status": "implemented",
+        "bytes": 3164
+      },
+      {
+        "path": "src/models.py",
+        "status": "implemented",
+        "bytes": 7826
+      },
+      {
+        "path": "src/objectives.py",
+        "status": "implemented",
+        "bytes": 1519
+      },
+      {
+        "path": "src/plotting.py",
+        "status": "implemented",
+        "bytes": 5699
+      },
+      {
+        "path": "src/preprocessing.py",
+        "status": "implemented",
+        "bytes": 10609
+      },
+      {
+        "path": "src/process_registry.py",
+        "status": "implemented",
+        "bytes": 1405
+      },
+      {
+        "path": "src/recommendation_rules.py",
+        "status": "implemented",
+        "bytes": 7606
+      },
+      {
+        "path": "src/report.py",
+        "status": "implemented",
+        "bytes": 4953
+      },
+      {
+        "path": "src/schema.py",
+        "status": "implemented",
+        "bytes": 4493
+      },
+      {
+        "path": "src/task_store.py",
+        "status": "implemented",
+        "bytes": 10678
+      },
+      {
+        "path": "src/ui_app.py",
+        "status": "implemented",
+        "bytes": 19199
+      },
+      {
+        "path": "tests/conftest.py",
+        "status": "implemented",
+        "bytes": 181
+      },
+      {
+        "path": "tests/test_interactive_bo.py",
+        "status": "implemented",
+        "bytes": 11630
+      },
+      {
+        "path": "tests/test_multi_process_cutting.py",
+        "status": "implemented",
+        "bytes": 8312
+      },
+      {
+        "path": "tests/test_pipeline_basics.py",
+        "status": "implemented",
+        "bytes": 4991
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/__init__.py",
+        "status": "implemented",
+        "bytes": 22
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/agent_runtime/__init__.py",
+        "status": "implemented",
+        "bytes": 38
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/agent_runtime/trace_collector.py",
+        "status": "implemented",
+        "bytes": 4575
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/app/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented",
+        "bytes": 16029
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented",
+        "bytes": 5430
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/app/launcher.py",
+        "status": "implemented",
+        "bytes": 2191
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/bo/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/bo/bo_engine_adapter.py",
+        "status": "implemented",
+        "bytes": 254
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/bo/dataset_builder.py",
+        "status": "implemented",
+        "bytes": 4441
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/prompt_builder.py",
+        "status": "implemented",
+        "bytes": 4475
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/rag_literature_retrieval.py",
+        "status": "implemented",
+        "bytes": 1535
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/debug_commands.py",
+        "status": "implemented",
+        "bytes": 1680
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/hybrid_router.py",
+        "status": "implemented",
+        "bytes": 3635
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/llm_router.py",
+        "status": "implemented",
+        "bytes": 2202
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/manual_override.py",
+        "status": "implemented",
+        "bytes": 1626
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/rule_router.py",
+        "status": "implemented",
+        "bytes": 8693
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/router/schemas.py",
+        "status": "implemented",
+        "bytes": 1763
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/schemas.py",
+        "status": "implemented",
+        "bytes": 1394
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/service.py",
+        "status": "implemented",
+        "bytes": 39399
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/session_state.py",
+        "status": "implemented",
+        "bytes": 7290
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/session_store.py",
+        "status": "implemented",
+        "bytes": 5429
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/skill_router.py",
+        "status": "implemented",
+        "bytes": 430
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/workflow_status.py",
+        "status": "implemented",
+        "bytes": 16304
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/config.py",
+        "status": "implemented",
+        "bytes": 1098
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/file_type.py",
+        "status": "implemented",
+        "bytes": 585
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/hashing.py",
+        "status": "implemented",
+        "bytes": 323
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/ids.py",
+        "status": "implemented",
+        "bytes": 319
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/llm_config.py",
+        "status": "implemented",
+        "bytes": 2739
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/core/time_utils.py",
+        "status": "implemented",
+        "bytes": 177
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/db/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/db/base.py",
+        "status": "implemented",
+        "bytes": 119
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+        "status": "implemented",
+        "bytes": 16483
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+        "status": "implemented",
+        "bytes": 29715
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/db/session.py",
+        "status": "implemented",
+        "bytes": 778
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/__init__.py",
+        "status": "implemented",
+        "bytes": 55
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/bounds.py",
+        "status": "implemented",
+        "bytes": 4832
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/models.py",
+        "status": "implemented",
+        "bytes": 408
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/schemas.py",
+        "status": "implemented",
+        "bytes": 1585
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/service.py",
+        "status": "implemented",
+        "bytes": 13139
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/validation.py",
+        "status": "implemented",
+        "bytes": 5312
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/ingestion/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/ingestion/archive.py",
+        "status": "implemented",
+        "bytes": 1771
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/ingestion/pipeline.py",
+        "status": "implemented",
+        "bytes": 4188
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/ingestion/scanner.py",
+        "status": "implemented",
+        "bytes": 369
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/ingestion/watcher.py",
+        "status": "stub",
+        "bytes": 174
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge/experience_extractor.py",
+        "status": "stub",
+        "bytes": 191
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge/review_queue.py",
+        "status": "implemented",
+        "bytes": 1079
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge/rule_promotion.py",
+        "status": "stub",
+        "bytes": 197
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/__init__.py",
+        "status": "implemented",
+        "bytes": 57
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/auto_precheck.py",
+        "status": "implemented",
+        "bytes": 2681
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/candidate_builder.py",
+        "status": "implemented",
+        "bytes": 4021
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/claim_extractor.py",
+        "status": "implemented",
+        "bytes": 1731
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/evidence_gap_detector.py",
+        "status": "implemented",
+        "bytes": 2679
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/query_generator.py",
+        "status": "implemented",
+        "bytes": 1256
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/rag_ingestion.py",
+        "status": "implemented",
+        "bytes": 106
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/schemas.py",
+        "status": "implemented",
+        "bytes": 980
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/service.py",
+        "status": "implemented",
+        "bytes": 3299
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/source_registry.py",
+        "status": "implemented",
+        "bytes": 2010
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/web_search_client.py",
+        "status": "stub",
+        "bytes": 2390
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/__init__.py",
+        "status": "implemented",
+        "bytes": 53
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/conflict_detector.py",
+        "status": "implemented",
+        "bytes": 2821
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/review_actions.py",
+        "status": "implemented",
+        "bytes": 8692
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/review_policy.py",
+        "status": "implemented",
+        "bytes": 621
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/review_queue.py",
+        "status": "implemented",
+        "bytes": 4791
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/schemas.py",
+        "status": "implemented",
+        "bytes": 291
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/service.py",
+        "status": "implemented",
+        "bytes": 730
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/__init__.py",
+        "status": "implemented",
+        "bytes": 325
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/canonicalizer.py",
+        "status": "implemented",
+        "bytes": 1669
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/chunk_builder.py",
+        "status": "implemented",
+        "bytes": 5808
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/deduplicator.py",
+        "status": "implemented",
+        "bytes": 2781
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/inventory.py",
+        "status": "implemented",
+        "bytes": 3377
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/quality.py",
+        "status": "implemented",
+        "bytes": 5001
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/raw_pdf_loader.py",
+        "status": "implemented",
+        "bytes": 7186
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/schemas.py",
+        "status": "implemented",
+        "bytes": 4446
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/section_parser.py",
+        "status": "implemented",
+        "bytes": 3019
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/service.py",
+        "status": "implemented",
+        "bytes": 26684
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/source_classifier.py",
+        "status": "implemented",
+        "bytes": 1341
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/source_registry.py",
+        "status": "implemented",
+        "bytes": 1470
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/structured_loader.py",
+        "status": "implemented",
+        "bytes": 3045
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/llm/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/llm/anthropic.py",
+        "status": "stub",
+        "bytes": 309
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/llm/base.py",
+        "status": "implemented",
+        "bytes": 530
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/llm/factory.py",
+        "status": "implemented",
+        "bytes": 776
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/llm/mock.py",
+        "status": "implemented",
+        "bytes": 1089
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/llm/openai_compatible.py",
+        "status": "implemented",
+        "bytes": 4601
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/normalization/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/normalization/units.py",
+        "status": "implemented",
+        "bytes": 1873
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/parsers/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/parsers/base.py",
+        "status": "implemented",
+        "bytes": 470
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/parsers/measurement_csv_parser.py",
+        "status": "implemented",
+        "bytes": 1736
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/parsers/operator_note_parser.py",
+        "status": "implemented",
+        "bytes": 2268
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/parsers/recipe_json_parser.py",
+        "status": "implemented",
+        "bytes": 2601
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/parsers/simple_log_parser.py",
+        "status": "implemented",
+        "bytes": 1858
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/__init__.py",
+        "status": "implemented",
+        "bytes": 140
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/citation_builder.py",
+        "status": "implemented",
+        "bytes": 946
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/document_builder.py",
+        "status": "implemented",
+        "bytes": 2392
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/embedding.py",
+        "status": "stub",
+        "bytes": 1922
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/evidence_pack.py",
+        "status": "implemented",
+        "bytes": 3440
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/hybrid_retriever.py",
+        "status": "implemented",
+        "bytes": 2554
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/index_service.py",
+        "status": "implemented",
+        "bytes": 5992
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/index_stub.py",
+        "status": "stub",
+        "bytes": 1277
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/lexical_index.py",
+        "status": "implemented",
+        "bytes": 3787
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/metadata_filter.py",
+        "status": "implemented",
+        "bytes": 2583
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/query_service.py",
+        "status": "implemented",
+        "bytes": 3223
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/reranker.py",
+        "status": "implemented",
+        "bytes": 1342
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/schemas.py",
+        "status": "implemented",
+        "bytes": 1153
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/vector_store.py",
+        "status": "implemented",
+        "bytes": 4167
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/artifact.py",
+        "status": "implemented",
+        "bytes": 158
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/bo.py",
+        "status": "implemented",
+        "bytes": 174
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/experience.py",
+        "status": "implemented",
+        "bytes": 176
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/measurement.py",
+        "status": "implemented",
+        "bytes": 195
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/recipe.py",
+        "status": "implemented",
+        "bytes": 150
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/run.py",
+        "status": "implemented",
+        "bytes": 147
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/schemas/task.py",
+        "status": "implemented",
+        "bytes": 147
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/validation/__init__.py",
+        "status": "implemented",
+        "bytes": 1
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/validation/bo_eligibility.py",
+        "status": "implemented",
+        "bytes": 1389
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/validation/quality_checks.py",
+        "status": "implemented",
+        "bytes": 281
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/conftest.py",
+        "status": "implemented",
+        "bytes": 2851
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_agent_trace.py",
+        "status": "implemented",
+        "bytes": 3154
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_auto_precheck.py",
+        "status": "implemented",
+        "bytes": 1652
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_bo_machine_bounds.py",
+        "status": "implemented",
+        "bytes": 2392
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_candidate_builder.py",
+        "status": "implemented",
+        "bytes": 1282
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_api.py",
+        "status": "implemented",
+        "bytes": 1963
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_knowledge_bootstrap_integration.py",
+        "status": "implemented",
+        "bytes": 2180
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_rag_integration.py",
+        "status": "implemented",
+        "bytes": 1104
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_route_plan.py",
+        "status": "implemented",
+        "bytes": 960
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_service.py",
+        "status": "implemented",
+        "bytes": 1361
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_stream_progress.py",
+        "status": "implemented",
+        "bytes": 894
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chunk_builder.py",
+        "status": "implemented",
+        "bytes": 751
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_equipment_api.py",
+        "status": "implemented",
+        "bytes": 2510
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_equipment_profile.py",
+        "status": "implemented",
+        "bytes": 3674
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_evidence_gap_detector.py",
+        "status": "implemented",
+        "bytes": 2376
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_evidence_pack.py",
+        "status": "implemented",
+        "bytes": 753
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_file_type.py",
+        "status": "implemented",
+        "bytes": 497
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_hashing.py",
+        "status": "implemented",
+        "bytes": 385
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_hybrid_retriever.py",
+        "status": "implemented",
+        "bytes": 885
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_knowledge_api.py",
+        "status": "implemented",
+        "bytes": 1763
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_knowledge_bootstrap.py",
+        "status": "implemented",
+        "bytes": 1258
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_knowledge_review.py",
+        "status": "implemented",
+        "bytes": 3308
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_literature_dedup.py",
+        "status": "implemented",
+        "bytes": 727
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_literature_inventory.py",
+        "status": "implemented",
+        "bytes": 552
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_llm_config.py",
+        "status": "implemented",
+        "bytes": 2633
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_llm_factory.py",
+        "status": "implemented",
+        "bytes": 1088
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_machine_bounds.py",
+        "status": "implemented",
+        "bytes": 3423
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_metadata_filter.py",
+        "status": "implemented",
+        "bytes": 613
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_parsers.py",
+        "status": "implemented",
+        "bytes": 1162
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_pipeline.py",
+        "status": "implemented",
+        "bytes": 1683
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_powershell_progress_contract.py",
+        "status": "implemented",
+        "bytes": 1738
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_prompt_equipment_context.py",
+        "status": "implemented",
+        "bytes": 1241
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_public_thinking_status.py",
+        "status": "implemented",
+        "bytes": 2267
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_query_generator.py",
+        "status": "implemented",
+        "bytes": 648
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_rag_api.py",
+        "status": "implemented",
+        "bytes": 1029
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_rag_index_service.py",
+        "status": "implemented",
+        "bytes": 698
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_rag_ingestion.py",
+        "status": "implemented",
+        "bytes": 1135
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_raw_pdf_loader.py",
+        "status": "implemented",
+        "bytes": 663
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_review_session_link.py",
+        "status": "implemented",
+        "bytes": 1502
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_route_plan_knowledge_bootstrap.py",
+        "status": "implemented",
+        "bytes": 1176
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_router_hybrid.py",
+        "status": "implemented",
+        "bytes": 862
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_router_manual_override.py",
+        "status": "implemented",
+        "bytes": 1105
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_router_session_state.py",
+        "status": "implemented",
+        "bytes": 909
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_skill_router.py",
+        "status": "implemented",
+        "bytes": 671
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_source_classifier.py",
+        "status": "implemented",
+        "bytes": 484
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_stream_ndjson.py",
+        "status": "implemented",
+        "bytes": 1525
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_streaming_mock_llm.py",
+        "status": "implemented",
+        "bytes": 400
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_structured_loader.py",
+        "status": "implemented",
+        "bytes": 476
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_task_intake_equipment_memory.py",
+        "status": "implemented",
+        "bytes": 2846
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_units.py",
+        "status": "implemented",
+        "bytes": 417
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_workflow_progress.py",
+        "status": "implemented",
+        "bytes": 2044
+      },
+      {
+        "path": "ultrafast_laser_memory/超快智能体文献检索/generate_literature_deliverables_updated.py",
+        "status": "implemented",
+        "bytes": 45059
+      },
+      {
+        "path": "参数辨识/single_rectangle_groove_metrics_v2.py",
+        "status": "implemented",
+        "bytes": 43572
+      }
+    ],
+    "python_file_count": 203,
+    "entrypoints": [
+      {
+        "type": "python_main",
+        "path": "main.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "scripts/phase0_baseline.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "scripts/phase0_inventory.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "scripts/phase0_performance.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "src/ui_app.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/app/launcher.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "ultrafast_laser_memory/超快智能体文献检索/generate_literature_deliverables_updated.py",
+        "status": "implemented"
+      },
+      {
+        "type": "python_main",
+        "path": "参数辨识/single_rectangle_groove_metrics_v2.py",
+        "status": "implemented"
+      },
+      {
+        "type": "project_script",
+        "name": "ultrafast",
+        "target": "ultrafast_memory.app.launcher:main",
+        "source": "ultrafast_laser_memory/pyproject.toml",
+        "status": "implemented"
+      }
+    ],
+    "api_endpoints": [
+      {
+        "method": "GET",
+        "path": "/artifacts",
+        "function": "artifacts",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/bo/export",
+        "function": "bo_export",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/chat",
+        "function": "chat",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/chat/sessions",
+        "function": "create_chat_session",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/chat/sessions/{session_id}/agent-trace",
+        "function": "chat_session_agent_trace",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/chat/sessions/{session_id}/knowledge-bootstrap",
+        "function": "chat_session_knowledge_bootstrap",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/chat/sessions/{session_id}/knowledge-bootstrap/run",
+        "function": "chat_session_knowledge_bootstrap_run",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/chat/sessions/{session_id}/messages",
+        "function": "chat_session_messages",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/chat/sessions/{session_id}/progress",
+        "function": "chat_session_progress",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/chat/sessions/{session_id}/thinking-status",
+        "function": "chat_session_thinking_status",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/chat/stream_ndjson",
+        "function": "chat_stream_ndjson",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/equipment/active",
+        "function": "equipment_active",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/equipment/active/machine-bounds",
+        "function": "equipment_active_machine_bounds",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/equipment/profiles",
+        "function": "equipment_profiles",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/equipment/profiles",
+        "function": "equipment_profile_create",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "PATCH",
+        "path": "/equipment/profiles/{equipment_profile_id}",
+        "function": "equipment_profile_update",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/equipment/profiles/{equipment_profile_id}/activate",
+        "function": "equipment_profile_activate",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/equipment/schema",
+        "function": "equipment_schema",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/experience/candidates",
+        "function": "candidates",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/experience/candidates/{candidate_id}/review",
+        "function": "review_candidate",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "function": "health",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/ingest/scan",
+        "function": "ingest_scan",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/knowledge/bootstrap-web",
+        "function": "knowledge_bootstrap_web",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/knowledge/candidates",
+        "function": "knowledge_candidates",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/knowledge/evidence-gap",
+        "function": "knowledge_evidence_gap",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/knowledge/review/tasks",
+        "function": "knowledge_review_tasks",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/knowledge/review/tasks/{review_id}",
+        "function": "knowledge_review_task",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/knowledge/review/tasks/{review_id}/action",
+        "function": "knowledge_review_action",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/literature/ingest",
+        "function": "literature_ingest",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/literature/ingestion-jobs/{job_id}",
+        "function": "literature_ingestion_job",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/literature/inventory",
+        "function": "literature_inventory",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/literature/papers",
+        "function": "literature_papers",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/literature/papers/{paper_id}",
+        "function": "literature_paper",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/literature/papers/{paper_id}/chunks",
+        "function": "literature_paper_chunks",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/llm/config",
+        "function": "llm_config",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/llm/test",
+        "function": "llm_test",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/rag/documents",
+        "function": "rag_documents",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/rag/index",
+        "function": "rag_index",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/rag/indexes",
+        "function": "rag_create_index",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/rag/indexes/{index_id}",
+        "function": "rag_index_status",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/rag/indexes/{index_id}/index",
+        "function": "rag_run_index",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/rag/query",
+        "function": "rag_query_endpoint",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/runs",
+        "function": "runs",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/api.py",
+        "status": "implemented"
+      }
+    ],
+    "cli_commands": [
+      {
+        "group": "app",
+        "command": "init-db",
+        "function": "init_db",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "app",
+        "command": "scan",
+        "function": "scan",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "app",
+        "command": "list-artifacts",
+        "function": "list_artifacts",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "app",
+        "command": "list-runs",
+        "function": "list_runs",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "app",
+        "command": "list-candidates",
+        "function": "cli_list_candidates",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "app",
+        "command": "review-candidate",
+        "function": "review_candidate",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "app",
+        "command": "export-bo",
+        "function": "export_bo",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "literature_app",
+        "command": "inventory",
+        "function": "literature_inventory",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "literature_app",
+        "command": "ingest",
+        "function": "literature_ingest",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "literature_app",
+        "command": "list",
+        "function": "literature_list",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "literature_app",
+        "command": "show",
+        "function": "literature_show",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "rag_app",
+        "command": "create-index",
+        "function": "rag_create_index",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "rag_app",
+        "command": "index",
+        "function": "rag_index_chunks",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "rag_app",
+        "command": "status",
+        "function": "rag_status",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      },
+      {
+        "group": "rag_app",
+        "command": "query",
+        "function": "rag_query",
+        "source": "ultrafast_laser_memory/src/ultrafast_memory/app/cli.py",
+        "status": "implemented"
+      }
+    ],
+    "powershell_tui": [
+      {
+        "path": "ultrafast_laser_memory/scripts/powershell/AgentTui.psm1",
+        "functions": [
+          "Clear-AgentLlmConfig",
+          "ConvertFrom-AgentSecureString",
+          "Export-AgentBoDataset",
+          "Format-AgentRestError",
+          "Get-AgentDisplayMode",
+          "Get-AgentMachineBounds",
+          "Get-AgentProviderInfo",
+          "Get-AgentSecret",
+          "Get-AgentStreamMode",
+          "Initialize-AgentDatabase",
+          "Initialize-AgentDeepSeekConfig",
+          "Initialize-AgentLocalBootstrap",
+          "Invoke-AgentKnowledgeBootstrapMenu",
+          "Invoke-AgentReviewQueueMenu",
+          "Invoke-AgentScan",
+          "Load-AgentLlmConfig",
+          "New-AgentChatSession",
+          "Read-AgentApiKey",
+          "Read-AgentNullableDouble",
+          "Read-AgentNullableDoubleDefault",
+          "Read-AgentNullableRange",
+          "Read-AgentNullableRangeDefault",
+          "Remove-AgentSecret",
+          "Save-AgentLlmConfig",
+          "Save-AgentSecret",
+          "Select-ActiveEquipmentProfile",
+          "Send-AgentChatMessage",
+          "Send-AgentChatStream",
+          "Set-AgentDeepSeekEnvironment",
+          "Set-AgentDisplayMode",
+          "Set-AgentEnvironment",
+          "Set-AgentStreamMode",
+          "Show-ActiveEquipmentProfile",
+          "Show-AgentBanner",
+          "Show-AgentConfig",
+          "Show-AgentMainMenu",
+          "Show-AgentProgressBar",
+          "Show-AgentReviewTaskDetail",
+          "Show-AgentReviewTasks",
+          "Show-AgentThinkingStatus",
+          "Show-AgentTraceEvent",
+          "Show-AgentWorkflowState",
+          "Show-DeepSeekModelMenu",
+          "Show-ModelMenu",
+          "Show-ProviderMenu",
+          "Start-AgentApiServer",
+          "Start-AgentApiServerBackground",
+          "Start-AgentChat",
+          "Start-AgentDeepSeekAutoLaunch",
+          "Start-EquipmentSetupWizard",
+          "Test-AgentApiServer",
+          "Test-AgentBoDatasetExported",
+          "Test-AgentEquipmentApiServer",
+          "Test-AgentExampleDataImported",
+          "Test-AgentPythonEnvironment",
+          "Test-AgentTcpPortAvailable",
+          "Update-ActiveEquipmentProfileWizard",
+          "Update-AgentDatabaseSchemaQuiet",
+          "Use-AgentSavedDeepSeekConfig"
+        ],
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/scripts/setup_and_start_tui.ps1",
+        "functions": [],
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/scripts/start_agent_tui.ps1",
+        "functions": [],
+        "status": "implemented"
+      }
+    ],
+    "skills": [
+      {
+        "name": "bo_dataset_governance",
+        "path": "agent_skills/bo-dataset-governance/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "bo_recommendation",
+        "path": "agent_skills/bo-recommendation/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "crl_task_planning",
+        "path": "agent_skills/crl-task-planning/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "experience_memory_update",
+        "path": "agent_skills/experience-memory-update/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "process_file_ingestion",
+        "path": "agent_skills/process-file-ingestion/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "rag_literature_retrieval",
+        "path": "agent_skills/rag-literature-retrieval/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "report_generation",
+        "path": "agent_skills/report-generation/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "skill_router",
+        "path": "agent_skills/skill-router/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      },
+      {
+        "name": "task_intake",
+        "path": "agent_skills/task-intake/SKILL.md",
+        "tracked": false,
+        "status": "implemented"
+      }
+    ],
+    "runtime_skill_names": [
+      "bo_dataset_governance",
+      "bo_recommendation",
+      "crl_task_planning",
+      "experience_memory_update",
+      "expert_review",
+      "knowledge_bootstrap",
+      "process_file_ingestion",
+      "rag_literature_retrieval",
+      "report_generation",
+      "task_intake"
+    ],
+    "tools": {
+      "formal_registry_status": "not_found",
+      "router_declared_tools": [
+        "evidence_gap_detector",
+        "knowledge_bootstrap"
+      ],
+      "overall_status": "partial"
+    },
+    "services": [
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/chat/service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/equipment/service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_bootstrap/service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/knowledge_review/service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/literature/service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/index_service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/src/ultrafast_memory/rag/query_service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_chat_service.py",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/tests/test_rag_index_service.py",
+        "status": "implemented"
+      }
+    ],
+    "database_models": {
+      "sqlalchemy_classes": [
+        {
+          "name": "RawArtifact",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ProcessTask",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ProcessRecipe",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ProcessRun",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ChatSession",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ChatMessage",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ChatSkillTrace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ChatToolTrace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ChatSessionState",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ChatRouteTrace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ExternalSourceArtifact",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "KnowledgeCandidate",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LiteratureEvidence",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ProcessPrior",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "RagDocument",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "RagIndexJob",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "KnowledgeReviewTask",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "KnowledgeReviewAction",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "KnowledgeConflict",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "WorkflowProgress",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ReasoningStatusTrace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "AgentTraceEvent",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "EquipmentProfile",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LaserSourceConfig",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "OpticalSetupConfig",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "MotionSystemConfig",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "ProcessCapabilityConfig",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "EquipmentConfigRevision",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LiteratureArtifact",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LiteraturePaper",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LiteraturePaperSource",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LiteratureSection",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "LiteratureChunk",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "RagIndex",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "RagIndexEntry",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "RagIngestionJob",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        },
+        {
+          "name": "RagQueryTrace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/models.py",
+          "status": "implemented"
+        }
+      ],
+      "sqlite_tables_declared": [
+        {
+          "name": "agent_trace_event",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "bo_training_sample",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "chat_message",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "chat_route_trace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "chat_session",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "chat_session_state",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "chat_skill_trace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "chat_tool_trace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "equipment_config_revision",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "equipment_profile",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "experience_candidate",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "external_source_artifact",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "knowledge_candidate",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "knowledge_conflict",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "knowledge_review_action",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "knowledge_review_task",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "laser_source_config",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "literature_artifact",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "literature_chunk",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "literature_evidence",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "literature_paper",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "literature_paper_source",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "literature_section",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "measurement_record",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "motion_system_config",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "optical_setup_config",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "process_capability_config",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "process_prior",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "process_recipe",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "process_run",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "process_task",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "rag_document",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "rag_index",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "rag_index_entry",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "rag_index_job",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "rag_ingestion_job",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "rag_query_trace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "raw_artifact",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "reasoning_status_trace",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "validated_rule",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        },
+        {
+          "name": "workflow_progress",
+          "source": "ultrafast_laser_memory/src/ultrafast_memory/db/init_db.py",
+          "status": "implemented"
+        }
+      ],
+      "access_layer_status": "partial"
+    },
+    "migrations": {
+      "status": "implemented",
+      "files": [
+        "docs/architecture/migration_map.md"
+      ],
+      "note": "Current schema is created by init_db.py; no versioned migration framework was found."
+    },
+    "configs": [
+      {
+        "path": ".gitignore",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/bo-dataset-governance/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/bo-recommendation/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/crl-task-planning/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/experience-memory-update/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/process-file-ingestion/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/rag-literature-retrieval/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/report-generation/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/skill-router/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "agent_skills/task-intake/agents/openai.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "config.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "requirements.txt",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/.gitignore",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/configs/default.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/configs/llm.local.json",
+        "status": "local_only_ignored"
+      },
+      {
+        "path": "ultrafast_laser_memory/data/backups/pre-agent-refactor/cb5094903bb8/configs/default.yaml",
+        "status": "implemented"
+      },
+      {
+        "path": "ultrafast_laser_memory/data/backups/pre-agent-refactor/cb5094903bb8/configs/llm.local.json",
+        "status": "local_only_ignored"
+      },
+      {
+        "path": "ultrafast_laser_memory/pyproject.toml",
+        "status": "implemented"
+      }
+    ],
+    "tests": {
+      "files": [
+        "tests/conftest.py",
+        "tests/test_interactive_bo.py",
+        "tests/test_multi_process_cutting.py",
+        "tests/test_pipeline_basics.py",
+        "ultrafast_laser_memory/tests/conftest.py",
+        "ultrafast_laser_memory/tests/test_agent_trace.py",
+        "ultrafast_laser_memory/tests/test_auto_precheck.py",
+        "ultrafast_laser_memory/tests/test_bo_machine_bounds.py",
+        "ultrafast_laser_memory/tests/test_candidate_builder.py",
+        "ultrafast_laser_memory/tests/test_chat_api.py",
+        "ultrafast_laser_memory/tests/test_chat_knowledge_bootstrap_integration.py",
+        "ultrafast_laser_memory/tests/test_chat_rag_integration.py",
+        "ultrafast_laser_memory/tests/test_chat_route_plan.py",
+        "ultrafast_laser_memory/tests/test_chat_service.py",
+        "ultrafast_laser_memory/tests/test_chat_stream_progress.py",
+        "ultrafast_laser_memory/tests/test_chunk_builder.py",
+        "ultrafast_laser_memory/tests/test_equipment_api.py",
+        "ultrafast_laser_memory/tests/test_equipment_profile.py",
+        "ultrafast_laser_memory/tests/test_evidence_gap_detector.py",
+        "ultrafast_laser_memory/tests/test_evidence_pack.py",
+        "ultrafast_laser_memory/tests/test_file_type.py",
+        "ultrafast_laser_memory/tests/test_hashing.py",
+        "ultrafast_laser_memory/tests/test_hybrid_retriever.py",
+        "ultrafast_laser_memory/tests/test_knowledge_api.py",
+        "ultrafast_laser_memory/tests/test_knowledge_bootstrap.py",
+        "ultrafast_laser_memory/tests/test_knowledge_review.py",
+        "ultrafast_laser_memory/tests/test_literature_dedup.py",
+        "ultrafast_laser_memory/tests/test_literature_inventory.py",
+        "ultrafast_laser_memory/tests/test_llm_config.py",
+        "ultrafast_laser_memory/tests/test_llm_factory.py",
+        "ultrafast_laser_memory/tests/test_machine_bounds.py",
+        "ultrafast_laser_memory/tests/test_metadata_filter.py",
+        "ultrafast_laser_memory/tests/test_parsers.py",
+        "ultrafast_laser_memory/tests/test_pipeline.py",
+        "ultrafast_laser_memory/tests/test_powershell_progress_contract.py",
+        "ultrafast_laser_memory/tests/test_prompt_equipment_context.py",
+        "ultrafast_laser_memory/tests/test_public_thinking_status.py",
+        "ultrafast_laser_memory/tests/test_query_generator.py",
+        "ultrafast_laser_memory/tests/test_rag_api.py",
+        "ultrafast_laser_memory/tests/test_rag_index_service.py",
+        "ultrafast_laser_memory/tests/test_rag_ingestion.py",
+        "ultrafast_laser_memory/tests/test_raw_pdf_loader.py",
+        "ultrafast_laser_memory/tests/test_review_session_link.py",
+        "ultrafast_laser_memory/tests/test_route_plan_knowledge_bootstrap.py",
+        "ultrafast_laser_memory/tests/test_router_hybrid.py",
+        "ultrafast_laser_memory/tests/test_router_manual_override.py",
+        "ultrafast_laser_memory/tests/test_router_session_state.py",
+        "ultrafast_laser_memory/tests/test_skill_router.py",
+        "ultrafast_laser_memory/tests/test_source_classifier.py",
+        "ultrafast_laser_memory/tests/test_stream_ndjson.py",
+        "ultrafast_laser_memory/tests/test_streaming_mock_llm.py",
+        "ultrafast_laser_memory/tests/test_structured_loader.py",
+        "ultrafast_laser_memory/tests/test_task_intake_equipment_memory.py",
+        "ultrafast_laser_memory/tests/test_units.py",
+        "ultrafast_laser_memory/tests/test_workflow_progress.py"
+      ],
+      "file_count": 55,
+      "test_function_count": 119,
+      "status": "implemented"
+    }
+  }
+}

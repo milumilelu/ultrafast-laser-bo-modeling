@@ -9,3 +9,19 @@ env/
 .env
 *.log
 outputs/run_log.txt
+
+# Local runtime databases and task artifacts. Existing tracked research fixtures
+# remain tracked; new local data must never be added by broad git commands.
+data/**
+outputs/tasks/**
+*.db
+*.sqlite
+*.sqlite3
+
+# Private configuration and credentials.
+.env.*
+!.env.example
+configs/local.yaml
+configs/llm.local.json
+configs/secrets/
+*.key

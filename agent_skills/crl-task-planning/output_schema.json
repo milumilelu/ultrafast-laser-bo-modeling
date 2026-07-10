@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CrlTaskPlanningOutput",
+  "type": "object",
+  "properties": {
+    "crl_task_spec": {"type": "object"},
+    "optical_consistency_check": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string"},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["status", "notes"]
+    },
+    "manufacturing_risks": {"type": "array", "items": {"type": "string"}},
+    "required_clarifications": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+    "recommended_workflow": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["crl_task_spec", "optical_consistency_check", "manufacturing_risks", "required_clarifications", "recommended_workflow"],
+  "additionalProperties": false
+}

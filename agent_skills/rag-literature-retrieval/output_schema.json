@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RagLiteratureRetrievalOutput",
+  "type": "object",
+  "properties": {
+    "evidence_pack": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {"type": "string"},
+          "source_id": {"type": "string"},
+          "page": {"type": ["integer", "null"]},
+          "usable_for": {"type": "array", "items": {"type": "string"}},
+          "not_usable_for": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"type": "string"}
+        },
+        "required": ["claim", "source_id", "usable_for", "not_usable_for", "confidence"]
+      }
+    },
+    "parameter_priors": {"type": "array"},
+    "risk_mechanisms": {"type": "array"},
+    "evidence_gaps": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["evidence_pack", "parameter_priors", "risk_mechanisms", "evidence_gaps"],
+  "additionalProperties": false
+}

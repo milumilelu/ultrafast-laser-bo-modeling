@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from time import perf_counter
 from typing import Any
 
 from ultrafast_memory.rag.embedding import BaseEmbeddingProvider
@@ -44,10 +45,18 @@ class HybridRetriever:
         rerank_top_k: int = 8,
         max_chunks_per_paper: int = 3,
     ) -> dict[str, Any]:
+        started = perf_counter()
         lexical_pool = lexical_top_k * 5 if filters else lexical_top_k
+        stage = perf_counter()
         lexical = apply_metadata_filters(self.lexical_index.search(query, lexical_pool), filters)[:lexical_top_k]
+        lexical_ms = (perf_counter() - stage) * 1000
+        stage = perf_counter()
         vector = apply_metadata_filters(self.vector_store.query(self.embedding.embed_query(query), vector_top_k, filters), filters)
+        vector_ms = (perf_counter() - stage) * 1000
+        stage = perf_counter()
         fused = reciprocal_rank_fusion([lexical, vector], fusion_top_k)
+        fusion_ms = (perf_counter() - stage) * 1000
+        stage = perf_counter()
         reranked = rerank_hits(fused, filters, purpose, rerank_top_k * 2)
         limited = []
         paper_counts: dict[str, int] = defaultdict(int)
@@ -58,4 +67,16 @@ class HybridRetriever:
             paper_counts[hit["paper_id"]] += 1
             if len(limited) >= rerank_top_k:
                 break
-        return {"lexical_hits": lexical, "vector_hits": vector, "hits": limited}
+        rerank_ms = (perf_counter() - stage) * 1000
+        return {
+            "lexical_hits": lexical,
+            "vector_hits": vector,
+            "hits": limited,
+            "waterfall_ms": {
+                "lexical": round(lexical_ms, 3),
+                "vector": round(vector_ms, 3),
+                "fusion": round(fusion_ms, 3),
+                "rerank_and_limit": round(rerank_ms, 3),
+                "total": round((perf_counter() - started) * 1000, 3),
+            },
+        }

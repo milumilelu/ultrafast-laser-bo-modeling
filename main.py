@@ -12,7 +12,7 @@ from src.bayes_opt import BO_COLUMNS, recommend_bo
 from src.features import add_engineered_features, available_feature_columns
 from src.importance import build_feature_importance, build_response_curves
 from src.io_utils import ensure_directories, load_config, read_table, resolve_input_files, setup_logging
-from src.interactive_bo import (
+from src.bo_compatibility import (
     export_task_logs,
     feedback_json,
     init_task,

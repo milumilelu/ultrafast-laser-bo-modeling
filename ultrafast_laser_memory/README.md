@@ -1,10 +1,41 @@
-# Ultrafast Laser Memory MVP
+# Ultrafast Laser Agent
 
 ## 项目目标
 
-本项目搭建一个可审计的超快激光加工专业知识记忆库与自学习数据闭环 MVP。它把配方、日志、检测 CSV 和操作员备注归档、解析、标准化、校验并写入 SQLite，之后生成经验候选并导出 BO 训练候选数据。
+本项目提供一个可审计、可离线降级的超快激光加工模块化单体：任务理解、设备硬约束、文献 RAG、工艺规划、双模式试切、知识使用审核、真实 BO、执行轨迹和任务报告共享同一正式入口。
 
-边界很明确：本 MVP 不训练大模型，不让 LLM 自动改参数，不自动生成正式工艺规则；LLM 只能作为后续 `experience_candidate` 抽取模块。
+边界很明确：不训练大模型，不让 LLM 审批知识或绕过设备/试切/审核门，不自动生成正式工艺规则，也不控制真实机床。
+
+## 功能状态矩阵
+
+| 功能 | 状态 | 可演示 | 数据 | 限制 |
+|---|---|---:|---|---|
+| 任务、设备与混合 Router | implemented | 是 | SQLite 设备 revision | 仍保留旧 Skill 名兼容 |
+| 文献导入与混合 RAG | implemented | 是 | 本地 8,512 个语料 chunks；Demo 可加 1 个忽略的 fixture | 不做自动 OCR/公式视觉理解 |
+| 真实 BO | implemented | 是 | 旧 BO 数据与受治理训练样本 | `<10` 样本为规则冷启动；文献参数必须过 Gate |
+| Skill 契约与 Domain Pack | implemented | 是 | 45 个校验契约 | 旧别名保留一个兼容周期 |
+| 简化/完整/跳过试切 | implemented | 是 | 版本化 SQLite 表 | 不控制真实设备 |
+| KnowledgeUseGate 与单次聚合审核 | implemented | 是 | append-only 审计 | 单用户显式审核，不是多用户 RBAC |
+| Runtime/NDJSON/性能 waterfall | implemented | 是 | 单调公开事件 | 不公开 hidden reasoning |
+| PowerShell TUI | implemented | 是 | Normal/Research/Debug | 无 Web 管理后台 |
+| Demo Mode / Doctor / 任务报告 | implemented | 是 | 确定性离线 fixture | Demo 测量不是实际机床结果 |
+
+## 唯一正式入口
+
+安装后统一使用：
+
+```powershell
+ultrafast --help
+ultrafast tui
+ultrafast api
+ultrafast doctor
+ultrafast --demo
+ultrafast demo tgv --approve-review
+ultrafast workflow complex_process_task --request request.json
+ultrafast legacy-bo -- --help
+```
+
+无子命令或使用旧 TUI 参数时继续委托原 PowerShell 启动器；根目录 `python main.py ...` 的旧 BO 命令保持兼容。
 
 ## 安装
 
@@ -54,7 +85,7 @@ python -m ultrafast_memory.app.cli export-bo
 python -m uvicorn ultrafast_memory.app.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-主要接口：`/health`、`/ingest/scan`、`/artifacts`、`/runs`、`/experience/candidates`、`/bo/export`、`/llm/config`、`/llm/test`、`/chat/sessions`、`/chat`、`/chat/stream_ndjson`。
+接口已按 health/chat/equipment/literature/rag/knowledge/trial/bo/workflows/reports Router 拆分。启动后访问 `/docs` 查看完整 OpenAPI。
 
 ## 聊天功能
 
@@ -78,7 +109,7 @@ pwsh -ExecutionPolicy Bypass -File scripts/start_agent_tui.ps1
 
 重要：如果在 TUI 中配置了 API Key，必须从同一个 TUI 会话中启动 FastAPI，否则后端进程可能无法继承环境变量。API Key 不会出现在 `/chat`、`/chat/sessions` 或消息历史响应中。
 
-当前 MVP 不真正调用 RAG/BO/tool calling，不支持 Web Chat 前端。
+当前系统会真实调用本地 RAG、工具注册表和 BO application service；无有效样本时明确返回 `rule_based_cold_start`，不会伪装成数据驱动最优值。当前不提供 Web Chat 前端。
 
 API 示例：
 
@@ -106,7 +137,7 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream_ndjson \
   -d '{"message":"我想加工金刚石CRL","use_skills":true,"stream":true}'
 ```
 
-返回 `application/x-ndjson`，事件类型包括 `meta`、`route`、`trace`、`delta`、`warning`、`error`、`done`。`delta` 为模型输出增量；`route` 包含 `primary_skill`、`secondary_skills`、`confidence` 和 `route_source`。
+返回 `application/x-ndjson`。所有事件带单调 `sequence`，公开阶段、状态、Skill/Tool 摘要、耗时、重试和缓存命中；`delta` 为模型输出增量。Normal/Research/Debug 只改变公开详情级别，不暴露隐藏 chain-of-thought。
 
 PowerShell TUI 聊天命令：
 
@@ -313,13 +344,27 @@ BO 默认要求 active equipment profile。没有 active profile 时，系统阻
 
 操作员备注只生成 `experience_candidate`。候选经验是待审核陈述，不是物理事实，也不是正式工艺规则。未经质量校验的数据不会进入 BO 训练样本。
 
-## 当前 MVP 不做什么
+## 当前系统不做什么
 
-不做实时 GUI、完整 RAG、真实 LLM API 调用、真实 BO 仓库集成、自动规则晋升、复杂 PDF 表格解析、多用户权限系统。
+不做真实机床闭环控制、商业 CAD/CAM 替代、自动 OCR、复杂图像/公式视觉理解、自动下载付费论文、自动生成 `validated_rule`、多用户 RBAC 或完整 Web 管理后台。外部 LLM 可配置，但 Demo/Doctor/回放不依赖外部调用。
 
-## 后续扩展
+## 降级与最终性能
 
-已预留 `knowledge/experience_extractor.py`、`rag/index_stub.py`、`bo/bo_engine_adapter.py`。后续可接入 LLM JSON schema extraction、向量索引和 `ultrafast-laser-bo-modeling`。
+- Router/LLM 异常回退到规则路由或不含工艺参数的安全模板；
+- 混合 RAG 异常回退 SQLite FTS，完全失败时返回 `insufficient`；
+- BO 超时返回设备搜索空间和阻塞原因，不伪造推荐；
+- 审核存储异常时高风险知识 fail closed；
+- 数据库只读时 Demo 仅返回不持久化预览，审批和正式加工保持阻塞。
+
+最终离线基准的 P50/P95/P99 与 12 项预算/基线判定见 `../reports/final_performance.json`；当前结果为 `pass`。全量测试、Demo replay 和 Doctor 结果见 `../reports/final_tests.txt`。
+
+## 架构与回滚
+
+- 版本化迁移：`schema_migration`。
+- 重构前备份：`../scripts/backup_before_refactor.ps1`。
+- 显式回滚：`../scripts/rollback_refactor.ps1 -ConfirmRollback`。
+- 离线演示回放：`../scripts/demo_replay.ps1`。
+- 架构、Skill、试切、审核和执行轨迹设计见仓库根目录 `docs/`。
 
 ## PowerShell TUI 启动器
 

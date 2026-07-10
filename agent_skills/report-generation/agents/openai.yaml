@@ -1,0 +1,4 @@
+interface:
+  display_name: "Report Generation"
+  short_description: "Writes evidence-linked process reports"
+  default_prompt: "Use $report-generation to produce an evidence-linked ultrafast laser report."

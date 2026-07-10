@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BoRecommendationOutput",
+  "type": "object",
+  "properties": {
+    "model_status": {"type": "string", "enum": ["rule_based_cold_start", "hybrid_rule_bo", "data_driven_bo", "not_connected", "blocked"]},
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "parameters": {"type": "object"},
+          "predicted_metrics": {"type": "object"},
+          "uncertainty": {"type": "object"},
+          "reason": {"type": "string"}
+        },
+        "required": ["candidate_id", "parameters", "reason"]
+      }
+    },
+    "evidence_trace": {"type": "array"},
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "next_experiment_plan": {"type": "array"}
+  },
+  "required": ["model_status", "recommendations", "evidence_trace", "risks", "next_experiment_plan"],
+  "additionalProperties": false
+}

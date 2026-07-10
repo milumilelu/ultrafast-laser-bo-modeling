@@ -1,0 +1,4 @@
+interface:
+  display_name: "CRL Task Planning"
+  short_description: "Plans diamond CRL manufacturing workflows"
+  default_prompt: "Use $crl-task-planning to plan this diamond CRL manufacturing task."

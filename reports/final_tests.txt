@@ -1,0 +1,25 @@
+Final verification (2026-07-11, Asia/Shanghai)
+
+Agent subproject:
+  command: cd ultrafast_laser_memory && pytest -q
+  result: 150 passed, 9 warnings in 58.08s
+
+Repository root (includes legacy BO and agent suite):
+  command: pytest -q
+  result: 182 passed, 41 warnings in 66.43s
+
+Warnings:
+  32 legacy BO and 9 new BO warnings are scikit-learn ConvergenceWarning
+  messages from deliberately small Gaussian-process test datasets. No test failed.
+
+Offline replay:
+  command: pwsh -ExecutionPolicy Bypass -File scripts/demo_replay.ps1
+  result: exit 0
+  external network/LLM calls: disabled by script (MockLLM)
+
+Doctor:
+  status: healthy
+  readiness: READY FOR DEMO
+
+Performance:
+  reports/final_performance.json acceptance: pass (12/12 checks)

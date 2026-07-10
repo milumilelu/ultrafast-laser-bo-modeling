@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CrlTaskPlanningInput",
+  "type": "object",
+  "properties": {
+    "material": {"type": ["string", "null"]},
+    "curvature_radius_mm": {"type": ["number", "null"]},
+    "thickness_mm": {"type": ["number", "null"]},
+    "aperture_mm": {"type": ["number", "null"]},
+    "parabola_spacing_um": {"type": ["number", "null"]},
+    "Ra_nm_max": {"type": ["number", "null"]},
+    "photon_energy_keV": {"type": ["number", "null"]},
+    "lens_count": {"type": ["integer", "null"]},
+    "focal_length_m": {"type": ["number", "null"]},
+    "task_context": {"type": "object"}
+  },
+  "additionalProperties": true
+}

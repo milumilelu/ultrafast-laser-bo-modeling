@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReportGenerationOutput",
+  "type": "object",
+  "properties": {
+    "task_understanding": {"type": "string"},
+    "known_conditions": {"type": "array"},
+    "missing_conditions": {"type": "array"},
+    "literature_evidence": {"type": "array"},
+    "memory_evidence": {"type": "array"},
+    "model_status": {"type": "string"},
+    "recommendation_summary": {"type": "string"},
+    "risks": {"type": "array"},
+    "execution_checklist": {"type": "array"},
+    "next_feedback_format": {"type": "object"}
+  },
+  "required": ["task_understanding", "known_conditions", "missing_conditions", "model_status", "risks", "execution_checklist"],
+  "additionalProperties": false
+}

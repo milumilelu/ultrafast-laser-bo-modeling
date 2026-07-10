@@ -1,0 +1,4 @@
+interface:
+  display_name: "Process File Ingestion"
+  short_description: "Ingests process files with hash traceability"
+  default_prompt: "Use $process-file-ingestion to archive, parse, and structure these machining files."
