@@ -187,6 +187,121 @@ BASELINE_MIGRATIONS = (
             """CREATE TABLE IF NOT EXISTS public_reasoning_trace (trace_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, stage TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, trace_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(run_id, sequence))""",
         ),
     ),
+    Migration(
+        migration_id="0007_runtime_jobs_evolution",
+        description="Add persistent background jobs and append-only evolution control records",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS background_job (
+                job_id TEXT PRIMARY KEY, job_type TEXT NOT NULL, status TEXT NOT NULL,
+                input_json TEXT NOT NULL, output_json TEXT, progress REAL DEFAULT 0,
+                current_step TEXT, attempt INTEGER DEFAULT 0, max_attempts INTEGER DEFAULT 3,
+                idempotency_key TEXT UNIQUE, timeout_seconds REAL, created_at TEXT NOT NULL,
+                started_at TEXT, finished_at TEXT, heartbeat_at TEXT, error_code TEXT, error_message TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS background_job_event (
+                event_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+                event_type TEXT NOT NULL, message TEXT, progress REAL, payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL, UNIQUE(job_id, sequence)
+            )""",
+            """CREATE TABLE IF NOT EXISTS evolvable_artifact_version (
+                artifact_version_id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, artifact_type TEXT NOT NULL,
+                version INTEGER NOT NULL, status TEXT NOT NULL, content_hash TEXT NOT NULL,
+                content_json TEXT NOT NULL, parent_version_id TEXT, created_from_candidate_id TEXT,
+                source_data_version TEXT, evaluation_run_id TEXT, created_at TEXT NOT NULL,
+                activated_at TEXT, retired_at TEXT, UNIQUE(artifact_id, version)
+            )""",
+            """CREATE TABLE IF NOT EXISTS evolution_candidate (
+                candidate_id TEXT PRIMARY KEY, candidate_type TEXT NOT NULL, target_artifact_id TEXT NOT NULL,
+                target_version_id TEXT, proposed_content_json TEXT NOT NULL, reason TEXT NOT NULL,
+                trigger_type TEXT NOT NULL, trigger_refs_json TEXT NOT NULL, expected_benefit_json TEXT NOT NULL,
+                risk_level TEXT NOT NULL, status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+                evaluation_run_id TEXT, approval_by TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS evolution_evaluation_run (
+                evaluation_id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, baseline_version_id TEXT,
+                dataset_version TEXT NOT NULL, evaluator_version TEXT NOT NULL, metrics_json TEXT NOT NULL,
+                failures_json TEXT NOT NULL, passed INTEGER NOT NULL, reproducibility_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS evolution_activation (
+                activation_id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, new_version_id TEXT NOT NULL,
+                previous_version_id TEXT, activation_reason TEXT NOT NULL, evaluation_id TEXT NOT NULL,
+                activated_at TEXT NOT NULL, rollback_condition TEXT, rollback_at TEXT, rollback_reason TEXT
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_background_job_status ON background_job(status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_background_job_event ON background_job_event(job_id, sequence)",
+        ),
+    ),
+    Migration(
+        migration_id="0008_bo_governance_lifecycle",
+        description="Add BO candidate eligibility, dataset/model versions, evaluations and replay traces",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS bo_training_sample_candidate (
+                candidate_id TEXT PRIMARY KEY, recommendation_id TEXT, raw_feedback_id TEXT,
+                candidate_json TEXT NOT NULL, eligibility_report_json TEXT NOT NULL,
+                status TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS approved_bo_training_sample (
+                approval_id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL UNIQUE, sample_id TEXT NOT NULL UNIQUE,
+                approved_by TEXT NOT NULL, approved_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS bo_dataset_version (
+                dataset_version_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE, sample_ids_json TEXT NOT NULL,
+                slice_scope_json TEXT NOT NULL, feature_schema_version TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS bo_model_artifact (
+                model_version_id TEXT PRIMARY KEY, artifact_path TEXT, model_type TEXT NOT NULL,
+                hyperparameters_json TEXT NOT NULL, training_dataset_version TEXT NOT NULL,
+                feature_schema_version TEXT NOT NULL, objective_version TEXT NOT NULL, code_version TEXT NOT NULL,
+                random_seed INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS bo_evaluation_run (
+                evaluation_id TEXT PRIMARY KEY, model_version_id TEXT NOT NULL, baseline_model_version_id TEXT,
+                dataset_version TEXT NOT NULL, split_strategy TEXT NOT NULL, metrics_json TEXT NOT NULL,
+                failures_json TEXT NOT NULL, passed INTEGER NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS bo_run_trace (
+                bo_run_id TEXT PRIMARY KEY, trace_json TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+        ),
+    ),
+    Migration(
+        migration_id="0009_process_recommendation_cam_documents",
+        description="Add versioned process recommendations, CAM exports, raw feedback and OCR candidates",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS process_recommendation (
+                recommendation_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, workflow_id TEXT NOT NULL,
+                iteration_number INTEGER NOT NULL, parent_recommendation_id TEXT, status TEXT NOT NULL,
+                recommendation_json TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS cam_export (
+                export_id TEXT PRIMARY KEY, recommendation_id TEXT NOT NULL, adapter_type TEXT NOT NULL,
+                schema_version TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS process_feedback (
+                feedback_id TEXT PRIMARY KEY, recommendation_id TEXT NOT NULL, feedback_json TEXT NOT NULL,
+                status TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS ocr_document (
+                document_id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, parser_name TEXT NOT NULL,
+                parser_version TEXT NOT NULL, source_hash TEXT NOT NULL, review_status TEXT NOT NULL,
+                created_at TEXT NOT NULL, UNIQUE(source_hash, parser_version)
+            )""",
+            """CREATE TABLE IF NOT EXISTS document_element (
+                element_id TEXT PRIMARY KEY, document_id TEXT NOT NULL, page_number INTEGER NOT NULL,
+                element_type TEXT NOT NULL, content TEXT NOT NULL, bbox_json TEXT, confidence REAL,
+                parser_name TEXT NOT NULL, parser_version TEXT NOT NULL, source_image_hash TEXT NOT NULL,
+                review_status TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS document_parameter_candidate (
+                candidate_id TEXT PRIMARY KEY, document_id TEXT NOT NULL, element_id TEXT NOT NULL,
+                parameter_name TEXT NOT NULL, raw_value TEXT NOT NULL, normalized_value_json TEXT,
+                confidence REAL, validation_status TEXT NOT NULL, review_status TEXT NOT NULL, created_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_process_recommendation_task ON process_recommendation(task_id, iteration_number)",
+            "CREATE INDEX IF NOT EXISTS idx_document_element_document ON document_element(document_id, page_number)",
+        ),
+    ),
 )
 
 

@@ -106,7 +106,11 @@ class OfflineModelingService:
         raw_y = np.asarray([sample.y_metrics[target] for sample in model_rows], dtype=float)
         sign = -1.0 if target in LOWER_IS_BETTER else 1.0
         y = raw_y * sign
-        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, nu=2.5) + WhiteKernel(
+        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(
+            length_scale=np.ones(len(feature_names)),
+            length_scale_bounds=(1e-3, 1e3),
+            nu=2.5,
+        ) + WhiteKernel(
             noise_level=1e-5, noise_level_bounds=(1e-8, 1e0)
         )
         pipeline = Pipeline(
@@ -118,7 +122,7 @@ class OfflineModelingService:
                         kernel=kernel,
                         normalize_y=True,
                         random_state=int(task_spec.get("random_seed", 42)),
-                        n_restarts_optimizer=0,
+                        n_restarts_optimizer=max(0, int(task_spec.get("optimizer_restarts", 2))),
                     ),
                 ),
             ]
@@ -194,7 +198,7 @@ class OfflineModelingService:
         return matrix
 
 
-class RecommendationService:
+class _BOCoreEngine:
     def __init__(
         self,
         validation: DatasetValidationService | None = None,
@@ -256,7 +260,11 @@ class RecommendationService:
         approval_ids = list(dict.fromkeys([*gate_approval_ids, *approval_ids]))
         validation = self.validation.validate(samples)
         valid_samples: list[BOSample] = validation["valid_samples"]
-        model_status = self.status.status_for_count(len(valid_samples))
+        governed_status = task_spec.get("_governed_model_status")
+        try:
+            model_status = BOModelStatus(governed_status) if governed_status else self.status.status_for_count(len(valid_samples))
+        except ValueError as exc:
+            raise BOBlockedError(f"unsupported governed model status: {governed_status}") from exc
         audit = [
             {
                 "step": "dataset_validation",
@@ -266,6 +274,14 @@ class RecommendationService:
             },
             *prior_trace,
         ]
+        if model_status == BOModelStatus.BLOCKED:
+            return BORecommendation(
+                model_status=model_status.value, sample_count=len(valid_samples),
+                recommended_parameters={}, prediction={}, acquisition={"type": None, "score": None},
+                bo_invoked=False, machine_bounds_revision=machine_context.get("revision_id"),
+                knowledge_approval_ids=approval_ids, warnings=["BO readiness assessment blocked modeling"],
+                audit_trace=[*audit, {"step": "bo_mode", "status": model_status.value}],
+            ).to_dict()
         if model_status == BOModelStatus.RULE_BASED_COLD_START:
             parameters = _cold_start_candidate(bounded)
             return BORecommendation(
@@ -356,6 +372,23 @@ class FeedbackService:
             "sample": asdict(sample),
             "rejected": validation["rejected"],
         }
+
+
+class RecommendationService:
+    """Deprecated legacy facade; all behavior is delegated to BORecommendationService."""
+
+    def recommend(
+        self,
+        task_spec: dict[str, Any],
+        samples: Iterable[BOSample | dict[str, Any]],
+        machine_context: dict[str, Any],
+        approved_priors: Iterable[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
+
+        return LegacyBOCompatibilityAdapter().recommend(
+            task_spec, samples, machine_context, approved_priors
+        )
 
 
 def _numeric_mapping(value: Any) -> dict[str, float]:

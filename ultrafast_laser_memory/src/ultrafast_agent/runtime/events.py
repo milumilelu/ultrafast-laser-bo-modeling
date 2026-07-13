@@ -71,16 +71,7 @@ class AgentEvent:
         self.trace_id = self.trace_id or self.run_id
         self.tool_name = self.tool_name or self.tool
 
-    @property
-    def created_at(self) -> str:
-        """Compatibility alias for existing SQLite adapters."""
-        return self.timestamp
-
     def to_dict(self) -> dict[str, Any]:
         value = redact_public_data(asdict(self))
         value["created_at"] = value["timestamp"]
         return value
-
-
-# One stable cycle of compatibility for existing imports.
-PublicEvent = AgentEvent

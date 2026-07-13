@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from ultrafast_memory.app.api import app
+from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
 from ultrafast_memory.chat.workflow_status import list_public_thinking_status, record_public_trace

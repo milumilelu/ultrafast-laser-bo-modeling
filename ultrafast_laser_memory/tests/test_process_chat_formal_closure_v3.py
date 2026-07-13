@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from ultrafast_memory.app.api import app
+from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.session_state import update_session_state
 from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.trial.service import TrialApplicationService

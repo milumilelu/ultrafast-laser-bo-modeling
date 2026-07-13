@@ -8,30 +8,13 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
-from .acquisition import (
-    apply_qualitative_feedback_rules,
-    compute_objective,
-    score_balanced,
-    score_exploitation,
-    score_exploration,
-)
+from .acquisition import apply_qualitative_feedback_rules
 from .features import add_engineered_features
 from .interface import validate_feedback, validate_task_request
 from .objectives import valid_sample_count
 from .recommendation_rules import apply_cutting_feedback_to_parameters, cold_start_cutting_parameters, cutting_prediction_nulls
-from .schema import (
-    FILL_PATTERNS,
-    normalize_feedback_level,
-    normalize_fill_pattern,
-    normalize_process_type,
-    model_status_from_sample_count,
-)
+from .schema import normalize_feedback_level, normalize_fill_pattern, normalize_process_type, model_status_from_sample_count
 from .task_store import (
     append_feedback_log,
     append_recommendation_log,
@@ -46,7 +29,6 @@ from .task_store import (
 
 PROCESS_COLUMNS = ["pulse_width_ps", "frequency_kHz", "hatch_spacing_um", "passes", "scan_speed_mm_s"]
 CUTTING_PROCESS_COLUMNS = ["pulse_width_ps", "frequency_kHz", "laser_power_W", "scan_speed_mm_s", "passes", "focus_offset_um", "layer_step_um", "hatch_spacing_um", "fill_pattern"]
-MODEL_FEATURES = PROCESS_COLUMNS + ["laser_power_W", "D_proxy", "pulse_density_proxy", "pulse_energy_uJ", "areal_energy_proxy"]
 OBJECTIVE_MODES = {"quality_first", "efficiency_first", "balanced"}
 RECOMMENDATION_TYPES = {"exploitation", "exploration", "balanced"}
 QUALITATIVE_DEFAULTS = {"roughness": "unknown", "depth": "unknown", "efficiency": "unknown"}
@@ -140,15 +122,60 @@ def recommend_parameters(task_state: dict[str, Any], recommendation_type: str = 
         raise ValueError(f"Unsupported recommendation_type: {recommendation_type}")
     if task_state.get("process_type", "milling") == "cutting" and task_state.get("model_status") == "rule_based_cold_start":
         return recommend_cutting_cold_start(task_state, recommendation_type)
+    from ultrafast_bo.application import BORecommendationService
+
     data = load_experiment_data(task_state)
     material = task_state["material"]
     material_data = _material_data(data, material, task_state.get("process_type", "milling"))
-    models = train_surrogates(material_data, task_state)
-    if models["depth"] is None:
-        raise ValueError(f"Depth model unavailable for material {material}; at least 5 numeric depth samples are required.")
-
-    candidates = generate_candidate_grid(material_data, task_state)
-    scored = score_candidates(candidates, models, material_data, task_state, recommendation_type)
+    samples = []
+    for index, row in material_data.iterrows():
+        parameters = {
+            name: float(row[name])
+            for name in PROCESS_COLUMNS
+            if name in row and pd.notna(row[name])
+        }
+        metrics = {
+            name: float(row[name])
+            for name in ("depth_um", "Sa_um")
+            if name in row and pd.notna(row[name])
+        }
+        samples.append(
+            {
+                "sample_id": str(row.get("record_id") or f"legacy-{index}"),
+                "material": material,
+                "process_type": task_state.get("process_type", "milling"),
+                "x_parameters": parameters,
+                "y_metrics": metrics,
+                "valid_for_training": bool(row.get("valid_flag", False)),
+                "feature_schema_version": "1.0",
+                "run_status": "completed",
+            }
+        )
+    formal = BORecommendationService().recommend(
+        {
+            "material": material,
+            "process_type": task_state.get("process_type", "milling"),
+            "objective_metric": "depth_um",
+            "feature_schema_version": "1.0",
+            "objective_version": "legacy-depth-v1",
+            "acquisition_version": f"legacy-{recommendation_type}-adapter-v1",
+            "random_seed": int(task_state.get("random_seed", 42)),
+        },
+        samples,
+        {
+            "active": True,
+            "machine_bounds": task_state.get("parameter_bounds") or {},
+            "revision_id": "legacy-task-bounds-v1",
+        },
+    )
+    if formal.get("status") == "blocked" or not formal.get("recommended_parameters"):
+        raise ValueError("Formal BO service could not produce a governed recommendation: " + "; ".join(formal.get("blocking_reasons") or []))
+    params = dict(formal["recommended_parameters"])
+    for name in PROCESS_COLUMNS:
+        if name not in params and name in task_state.get("parameter_bounds", {}):
+            lower, upper = task_state["parameter_bounds"][name]
+            params[name] = lower + 0.35 * (upper - lower)
+    d_proxy = _d_proxy_from_parameters(params)
     feedback_rule_reason = "No prior feedback rule applied."
     feedback_metadata = {
         "feedback_interpretation": {},
@@ -157,21 +184,40 @@ def recommend_parameters(task_state: dict[str, Any], recommendation_type: str = 
     last_feedback = _last_feedback(task_state)
     if last_feedback:
         previous_params = _last_recommendation(task_state).get("recommended_parameters", {}) if _last_recommendation(task_state) else {}
-        scored, feedback_rule_reason, feedback_metadata = apply_qualitative_feedback_rules(
-            scored,
+        probe = pd.DataFrame([{**params, "D_proxy": d_proxy, "predicted_depth_um": (formal.get("predictions") or {}).get("mean"), "predicted_Sa_um": np.nan, "acquisition_score": (formal.get("acquisition") or {}).get("score") or 0.0}])
+        _, feedback_rule_reason, feedback_metadata = apply_qualitative_feedback_rules(
+            probe,
             last_feedback.get("qualitative_feedback"),
             previous_params,
             task_state["objective_mode"],
         )
-    valid = scored.replace([np.inf, -np.inf], np.nan).dropna(subset=["acquisition_score", "predicted_depth_um"])
-    deduped = _drop_previous_recommendations(valid, task_state)
-    if not deduped.empty:
-        valid = deduped
-    if valid.empty:
-        raise ValueError("No valid candidate remains after applying objective and feedback constraints.")
-    selected = valid.sort_values(["acquisition_score", "D_proxy"], ascending=[False, True]).iloc[0]
+        params = _apply_feedback_direction(params, previous_params, feedback_metadata, task_state)
+        d_proxy = _d_proxy_from_parameters(params)
     iteration = len(task_state.get("history", [])) + 1
-    recommendation = _build_recommendation_json(task_state, selected, iteration, recommendation_type, feedback_rule_reason, feedback_metadata)
+    prediction = formal.get("predictions") or {}
+    recommendation = {
+        "task_id": task_state["task_id"], "iteration": iteration,
+        "process_type": task_state.get("process_type", "milling"), "material": material,
+        "model_status": formal.get("engine_model_status") or formal.get("model_status"),
+        "objective_mode": task_state["objective_mode"], "recommended_parameters": params,
+        "prediction": {"depth_um": prediction.get("mean"), "depth_std_um": prediction.get("uncertainty"), "Sa_um": None, "Sa_std_um": None},
+        "acquisition": formal.get("acquisition") or {"type": recommendation_type, "score": None},
+        "bo_component": {
+            "surrogate_model": "GPR" if formal.get("bo_invoked") else None,
+            "acquisition": recommendation_type, "raw_acquisition_score": (formal.get("acquisition") or {}).get("score"),
+            "predicted_mean": {"depth_um": prediction.get("mean"), "Sa_um": None},
+            "predicted_std": {"depth_um": prediction.get("uncertainty"), "Sa_um": None},
+            "bo_run_id": formal.get("bo_run_id"), "model_version": formal.get("model_version"),
+            "dataset_version": formal.get("dataset_version"),
+        },
+        "feedback_interpretation": feedback_metadata.get("feedback_interpretation", {}),
+        "feedback_rule_component": feedback_metadata.get("feedback_rule_component", {}),
+        "final_selection_reason": feedback_rule_reason,
+        "roughness_model_available": False, "within_observed_range": True,
+        "D_proxy": d_proxy,
+        "reason": "Candidate produced by the governed BO service and legacy response adapter.",
+        "created_at": utc_timestamp(),
+    }
 
     task_state.setdefault("history", []).append(
         {
@@ -367,41 +413,6 @@ def load_experiment_data(config_or_state: dict[str, Any]) -> pd.DataFrame:
     return add_engineered_features(data)
 
 
-def train_surrogates(material_data: pd.DataFrame, task_state: dict[str, Any]) -> dict[str, Pipeline | None]:
-    """Fit temporary GPR surrogates for depth and Sa."""
-    return {
-        "depth": _fit_gpr(material_data, "depth_um", int(task_state.get("random_seed", 42))),
-        "Sa": _fit_gpr(material_data, "Sa_um", int(task_state.get("random_seed", 42))),
-    }
-
-
-def generate_candidate_grid(material_data: pd.DataFrame, task_state: dict[str, Any]) -> pd.DataFrame:
-    """Generate candidates from observed levels and bounded range supplements."""
-    bounds = task_state.get("parameter_bounds") or resolve_parameter_bounds(material_data, None)
-    grid_size = int(task_state.get("bo_candidate_grid_size", 3000))
-    per_feature = max(2, int(np.floor(grid_size ** (1 / len(PROCESS_COLUMNS)))))
-    levels = []
-    for col in PROCESS_COLUMNS:
-        lo, hi = bounds[col]
-        observed = np.sort(pd.to_numeric(material_data[col], errors="coerce").dropna().unique())
-        observed = observed[(observed >= lo) & (observed <= hi)]
-        if len(observed) == 0:
-            observed = np.linspace(lo, hi, per_feature)
-        elif len(observed) < per_feature:
-            observed = np.unique(np.concatenate([observed, np.linspace(lo, hi, per_feature)]))
-        elif len(observed) > per_feature:
-            idx = np.linspace(0, len(observed) - 1, per_feature).round().astype(int)
-            observed = observed[idx]
-        levels.append([float(v) for v in observed])
-
-    mesh = np.array(np.meshgrid(*levels)).T.reshape(-1, len(PROCESS_COLUMNS))
-    candidates = pd.DataFrame(mesh, columns=PROCESS_COLUMNS)
-    if len(candidates) > grid_size:
-        candidates = candidates.sample(n=grid_size, random_state=int(task_state.get("random_seed", 42))).reset_index(drop=True)
-    candidates = _clean_candidates(candidates)
-    return add_engineered_features(candidates)
-
-
 def resolve_parameter_bounds(material_data: pd.DataFrame, requested: dict[str, list[float]] | None, process_type: str = "milling") -> dict[str, Any]:
     """Intersect user-specified parameter bounds with historical observed ranges."""
     if process_type == "cutting":
@@ -440,41 +451,6 @@ def resolve_parameter_bounds(material_data: pd.DataFrame, requested: dict[str, l
             if optional in requested:
                 bounds[optional] = requested[optional]
     return bounds
-
-
-def score_candidates(
-    candidates: pd.DataFrame,
-    models: dict[str, Pipeline | None],
-    material_data: pd.DataFrame,
-    task_state: dict[str, Any],
-    recommendation_type: str,
-) -> pd.DataFrame:
-    """Predict candidate outcomes and compute acquisition scores."""
-    out = candidates.copy()
-    depth_mean, depth_std = _predict(models["depth"], out)
-    sa_mean, sa_std = _predict(models["Sa"], out)
-    out["predicted_depth_um"] = depth_mean
-    out["predicted_depth_std_um"] = depth_std
-    out["predicted_Sa_um"] = sa_mean
-    out["predicted_Sa_std_um"] = sa_std
-    context = {
-        "historical_data": material_data,
-        "target_depth_um": task_state.get("target_depth_um"),
-        "depth_min_um": task_state.get("depth_min_um"),
-        "Sa_max_um": task_state.get("Sa_max_um"),
-        "lambda_sa": task_state.get("lambda_sa", 0.25),
-        "roughness_model_available": models["Sa"] is not None,
-    }
-    objective = compute_objective(out, task_state["objective_mode"], context)
-    out["objective_value"] = objective
-    if recommendation_type == "exploitation":
-        out["acquisition_score"] = score_exploitation(out, task_state["objective_mode"], context)
-    elif recommendation_type == "exploration":
-        out["acquisition_score"] = score_exploration(out, task_state["objective_mode"], context)
-    else:
-        out["acquisition_score"] = score_balanced(out, task_state["objective_mode"], context)
-    out["bo_acquisition_score"] = out["acquisition_score"]
-    return out
 
 
 def append_numeric_feedback_to_data(
@@ -518,8 +494,9 @@ def append_numeric_feedback_to_data(
         "chipping_um": np.nan,
         "objective_mode": task_state.get("objective_mode"),
         "source_file": f"interactive_feedback:{task_state['task_id']}",
-        "valid_flag": True,
-        "note": note,
+        "valid_flag": False,
+        "eligibility_status": "candidate_pending_validation_and_approval",
+        "note": (note + " | feedback candidate; not approved for BO training").strip(" |"),
     }
     raw_cols = list(dict.fromkeys(list(data.columns) + list(row.keys())))
     base = data.reindex(columns=raw_cols)
@@ -530,136 +507,31 @@ def append_numeric_feedback_to_data(
     return path
 
 
-def _fit_gpr(material_data: pd.DataFrame, target: str, random_seed: int) -> Pipeline | None:
-    """Fit a GPR model for one target if enough numeric samples exist."""
-    subset = material_data.dropna(subset=[target]).copy()
-    subset = subset[subset["valid_flag"].astype(bool)] if "valid_flag" in subset else subset
-    if len(subset) < 5:
-        return None
-    feature_cols = [col for col in MODEL_FEATURES if col in subset and subset[col].notna().any()]
-    if len(feature_cols) < 2:
-        return None
-    kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, nu=2.5) + WhiteKernel(noise_level=1e-3)
-    model = Pipeline(
-        [
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            ("gpr", GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=random_seed, n_restarts_optimizer=0)),
-        ]
-    )
-    model.fit(subset[feature_cols], subset[target])
-    model.feature_columns_ = feature_cols  # type: ignore[attr-defined]
-    return model
+def _d_proxy_from_parameters(parameters: dict[str, Any]) -> float:
+    denominator = float(parameters["scan_speed_mm_s"]) * float(parameters["hatch_spacing_um"])
+    return float(parameters["frequency_kHz"]) * float(parameters["passes"]) / denominator
 
 
-def _predict(model: Pipeline | None, candidates: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """Predict mean and standard deviation for candidates."""
-    if model is None:
-        return np.full(len(candidates), np.nan), np.full(len(candidates), np.nan)
-    feature_cols = model.feature_columns_  # type: ignore[attr-defined]
-    transformed = model[:-1].transform(candidates[feature_cols])
-    mean, std = model.named_steps["gpr"].predict(transformed, return_std=True)
-    return np.asarray(mean, dtype=float), np.asarray(std, dtype=float)
-
-
-def _build_recommendation_json(
+def _apply_feedback_direction(
+    parameters: dict[str, Any],
+    previous: dict[str, Any],
+    metadata: dict[str, Any],
     task_state: dict[str, Any],
-    selected: pd.Series,
-    iteration: int,
-    recommendation_type: str,
-    feedback_rule_reason: str,
-    feedback_metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the public recommendation JSON payload."""
-    params = {col: _json_number(selected.get(col)) for col in PROCESS_COLUMNS}
-    for optional in ["laser_power_W", "focus_offset_um", "layer_step_um"]:
-        if pd.notna(selected.get(optional, np.nan)):
-            params[optional] = _json_number(selected.get(optional))
-    if pd.notna(selected.get("power_W", np.nan)):
-        params["power_W"] = _json_number(selected.get("power_W"))
-    roughness_available = bool(pd.notna(selected.get("predicted_Sa_um", np.nan)))
-    warnings = task_state.setdefault("warnings", [])
-    if task_state["objective_mode"] in {"quality_first", "balanced"} and not roughness_available:
-        warning = "Sa model unavailable; recommendation uses depth and D_proxy proxies only."
-        if warning not in warnings:
-            warnings.append(warning)
-    reason = _reason_text(task_state["objective_mode"], recommendation_type, feedback_rule_reason, roughness_available)
-    selected_rule_adjustment = _json_number(selected.get("rule_adjustment"))
-    rule_component = dict(feedback_metadata.get("feedback_rule_component", {}))
-    penalty_or_bias = dict(rule_component.get("penalty_or_bias", {}))
-    penalty_or_bias["selected_rule_adjustment"] = selected_rule_adjustment
-    penalty_or_bias["score_before_feedback"] = _json_number(selected.get("bo_acquisition_score"))
-    penalty_or_bias["score_after_feedback"] = _json_number(selected.get("acquisition_score"))
-    rule_component["penalty_or_bias"] = penalty_or_bias
-    final_reason = "Candidate selected by BO acquisition score after feedback-direction adjustment." if rule_component.get("applied") else "Candidate selected by BO acquisition score without qualitative feedback adjustment."
-    return {
-        "task_id": task_state["task_id"],
-        "iteration": iteration,
-        "process_type": task_state.get("process_type", "milling"),
-        "material": task_state["material"],
-        "model_status": task_state.get("model_status", "data_driven_bo"),
-        "objective_mode": task_state["objective_mode"],
-        "recommended_parameters": params,
-        "prediction": {
-            "depth_um": _json_number(selected.get("predicted_depth_um")),
-            "depth_std_um": _json_number(selected.get("predicted_depth_std_um")),
-            "Sa_um": _json_number(selected.get("predicted_Sa_um")),
-            "Sa_std_um": _json_number(selected.get("predicted_Sa_std_um")),
-        },
-        "acquisition": {"type": recommendation_type, "score": _json_number(selected.get("acquisition_score"))},
-        "bo_component": {
-            "surrogate_model": "GPR",
-            "acquisition": recommendation_type,
-            "objective_value": _json_number(selected.get("objective_value")),
-            "raw_acquisition_score": _json_number(selected.get("bo_acquisition_score")),
-            "predicted_mean": {
-                "depth_um": _json_number(selected.get("predicted_depth_um")),
-                "Sa_um": _json_number(selected.get("predicted_Sa_um")),
-            },
-            "predicted_std": {
-                "depth_um": _json_number(selected.get("predicted_depth_std_um")),
-                "Sa_um": _json_number(selected.get("predicted_Sa_std_um")),
-            },
-        },
-        "feedback_interpretation": feedback_metadata.get("feedback_interpretation", {}),
-        "feedback_rule_component": rule_component,
-        "final_selection_reason": final_reason,
-        "roughness_model_available": roughness_available,
-        "within_observed_range": True,
-        "D_proxy": _json_number(selected.get("D_proxy")),
-        "reason": reason,
-        "created_at": utc_timestamp(),
-    }
-
-
-def _reason_text(objective_mode: str, recommendation_type: str, feedback_rule_reason: str, roughness_available: bool) -> str:
-    """Create a concise recommendation reason."""
-    base = f"Candidate selected by {recommendation_type} acquisition under {objective_mode} objective."
-    if not roughness_available and objective_mode in {"quality_first", "balanced"}:
-        base += " Roughness surrogate is unavailable, so Sa is not fabricated and the rule falls back to depth/D_proxy evidence."
-    if feedback_rule_reason and not feedback_rule_reason.startswith("No "):
-        base += " " + feedback_rule_reason
-    return base
-
-
-def _clean_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
-    """Remove invalid candidates."""
-    out = candidates.replace([np.inf, -np.inf], np.nan).dropna(subset=PROCESS_COLUMNS).copy()
-    out = out[(out["passes"] > 0) & (out["scan_speed_mm_s"] > 0) & (out["hatch_spacing_um"] > 0)]
-    return out.reset_index(drop=True)
-
-
-def _drop_previous_recommendations(candidates: pd.DataFrame, task_state: dict[str, Any]) -> pd.DataFrame:
-    """Drop candidates that exactly match previous recommendations."""
-    previous = []
-    for item in task_state.get("history", []):
-        params = item.get("recommendation", {}).get("recommended_parameters", {})
-        if all(col in params for col in PROCESS_COLUMNS):
-            previous.append(tuple(float(params[col]) for col in PROCESS_COLUMNS))
-    if not previous:
-        return candidates
-    keys = candidates[PROCESS_COLUMNS].apply(lambda row: tuple(float(row[col]) for col in PROCESS_COLUMNS), axis=1)
-    return candidates.loc[~keys.isin(previous)].copy()
+    result = dict(parameters)
+    component = metadata.get("feedback_rule_component") or {}
+    decrease = int(component.get("decrease_strength") or 0)
+    increase = int(component.get("increase_strength") or 0)
+    if not previous or (decrease == increase and decrease > 0 and task_state.get("objective_mode") == "balanced"):
+        return result
+    frequency_bounds = (task_state.get("parameter_bounds") or {}).get("frequency_kHz")
+    if not frequency_bounds:
+        return result
+    if decrease > increase or (decrease == increase and decrease > 0 and task_state.get("objective_mode") == "quality_first"):
+        result["frequency_kHz"] = float(frequency_bounds[0])
+    elif increase > decrease or (decrease == increase and increase > 0 and task_state.get("objective_mode") == "efficiency_first"):
+        result["frequency_kHz"] = float(frequency_bounds[1])
+    return result
 
 
 def _normalize_measured_result(measured: dict[str, Any], raw: dict[str, Any], process_type: str = "milling") -> dict[str, Any]:
@@ -794,20 +666,3 @@ def _none_or_float(value: Any) -> float | None:
         return None
     number = float(value)
     return number if np.isfinite(number) else None
-
-
-def _json_number(value: Any) -> float | int | None:
-    """Convert numpy/pandas numbers to JSON-safe values."""
-    if value is None:
-        return None
-    try:
-        if pd.isna(value):
-            return None
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not np.isfinite(number):
-        return None
-    if abs(number - round(number)) < 1e-12:
-        return int(round(number))
-    return float(number)

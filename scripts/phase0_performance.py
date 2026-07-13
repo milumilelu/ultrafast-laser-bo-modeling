@@ -67,7 +67,7 @@ def startup_samples(samples: int = 5) -> list[float]:
     env["ULTRAFAST_LLM_MODEL"] = "baseline-mock"
     code = (
         "import time; s=time.perf_counter(); "
-        "import ultrafast_memory.app.api; "
+        "import ultrafast_memory.apps.api.main; "
         "print((time.perf_counter()-s)*1000)"
     )
     values = []
@@ -95,7 +95,7 @@ def main() -> int:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     metrics: dict[str, Any] = {}
     metrics["application_startup"] = summarize(
-        startup_samples(), note="Fresh Python process importing ultrafast_memory.app.api; server socket startup excluded."
+        startup_samples(), note="Fresh Python process importing ultrafast_memory.apps.api.main; server socket startup excluded."
     )
 
     with tempfile.TemporaryDirectory(

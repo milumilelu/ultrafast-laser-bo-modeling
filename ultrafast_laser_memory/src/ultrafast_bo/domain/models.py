@@ -20,6 +20,22 @@ class BOSample:
     valid_for_training: bool = True
     material: str | None = None
     process_type: str | None = None
+    equipment_profile_id: str | None = None
+    equipment_compatible_with: tuple[str, ...] = ()
+    target_metric: str | None = None
+    measurement_method: str | None = None
+    measurement_standardized: bool = False
+    process_stage: str | None = None
+    feature_schema_version: str = "1.0"
+    unit_schema_version: str = "1.0"
+    task_id: str | None = None
+    workpiece_id: str | None = None
+    batch_id: str | None = None
+    replicate_id: str | None = None
+    run_status: str = "completed"
+    alarms: tuple[str, ...] = ()
+    abnormal: bool = False
+    source_type: str = "experiment"
 
 
 @dataclass(slots=True)

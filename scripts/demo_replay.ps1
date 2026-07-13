@@ -14,7 +14,7 @@ Push-Location $ProjectRoot
 try {
     & python -m ultrafast_memory.app.main doctor
     if ($LASTEXITCODE -ne 0) { throw "Doctor failed." }
-    $Arguments = @("-m", "ultrafast_memory.app.main", "demo", "tgv")
+    $Arguments = @("-m", "ultrafast_memory.app.main", "demo", "tgv", "--trial-mode", "simple_trial_cut")
     if ($ApproveReview) { $Arguments += "--approve-review" }
     & python @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Demo replay failed." }

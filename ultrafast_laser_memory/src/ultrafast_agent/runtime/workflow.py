@@ -8,7 +8,7 @@ from threading import Thread
 from typing import Any, Callable, Iterator
 
 from ultrafast_agent.runtime.event_bus import EventBus
-from ultrafast_agent.runtime.events import PublicEvent
+from ultrafast_agent.runtime.events import AgentEvent
 from ultrafast_agent.runtime.cancellation import CancellationToken, WorkflowCancelled
 from ultrafast_agent.runtime.execution_context import RunContext
 from ultrafast_agent.runtime.retry_policy import attempt_count
@@ -236,7 +236,7 @@ class WorkflowRunner:
 
     def stream(self, workflow: WorkflowDefinition, context: RunContext) -> Iterator[dict[str, Any]]:
         bus = self.event_bus_factory(context.run_id)
-        channel: queue.Queue[PublicEvent | object] = queue.Queue()
+        channel: queue.Queue[AgentEvent | object] = queue.Queue()
         sentinel = object()
         unsubscribe = bus.subscribe(channel.put)
 
@@ -253,7 +253,7 @@ class WorkflowRunner:
                 item = channel.get()
                 if item is sentinel:
                     break
-                assert isinstance(item, PublicEvent)
+                assert isinstance(item, AgentEvent)
                 yield item.to_dict()
         finally:
             unsubscribe()

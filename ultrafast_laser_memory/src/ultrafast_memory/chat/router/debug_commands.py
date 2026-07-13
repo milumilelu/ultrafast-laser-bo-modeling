@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ultrafast_memory.chat.router.manual_override import AVAILABLE_SKILLS
+from ultrafast_memory.chat.debug_views import (
+    campaign_view,
+    model_view,
+    reasoning_view,
+    waterfall_view,
+)
 from ultrafast_agent.skills import get_default_skill_registry
 from ultrafast_memory.chat.session_state import (
     get_session_state,
@@ -54,8 +60,14 @@ def handle_debug_command(message: str, session_id: str) -> dict[str, Any] | None
             "rag_parameter_recommendation_tool", "llm_fallback_parameter_tool",
             "parameter_constraint_validation_tool", "parameter_provenance_registry_tool",
             "experiment_store_tool", "measurement_parser_tool", "quality_metric_tool", "model_snapshot_tool"]}
-    if text in {"/reasoning", "/waterfall", "/campaign", "/model"}:
-        return {"handled": True, "message": text[1:] + " public view", "state": get_session_state(session_id)}
+    if text == "/reasoning":
+        return {"handled": True, "message": "公开推理摘要", **reasoning_view(session_id)}
+    if text == "/waterfall":
+        return {"handled": True, "message": "执行耗时瀑布", **waterfall_view(session_id)}
+    if text == "/campaign":
+        return {"handled": True, "message": "优化 Campaign", **campaign_view(session_id)}
+    if text == "/model":
+        return {"handled": True, "message": "模型快照", **model_view(session_id)}
     if text == "/no_skill":
         return {"handled": True, "message": "skill routing disabled for this turn"}
     return None

@@ -7,7 +7,8 @@ import sys
 import tempfile
 from typing import Any
 
-from ultrafast_bo import BOStatusService, RecommendationService
+from ultrafast_bo import BOStatusService
+from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
 from ultrafast_memory.core.config import get_database_path, load_config
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.db.init_db import init_database
@@ -195,7 +196,7 @@ class DoctorService:
     def _bo(self) -> dict[str, Any]:
         try:
             status = BOStatusService().status_for_count(0).value
-            result = RecommendationService().recommend(
+            result = LegacyBOCompatibilityAdapter().recommend(
                 {},
                 [],
                 {

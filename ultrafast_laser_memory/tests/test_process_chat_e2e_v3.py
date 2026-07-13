@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from ultrafast_memory.app.api import app
+from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.equipment.schemas import EquipmentProfileCreate
 from ultrafast_memory.equipment.service import create_equipment_profile
 
@@ -31,13 +31,23 @@ def test_streaming_process_chat_accumulates_fields_and_requires_trial_choice(iso
     client = TestClient(app)
     session_id = client.post("/chat/sessions", json={}).json()["session_id"]
 
-    _, first = _stream(client, session_id, "我想切割5mm厚的碳纤维板，板号T300")
-    assert "REQUIREMENTS_PENDING" in first
+    first_events, first = _stream(client, session_id, "我想切割5mm厚的碳纤维板，板号T300")
+    assert "等待补充加工要求" in first
+    assert "请回答" in first
     assert "推荐参数" not in first
+    assert len([item for item in first_events if item.get("type") == "progress"]) == 1
+    assert next(item for item in first_events if item.get("type") == "meta")["model"] == \
+        "deterministic-process-workflow-v3"
+    state = next(item for item in first_events if item.get("type") == "workflow_state")
+    assert state["current_stage"] == "等待补充加工要求"
+    assert state["current_stage_code"] == "REQUIREMENTS_PENDING"
+    assert state["next_required_action"]["action_label"] == "补充加工要求"
+    assert any(item.get("title") == "公开推理摘要" for item in first_events)
+    assert not any(item.get("event_type") == "device_lookup" for item in first_events)
     _, second = _stream(client, session_id, "1、切缝碳纤维无分层；2、无；3、可多次分层加工")
-    assert "REQUIREMENTS_PENDING" in second
+    assert "等待补充加工要求" in second
     events, third = _stream(client, session_id, "10cm直线；无效率要求；压缩空气")
-    assert "TRIAL_MODE_PENDING" in third
+    assert "等待选择试切方式" in third
     assert "[简化试切] [完整试切] [跳过试切]" in third
     assert any(item.get("event_type") == "tool_started" for item in events)
     _, fourth = _stream(client, session_id, "选择简化试切")

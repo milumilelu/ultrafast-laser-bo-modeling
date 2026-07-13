@@ -5,7 +5,7 @@ import json
 from fastapi.testclient import TestClient
 
 from ultrafast_memory.agent_runtime.trace_collector import list_agent_trace_events, record_agent_trace_event
-from ultrafast_memory.app.api import app
+from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
 from ultrafast_memory.chat.session_state import get_session_state

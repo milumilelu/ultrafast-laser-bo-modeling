@@ -27,6 +27,7 @@ ultrafast = "ultrafast_memory.app.main:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.25", "ruff>=0.5"]
+ocr = ["paddleocr>=3.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -18,6 +18,7 @@ VALID_EVENT_TYPES = {
     "tool_result",
     "knowledge_lookup",
     "device_lookup",
+    "equipment_profile_loaded",
     "question_generated",
     "decision",
     "warning",

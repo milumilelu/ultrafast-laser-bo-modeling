@@ -116,7 +116,7 @@ class DemoService:
         }
 
     def _read_only_fallback(self, error: Exception) -> dict[str, Any]:
-        from ultrafast_bo import RecommendationService
+        from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
         from ultrafast_domain.trial import design_trial_plan
 
         machine = {
@@ -141,7 +141,7 @@ class DemoService:
             machine["machine_bounds"],
             "tgv",
         ).to_dict()
-        bo = RecommendationService().recommend({}, [], machine)
+        bo = LegacyBOCompatibilityAdapter().recommend({}, [], machine)
         return {
             "status": "read_only_demo",
             "task_id": "read-only-demo-tgv",

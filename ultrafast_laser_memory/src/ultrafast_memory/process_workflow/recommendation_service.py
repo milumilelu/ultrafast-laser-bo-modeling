@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ultrafast_bo import RecommendationService
+from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
 from ultrafast_integrations.storage.read_models import list_bo_training_samples
 from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.core.llm_config import get_llm_config
@@ -36,7 +36,7 @@ def recommend_trial_parameters(task: dict[str, Any], equipment: dict[str, Any],
         "trial_allowed": True, "intended_use": "simple_trial",
     }
     if len(samples) >= 10:
-        raw = RecommendationService().recommend(task, samples, equipment)
+        raw = LegacyBOCompatibilityAdapter().recommend(task, samples, equipment)
         context["bo_candidates"] = [
             {"name": name, "value": value, "unit": UNITS.get(name, "unknown"),
              "source_refs": [f"bo_dataset:{raw.get('sample_count', 0)}"], "confidence": 0.7,

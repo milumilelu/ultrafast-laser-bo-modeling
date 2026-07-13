@@ -5,7 +5,8 @@ from typing import Any, Iterator
 
 from ultrafast_agent.runtime import AgentRuntime, EventBus, RunContext, ToolContract, ToolRegistry
 from ultrafast_agent.workflows import get_workflow
-from ultrafast_bo import BOStatusService, RecommendationService
+from ultrafast_bo import BOStatusService
+from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
 from ultrafast_domain.domain_packs import load_domain_pack
 from ultrafast_domain.trial import assess_trial_need, select_trial_mode
 from ultrafast_integrations.storage.read_models import (
@@ -286,7 +287,7 @@ class TaskWorkflowService:
         if evidence_count:
             task["literature_parameters_used"] = True
             task["knowledge_gate_decision"] = context.get("knowledge_gate_decision") or {}
-        return RecommendationService().recommend(
+        return LegacyBOCompatibilityAdapter().recommend(
             task,
             list_bo_training_samples(),
             context.get("equipment_snapshot") or {},

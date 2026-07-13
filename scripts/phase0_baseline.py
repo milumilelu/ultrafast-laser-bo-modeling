@@ -176,7 +176,7 @@ def capture_api_golden() -> dict[str, Any]:
         sys.path.insert(0, str(AGENT_ROOT / "src"))
         try:
             from fastapi.testclient import TestClient
-            from ultrafast_memory.app.api import app
+            from ultrafast_memory.apps.api.main import app
 
             requests = [
                 ("GET", "/health", None),

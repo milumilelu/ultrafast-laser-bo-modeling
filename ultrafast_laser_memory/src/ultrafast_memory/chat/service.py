@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from ultrafast_memory.chat.prompt_builder import build_system_prompt
 from collections.abc import Iterator
 
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
+from ultrafast_memory.chat.prompt_builder import build_system_prompt
 from ultrafast_memory.chat.router.debug_commands import handle_debug_command
 from ultrafast_memory.chat.router.hybrid_router import route_message
 from ultrafast_memory.chat.schemas import ChatRequest, ChatResponse
@@ -15,10 +15,10 @@ from ultrafast_memory.chat.session_store import (
     save_skill_trace,
     session_exists,
 )
-from ultrafast_memory.chat.workflow_status import build_workflow_artifacts
+from ultrafast_memory.chat.workflow_status import build_workflow_artifacts, record_public_trace
 from ultrafast_memory.core.config import load_config
 from ultrafast_memory.core.llm_config import get_llm_config
-from ultrafast_memory.equipment.bounds import require_machine_bounds_for_bo
+from ultrafast_memory.equipment.bounds import build_machine_bounds, require_machine_bounds_for_bo
 from ultrafast_memory.knowledge_bootstrap.schemas import EvidenceGapRequest
 from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge, check_evidence_gap
 from ultrafast_memory.knowledge_review.review_queue import get_review_task
@@ -37,14 +37,10 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     mode_command = _handle_display_mode_command(request.message, session_id)
     if mode_command:
         save_message(session_id, "assistant", mode_command["assistant_message"], {"display_mode": mode_command.get("display_mode")})
-        return _build_chat_response(
-            session_id=session_id,
-            assistant_message=mode_command["assistant_message"],
-            message=request.message,
-            message_id=user_message["message_id"],
-            selected_skill=None,
-            route_plan=None,
-            audit_trace=[{"step": "display_mode", "status": "success", "mode": mode_command.get("display_mode")}],
+        return _build_command_chat_response(
+            session_id,
+            mode_command["assistant_message"],
+            [{"step": "display_mode", "status": "success", "mode": mode_command.get("display_mode")}],
         )
 
     bootstrap_command = _handle_bootstrap_chat_command(request.message, session_id, state)
@@ -101,14 +97,10 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     if debug_command and not request.message.strip().startswith("/skill "):
         assistant_content = _debug_response(debug_command)
         save_message(session_id, "assistant", assistant_content, {"debug_command": True})
-        return _build_chat_response(
-            session_id=session_id,
-            assistant_message=assistant_content,
-            message=request.message,
-            message_id=user_message["message_id"],
-            selected_skill=None,
-            route_plan=None,
-            audit_trace=[{"step": "debug_command", "status": "success"}],
+        return _build_command_chat_response(
+            session_id,
+            assistant_content,
+            [{"step": "debug_command", "status": "success"}],
         )
 
     route_plan = None
@@ -117,7 +109,9 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     if request.use_skills:
         route_plan = route_message(request.message, session_id, user_message["message_id"])
         selected_skill = route_plan.primary_skill
-        _record_route_decision_trace(session_id, user_message["message_id"], request.message, route_plan)
+        route_trace = _record_route_decision_trace(
+            session_id, user_message["message_id"], request.message, route_plan
+        )
         if route_plan.deprecated_skill_used:
             record_agent_trace_event(
                 session_id=session_id,
@@ -149,31 +143,27 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
         )
         if selected_skill == "complex_process_task":
             process_result = run_process_chat_turn(session_id, request.message)
-            save_message(session_id, "assistant", process_result["content"], {
-                "selected_skill": selected_skill, "process_workflow": process_result["state"],
-                "next_required_action": process_result["next_action"]})
-            response = _build_chat_response(
-                session_id=session_id, assistant_message=process_result["content"], message=request.message,
-                message_id=user_message["message_id"], selected_skill=selected_skill,
-                route_plan=route_plan.model_dump(mode="json"), route_plan_obj=route_plan,
-                audit_trace=audit_trace, status="waiting_user" if process_result["next_action"].get("blocking") else "running")
-            response.current_stage = process_result["state"].get("state")
-            response.next_required_action = process_result["next_action"]
-            process_view = process_progress(process_result["state"], process_result["next_action"])
-            response.workflow_overview = process_view["workflow_overview"]
-            response.completed_stages = process_view["completed_stages"]
-            response.pending_stages = process_view["pending_stages"]
-            response.blocked_stages = process_view["blocked_stages"]
-            response.progress = {"current_stage": process_view["current_stage"],
-                                 "progress_percent": process_view["percent"],
-                                 "completed_steps_count": process_view["completed_steps"],
-                                 "total_steps": process_view["total_steps"],
-                                 "message": process_result["content"].splitlines()[0]}
-            if process_result.get("events"):
-                response.execution_trace = _filter_public_trace(session_id, process_result["events"])
-                response.skill_trace = [event for event in process_result["events"] if event.get("skill")]
-                response.tool_trace = [event for event in process_result["events"] if event.get("tool_name") or event.get("tool")]
-            return response
+            process_trace = _record_process_public_reasoning(
+                session_id, user_message["message_id"], process_result
+            )
+            save_message(
+                session_id,
+                "assistant",
+                process_result["content"],
+                {
+                    "selected_skill": selected_skill,
+                    "process_workflow": process_result["state"],
+                    "next_required_action": process_result["next_action"],
+                },
+            )
+            return _build_process_chat_response(
+                session_id,
+                process_result,
+                selected_skill,
+                route_plan.model_dump(mode="json"),
+                audit_trace,
+                [route_trace, *process_trace, *(process_result.get("events") or [])],
+            )
         bo_guard = _handle_bo_machine_bounds_guard(route_plan, audit_trace, session_id, user_message["message_id"])
         if bo_guard:
             assistant_content = bo_guard["assistant_message"]
@@ -338,205 +328,45 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
 
 
 def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
-    session_id = _ensure_session(request)
-    user_message = save_message(session_id, "user", request.message, {"mode": request.mode, "stream": True})
-    route_plan = None
-    selected_skill = None
-    try:
-        debug_command = handle_debug_command(request.message, session_id)
-        mode_command = _handle_display_mode_command(request.message, session_id)
-        if mode_command:
-            content = mode_command["assistant_message"]
-            save_message(session_id, "assistant", content, {"display_mode": mode_command.get("display_mode")})
-            yield {"type": "meta", "session_id": session_id, "provider": "system", "model": "display_mode"}
-            yield {"type": "agent_trace", "event_type": "state_update", "stage": "display_mode", "title": "显示模式", "summary": content, "status": "completed"}
-            yield {"type": "delta", "content": content}
-            yield {"type": "done"}
-            return
-        if debug_command and not request.message.strip().startswith("/skill "):
-            content = _debug_response(debug_command)
-            save_message(session_id, "assistant", content, {"debug_command": True})
-            yield {"type": "meta", "session_id": session_id, "provider": "system", "model": "debug"}
-            artifacts = build_workflow_artifacts(session_id, user_message["message_id"], request.message)
-            yield _progress_event(artifacts["progress"])
-            for item in artifacts["thinking_status"]:
-                yield _thinking_event(item)
-            for item in artifacts["execution_trace"]:
-                yield _agent_trace_event(item)
-            yield {"type": "workflow_state", **artifacts["workflow_state"]}
-            yield {"type": "trace", "step": "debug_command", "status": "success"}
-            yield {"type": "delta", "content": content}
-            yield {"type": "done"}
-            return
-        if request.use_skills:
-            route_plan = route_message(request.message, session_id, user_message["message_id"])
-            selected_skill = route_plan.primary_skill
-            save_skill_trace(
-                session_id,
-                user_message["message_id"],
-                {
-                    "selected_skill": selected_skill,
-                    "confidence": route_plan.confidence,
-                    "reason": route_plan.reason,
-                },
-            )
-        history = get_recent_messages(session_id, limit=20)
-        messages = [{"role": "system", "content": build_system_prompt(selected_skill)}] + history
-        cfg = get_llm_config()
-        client = create_llm_client(cfg)
-        provider = getattr(client, "provider", client.__class__.__name__.replace("Client", "").lower())
-        model = getattr(client, "model", "mock")
-        yield {"type": "meta", "session_id": session_id, "provider": provider, "model": model}
-        artifacts = build_workflow_artifacts(session_id, user_message["message_id"], request.message, route_plan)
-        yield _progress_event(artifacts["progress"])
-        trace_mode = _public_trace_mode(session_id)
-        if trace_mode != "off":
-            for item in artifacts["thinking_status"]:
-                yield _thinking_event(item)
-        for item in _filter_public_trace(session_id, artifacts["execution_trace"]):
-            yield _agent_trace_event(item)
-        yield {"type": "workflow_state", **artifacts["workflow_state"]}
-        bo_guard = _handle_bo_machine_bounds_guard(route_plan, [], session_id, user_message["message_id"])
-        if bo_guard:
-            content = bo_guard["assistant_message"]
-            save_message(
-                session_id,
-                "assistant",
-                content,
-                {
-                    "provider": "system",
-                    "model": "equipment_guard",
-                    "selected_skill": selected_skill,
-                    "route_plan": route_plan.model_dump(mode="json") if route_plan else None,
-                    "equipment": bo_guard.get("equipment"),
-                },
-            )
-            yield {"type": "trace", "step": "bo_machine_bounds_guard", "status": "blocked_need_user_input"}
-            yield {"type": "delta", "content": content}
-            yield {"type": "done"}
-            return
-        if selected_skill == "complex_process_task":
-            if route_plan:
-                route_trace = _record_route_decision_trace(session_id, user_message["message_id"], request.message, route_plan, artifacts["progress"].get("progress_percent"))
-                yield _agent_trace_event(route_trace)
-                yield {"type": "route", "primary_skill": route_plan.primary_skill,
-                       "secondary_skills": route_plan.secondary_skills, "confidence": route_plan.confidence,
-                       "route_source": route_plan.route_source}
-                yield {"type": "trace", "step": "hybrid_router", "status": "success"}
-            process_result = run_process_chat_turn(session_id, request.message)
-            process_view = process_progress(process_result["state"], process_result["next_action"])
-            for event in _filter_public_trace(session_id, process_result.get("events") or []):
-                public_event = dict(event)
-                public_event["type"] = "agent_trace"
-                yield public_event
-            yield {"type": "workflow_state", **process_result["state"], **process_view,
-                   "next_required_action": process_result["next_action"]}
-            save_message(session_id, "assistant", process_result["content"], {
-                "provider": "deterministic_process_workflow", "model": "none",
-                "selected_skill": selected_skill, "route_plan": route_plan.model_dump(mode="json"),
-                "next_required_action": process_result["next_action"]})
-            yield {"type": "delta", "content": process_result["content"]}
-            yield {"type": "done"}
-            return
-        limit_message = _clarification_limit_message(artifacts)
-        if limit_message:
-            save_message(
-                session_id,
-                "assistant",
-                limit_message,
-                {
-                    "provider": "system",
-                    "model": "workflow_guard",
-                    "selected_skill": selected_skill,
-                    "route_plan": route_plan.model_dump(mode="json") if route_plan else None,
-                },
-            )
-            yield {"type": "trace", "step": "clarification_limit", "status": "blocked_need_user_input"}
-            yield {"type": "delta", "content": limit_message}
-            yield {"type": "done"}
-            return
-        if route_plan:
-            route_trace = _record_route_decision_trace(session_id, user_message["message_id"], request.message, route_plan, artifacts["progress"].get("progress_percent"))
-            yield _agent_trace_event(route_trace)
+    # One application execution path: streaming is only a renderer over the
+    # same ChatResponse produced by the non-streaming workflow.
+    response = handle_chat(request.model_copy(update={"stream": False}))
+    route = response.route_plan or {}
+    process_workflow = route.get("primary_skill") == "complex_process_task"
+    yield {
+        "type": "meta", "session_id": response.session_id,
+        "provider": "system" if process_workflow else "workflow",
+        "model": "deterministic-process-workflow-v3" if process_workflow else "shared-chat-workflow-v1",
+    }
+    if response.progress:
+        yield _progress_event(response.progress)
+    for item in response.thinking_status:
+        yield _thinking_event(item)
+    if route:
+        yield {
+            "type": "route", "primary_skill": route.get("primary_skill"),
+            "secondary_skills": route.get("secondary_skills") or [],
+            "confidence": route.get("confidence"), "route_source": route.get("route_source"),
+        }
+        yield {"type": "trace", "step": "hybrid_router", "status": "success", "selected_skill": route.get("primary_skill")}
+    for item in response.execution_trace:
+        yield _agent_trace_event(item)
+    for item in response.audit_trace:
+        if item.get("status") == "fallback":
             yield {
-                "type": "route",
-                "primary_skill": route_plan.primary_skill,
-                "secondary_skills": route_plan.secondary_skills,
-                "confidence": route_plan.confidence,
-                "route_source": route_plan.route_source,
+                "type": "warning", "event_type": "fallback", "stage": item.get("step", "llm_chat"),
+                "status": "completed", "summary": item.get("detail") or "已使用安全降级模板。",
             }
-            yield {"type": "trace", "step": "hybrid_router", "status": "success"}
-        llm_call_trace = record_agent_trace_event(
-            session_id=session_id,
-            message_id=user_message["message_id"],
-            event_type="tool_call",
-            stage="llm_chat",
-            title="调用语言模型",
-            summary="正在生成面向用户的回复。",
-            skill=selected_skill,
-            tool="llm_adapter",
-            input_summary=f"history_messages={len(history)}; model={model}",
-            status="running",
-        )
-        yield _agent_trace_event(llm_call_trace)
-        chunks: list[str] = []
-        stream_failure: Exception | None = None
-        try:
-            for event in client.stream_chat(messages, temperature=0.2):
-                if event.get("type") == "delta":
-                    chunks.append(event.get("content", ""))
-                    yield event
-                elif event.get("type") == "done":
-                    continue
-                elif event.get("type") == "error":
-                    message = event.get("message") if event.get("safe_to_display") is True else None
-                    stream_failure = RuntimeError(message or "语言模型流式调用失败。")
-                else:
-                    yield event
-        except Exception as exc:
-            stream_failure = exc
-        if stream_failure is not None and not chunks:
-            fallback_content = _llm_fallback_message()
-            chunks.append(fallback_content)
-            yield {
-                "type": "warning",
-                "event_type": "fallback",
-                "stage": "llm_chat",
-                "status": "completed",
-                "summary": f"{stream_failure}；已使用安全模板。",
-            }
-            yield {"type": "delta", "content": fallback_content}
-        assistant_content = "".join(chunks)
-        save_message(
-            session_id,
-            "assistant",
-            assistant_content,
-            {
-                "provider": provider,
-                "model": model,
-                "selected_skill": selected_skill,
-                "route_plan": route_plan.model_dump(mode="json") if route_plan else None,
-            },
-        )
-        llm_result_trace = record_agent_trace_event(
-            session_id=session_id,
-            message_id=user_message["message_id"],
-            event_type="tool_result",
-            stage="llm_chat",
-            title="语言模型返回",
-            summary="已生成回复文本。",
-            skill=selected_skill,
-            tool="llm_adapter",
-            output_summary=f"provider={provider}; model={model}; chars={len(assistant_content)}",
-            status="completed",
-        )
-        yield _agent_trace_event(llm_result_trace)
-        yield {"type": "done"}
-    except Exception as exc:
-        yield {"type": "error", "message": str(exc)}
-        yield {"type": "done"}
-
-
+    if response.workflow_state:
+        workflow_state = dict(response.workflow_state)
+        # Stream v3 retained the localized display field; the stable machine
+        # code remains available separately for new clients.
+        if process_workflow and workflow_state.get("current_stage_label"):
+            workflow_state["current_stage"] = workflow_state["current_stage_label"]
+        yield {"type": "workflow_state", **workflow_state}
+    yield {"type": "delta", "content": response.assistant_message}
+    yield {"type": "done"}
+    return
 def _llm_fallback_message() -> str:
     return (
         "语言模型当前不可用。已保留任务、设备、证据和工作流状态；"
@@ -603,6 +433,150 @@ def _handle_display_mode_command(message: str, session_id: str) -> dict | None:
         return {"assistant_message": "无效显示模式。可选：normal、research、debug。", "display_mode": None}
     update_session_state(session_id, {"collected_slots": {"display_mode": mode}})
     return {"assistant_message": f"显示模式已切换为：{mode}。", "display_mode": mode}
+
+
+def _record_process_public_reasoning(
+    session_id: str,
+    message_id: str | None,
+    process_result: dict,
+) -> list[dict]:
+    """Persist an auditable decision summary, never private model chain-of-thought."""
+    state = process_result.get("state") or {}
+    next_action = process_result.get("next_action") or {}
+    view = process_progress(state, next_action)
+    required_labels = view["next_required_action"].get("required_field_labels") or []
+    if required_labels:
+        basis = f"当前输入仍缺少：{'、'.join(required_labels)}。"
+    else:
+        basis = "当前输入已通过本阶段的结构化字段校验。"
+    summary = (
+        f"规则引擎判定当前处于“{view['current_stage']}”。{basis}"
+        f"下一步为“{view['next_required_action'].get('action_label') or '等待流程推进'}”。"
+    )
+    agent_event = record_agent_trace_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type="thinking_summary",
+        stage=view["current_stage_code"],
+        title="公开推理摘要",
+        summary=summary,
+        progress=view["percent"],
+        skill="complex_process_task",
+        status="completed",
+    )
+    record_public_trace(
+        session_id,
+        "thinking_summary",
+        "公开推理摘要",
+        summary,
+        message_id=message_id,
+        workflow_id=process_result.get("run_id"),
+        detail={"stage": view["current_stage_code"], "next_step": view["next_required_action"].get("action_type")},
+    )
+    events = [agent_event]
+    equipment = build_machine_bounds()
+    if equipment.get("active"):
+        equipment_summary = (
+            f"已读取设备配置 {equipment.get('profile_name') or equipment.get('equipment_profile_id')}，"
+            f"版本 {equipment.get('revision_id')}。"
+        )
+        equipment_event = record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="equipment_profile_loaded",
+            stage=view["current_stage_code"],
+            title="读取设备配置",
+            summary=equipment_summary,
+            progress=view["percent"],
+            skill="complex_process_task",
+            tool="equipment_memory_tool",
+            status="completed",
+        )
+        record_public_trace(
+            session_id,
+            "equipment_profile_loaded",
+            "读取设备配置",
+            equipment_summary,
+            message_id=message_id,
+            workflow_id=process_result.get("run_id"),
+            detail={"equipment_profile_id": equipment.get("equipment_profile_id"), "revision_id": equipment.get("revision_id")},
+        )
+        events.append(equipment_event)
+    return events
+
+
+def _build_command_chat_response(
+    session_id: str,
+    assistant_message: str,
+    audit_trace: list[dict],
+) -> ChatResponse:
+    return ChatResponse(
+        session_id=session_id,
+        assistant_message=assistant_message,
+        audit_trace=audit_trace,
+    )
+
+
+def _build_process_chat_response(
+    session_id: str,
+    process_result: dict,
+    selected_skill: str,
+    route_plan: dict,
+    audit_trace: list[dict],
+    events: list[dict],
+) -> ChatResponse:
+    view = process_progress(process_result["state"], process_result["next_action"])
+    visible_trace = _filter_public_trace(session_id, events)
+    reasoning_events = [
+        item
+        for item in visible_trace
+        if item.get("event_type") in {"thinking_summary", "decision", "equipment_profile_loaded"}
+    ]
+    equipment = build_machine_bounds()
+    equipment_profile = None
+    if equipment.get("active"):
+        equipment_profile = {
+            "equipment_profile_id": equipment.get("equipment_profile_id"),
+            "profile_name": equipment.get("profile_name"),
+            "revision_id": equipment.get("revision_id"),
+        }
+    workflow_state = {
+        **process_result["state"],
+        **view,
+        "missing_slots": list(process_result["state"].get("missing_fields") or []),
+        "equipment_profile_used": equipment_profile,
+        "machine_bounds": equipment.get("machine_bounds") or {},
+    }
+    return ChatResponse(
+        session_id=session_id,
+        assistant_message=process_result["content"],
+        selected_skill=selected_skill,
+        route_plan=route_plan,
+        progress={
+            "workflow_type": "complex_process_task",
+            "current_stage": view["current_stage"],
+            "current_stage_code": view["current_stage_code"],
+            "progress_percent": view["percent"],
+            "completed_steps_count": view["completed_steps"],
+            "total_steps": view["total_steps"],
+            "status": "waiting_user" if process_result["next_action"].get("blocking") else "running",
+            "message": process_result["content"].splitlines()[0],
+        },
+        thinking_status=reasoning_events,
+        workflow_state=workflow_state,
+        execution_trace=visible_trace,
+        audit_trace=audit_trace,
+        workflow_overview=view["workflow_overview"],
+        current_stage=view["current_stage"],
+        current_stage_code=view["current_stage_code"],
+        completed_stages=view["completed_stages"],
+        pending_stages=view["pending_stages"],
+        blocked_stages=view["blocked_stages"],
+        next_required_action=view["next_required_action"],
+        skill_trace=[item for item in visible_trace if item.get("skill")],
+        tool_trace=[item for item in visible_trace if item.get("tool")],
+        reasoning_trace=reasoning_events,
+    )
 
 
 def _build_chat_response(

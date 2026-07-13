@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
-from ultrafast_bo.compatibility.agent_export import recommend_from_agent_export
+from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
 from ultrafast_memory.equipment.bounds import build_machine_bounds
 
 
@@ -19,9 +20,16 @@ def call_bo_recommendation(task_spec: dict, training_csv_path: str) -> dict:
     if machine_context is None:
         machine_context = build_machine_bounds()
     approved_priors = spec.pop("approved_priors", [])
-    return recommend_from_agent_export(
+    path = Path(training_csv_path)
+    samples = []
+    if path.exists():
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            samples = [dict(row) for row in csv.DictReader(handle)]
+    result = LegacyBOCompatibilityAdapter().recommend(
         task_spec=spec,
-        training_csv_path=Path(training_csv_path),
+        samples=samples,
         machine_context=machine_context,
         approved_priors=approved_priors,
     )
+    result["training_csv_path"] = str(path)
+    return result

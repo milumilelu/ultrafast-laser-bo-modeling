@@ -22,6 +22,9 @@ def test_baseline_migration_is_registered_and_idempotent(isolated_root):
         "0004_runtime_observability",
             "0005_task_reports",
             "0006_process_workflow_v3",
+            "0007_runtime_jobs_evolution",
+            "0008_bo_governance_lifecycle",
+            "0009_process_recommendation_cam_documents",
     ]
     assert count == 1
 

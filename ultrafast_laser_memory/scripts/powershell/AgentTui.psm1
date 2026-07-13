@@ -325,7 +325,7 @@ function Invoke-AgentScan {
 function Start-AgentApiServer {
     if (-not (Test-AgentPythonEnvironment)) { return }
     Push-Location $script:RepoRoot
-    try { python -m uvicorn ultrafast_memory.app.api:app --reload --host 127.0.0.1 --port 8000 } finally { Pop-Location }
+    try { python -m uvicorn ultrafast_memory.apps.api.main:app --reload --host 127.0.0.1 --port 8000 } finally { Pop-Location }
 }
 
 function Export-AgentBoDataset {
@@ -517,7 +517,7 @@ function Start-AgentApiServerBackground {
         }
         Write-Host ("正在后台启动 FastAPI 后端：{0} ..." -f $baseUrl)
         $process = Start-Process -FilePath "python" `
-            -ArgumentList @("-m", "uvicorn", "ultrafast_memory.app.api:app", "--host", "127.0.0.1", "--port", "$port") `
+            -ArgumentList @("-m", "uvicorn", "ultrafast_memory.apps.api.main:app", "--host", "127.0.0.1", "--port", "$port") `
             -WorkingDirectory $script:RepoRoot `
             -WindowStyle Hidden `
             -PassThru
@@ -540,7 +540,7 @@ function Start-AgentApiServerBackground {
             }
         }
     }
-    Write-Host ("FastAPI 后端启动失败。请检查 {0}-{1} 端口是否被占用，或手动运行 python -m uvicorn ultrafast_memory.app.api:app --host 127.0.0.1 --port <port>" -f $PreferredPort, $MaxPort)
+    Write-Host ("FastAPI 后端启动失败。请检查 {0}-{1} 端口是否被占用，或手动运行 python -m uvicorn ultrafast_memory.apps.api.main:app --host 127.0.0.1 --port <port>" -f $PreferredPort, $MaxPort)
     return $false
 }
 
@@ -669,14 +669,24 @@ function Show-AgentWorkflowState {
         }
     }
     if ($WorkflowState.next_required_action) {
-        Write-Host ("[下一步] {0}" -f $WorkflowState.next_required_action.action_type) -ForegroundColor Yellow
-        if ($WorkflowState.next_required_action.required_fields) {
-            Write-Host ("  必填：{0}" -f (@($WorkflowState.next_required_action.required_fields) -join "、")) -ForegroundColor DarkGray
+        $actionLabel = if ($WorkflowState.next_required_action.action_label) {
+            $WorkflowState.next_required_action.action_label
+        } else {
+            $WorkflowState.next_required_action.action_type
+        }
+        Write-Host ("[下一步] {0}" -f $actionLabel) -ForegroundColor Yellow
+        $requiredLabels = if ($WorkflowState.next_required_action.required_field_labels) {
+            @($WorkflowState.next_required_action.required_field_labels)
+        } else {
+            @($WorkflowState.next_required_action.required_fields)
+        }
+        if ($requiredLabels.Count -gt 0) {
+            Write-Host ("  必填：{0}" -f ($requiredLabels -join "、")) -ForegroundColor DarkGray
         }
     }
     $campaign = if ($WorkflowState.formal_campaign) { $WorkflowState.formal_campaign } else { $WorkflowState.campaign }
     if ($campaign) {
-        Write-Host ("[Campaign] {0}；fidelity={1}；iteration={2}；status={3}" -f `
+        Write-Host ("[优化任务] {0}；保真级别={1}；轮次={2}；状态={3}" -f `
             $campaign.campaign_id, $campaign.fidelity_level, $campaign.current_iteration, $campaign.status) -ForegroundColor DarkCyan
     }
     if ($WorkflowState.equipment_profile_used) {

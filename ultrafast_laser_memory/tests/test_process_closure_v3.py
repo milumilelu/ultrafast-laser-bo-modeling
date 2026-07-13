@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from ultrafast_memory.app.api import app
+from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.process_workflow.closure import archive_gate, bo_sample_eligibility, quality_decision
 
 

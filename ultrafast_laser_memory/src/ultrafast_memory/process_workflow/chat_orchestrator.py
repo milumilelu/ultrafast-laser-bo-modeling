@@ -4,7 +4,11 @@ import json
 from typing import Any
 
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
-from ultrafast_memory.chat.workflow_status import missing_process_fields, parse_process_task_fields
+from ultrafast_memory.chat.workflow_status import (
+    missing_process_fields,
+    parse_process_task_fields,
+    upsert_workflow_progress,
+)
 from ultrafast_memory.trial.service import TrialApplicationService
 from ultrafast_memory.reports.task_report_service import TaskReportService
 from ultrafast_memory.workflows.service import TaskWorkflowService
@@ -17,6 +21,7 @@ from .campaign import CampaignService
 from .recommendation_service import recommend_trial_parameters
 from .repository import ProcessWorkflowRepository
 from .tools import parameter_provenance_registry_tool
+from .presentation import FIELD_LABELS, FIELD_QUESTIONS, STATUS_LABELS, localize_action, stage_label
 
 
 TRIAL_CHOICES = {
@@ -26,7 +31,7 @@ TRIAL_CHOICES = {
 }
 
 PROCESS_STAGES = [
-    "REQUIREMENTS_CONFIRMED", "EQUIPMENT_LOADING", "EVIDENCE_RETRIEVAL", "EVIDENCE_ASSESSMENT",
+    "REQUIREMENTS_PENDING", "REQUIREMENTS_CONFIRMED", "EQUIPMENT_LOADING", "EVIDENCE_RETRIEVAL", "EVIDENCE_ASSESSMENT",
     "TRIAL_ASSESSMENT", "TRIAL_MODE_PENDING", "TRIAL_PLAN_READY", "TRIAL_RESULT_PENDING",
     "TRIAL_RESULT_EVALUATION", "KNOWLEDGE_APPROVAL_PENDING", "BO_READY", "BO_RUNNING",
     "FORMAL_PROCESS_READY", "FORMAL_RELEASE_PENDING", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
@@ -36,22 +41,28 @@ PROCESS_STAGES = [
 
 def process_progress(state: dict[str, Any], next_action: dict[str, Any]) -> dict[str, Any]:
     current = state.get("state") or "INTAKE"
-    if current == "REQUIREMENTS_PENDING":
+    if current == "COMPLETED":
+        completed_count = len(PROCESS_STAGES)
+    elif current == "REQUIREMENTS_PENDING":
         completed_count = 0
     elif current in PROCESS_STAGES:
         completed_count = PROCESS_STAGES.index(current)
-    elif current == "COMPLETED":
-        completed_count = len(PROCESS_STAGES)
     else:
         completed_count = 0
-    overview = [{"step": name, "status": "completed" if index < completed_count else
-                 "current" if name == current else "pending"}
-                for index, name in enumerate(PROCESS_STAGES)]
-    return {"workflow_overview": overview, "current_stage": current,
-            "completed_stages": [item["step"] for item in overview if item["status"] == "completed"],
-            "pending_stages": [item["step"] for item in overview if item["status"] == "pending"],
-            "blocked_stages": [current] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
-            "next_required_action": next_action, "completed_steps": completed_count,
+    overview = []
+    for index, name in enumerate(PROCESS_STAGES):
+        status_code = "completed" if index < completed_count else "current" if name == current else "pending"
+        overview.append({"step_code": name, "step": stage_label(name), "status_code": status_code,
+                         "status": STATUS_LABELS[status_code]})
+    return {"workflow_overview": overview, "current_stage_code": current, "current_stage": current,
+            "current_stage_label": stage_label(current),
+            "completed_stage_codes": [item["step_code"] for item in overview if item["status_code"] == "completed"],
+            "completed_stages": [item["step"] for item in overview if item["status_code"] == "completed"],
+            "pending_stage_codes": [item["step_code"] for item in overview if item["status_code"] == "pending"],
+            "pending_stages": [item["step"] for item in overview if item["status_code"] == "pending"],
+            "blocked_stage_codes": [current] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
+            "blocked_stages": [stage_label(current)] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
+            "next_required_action": localize_action(next_action), "completed_steps": completed_count,
             "total_steps": len(PROCESS_STAGES), "percent": round(completed_count / len(PROCESS_STAGES) * 100)}
 
 
@@ -64,12 +75,20 @@ def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
     missing = missing_process_fields(task)
     collected["process_task_spec"] = task
     if missing:
-        workflow.update({"state": "REQUIREMENTS_PENDING", "missing_fields": missing})
+        clarification_round = min(int(workflow.get("clarification_round") or 0) + 1, 3)
+        workflow.update({"state": "REQUIREMENTS_PENDING", "missing_fields": missing,
+                         "clarification_round": clarification_round,
+                         "max_clarification_rounds": 3})
         collected["process_workflow"] = workflow
         update_session_state(session_id, {"collected_slots": collected,
             "active_workflow": "complex_process_task", "active_skill": "complex_process_task",
             "workflow_stage": "clarification", "pending_questions": missing})
-        return {"content": _requirements_message(task, missing), "state": workflow,
+        upsert_workflow_progress(
+            session_id, "complex_process_task", "REQUIREMENTS_PENDING", "waiting_user",
+            "等待用户补充加工要求。", completed_steps=["工作流路由完成"],
+            pending_steps=missing, missing_slots=missing,
+        )
+        return {"content": _requirements_message(task, missing, clarification_round), "state": workflow,
                 "next_action": {"action_type": "submit_required_fields", "required_fields": missing, "blocking": True},
                 "events": []}
 
@@ -370,21 +389,25 @@ def _ingest_and_evaluate(plan: dict[str, Any], payload: dict[str, Any]) -> dict[
         "confirm_conditional": bool(payload.get("confirm_conditional"))})
 
 
-def _requirements_message(task: dict[str, Any], missing: list[str]) -> str:
-    return ("加工工作流已停在需求确认阶段。\n\n任务流程\n1. 任务需求确认：等待补充\n2. 设备/RAG/试切/BO/正式加工：未开始\n\n"
-            f"当前阶段：REQUIREMENTS_PENDING\n缺失字段：{', '.join(missing)}\n"
-            "在字段完整前不会检索参数、生成参数或运行 BO。")
+def _requirements_message(task: dict[str, Any], missing: list[str], clarification_round: int = 1) -> str:
+    questions = "\n".join(f"{index}. {FIELD_QUESTIONS.get(field, '请补充' + FIELD_LABELS.get(field, field) + '。')}"
+                          for index, field in enumerate(missing, start=1))
+    labels = "、".join(FIELD_LABELS.get(field, field) for field in missing)
+    limit = "\n\n已完成 3 轮澄清；若仍无法补齐，系统只提供保守方案，不能进入确定性 BO 参数推荐。" if clarification_round >= 3 else ""
+    return ("加工任务进入需求确认阶段，工作流已停在“等待补充加工要求”阶段。\n\n"
+            f"还缺少：{labels}\n\n请回答：\n{questions}\n\n"
+            "字段完整前不会读取工艺参数证据、生成参数或运行贝叶斯优化。" + limit)
 
 
 def _trial_choice_message(selection: dict[str, Any]) -> str:
     return ("任务需求、设备、RAG、证据评价和试切必要性评估已执行。\n\n"
-            f"当前阶段：TRIAL_MODE_PENDING\n系统建议：{selection.get('recommended_mode')}\n"
+            f"当前阶段：等待选择试切方式\n系统建议：{selection.get('recommended_mode')}\n"
             "请选择：[简化试切] [完整试切] [跳过试切]。系统不会替您默认选择。")
 
 
 def _trial_plan_message(plan: dict[str, Any]) -> str:
     return (f"已生成 {plan.get('trial_mode')} 方案（{plan.get('trial_plan_id')}）。\n"
-            "当前阶段：TRIAL_RESULT_PENDING。尚未收到结果，不会声称试切通过或进入 BO。")
+            "当前阶段：等待提交试切结果。尚未收到结果，不会声称试切通过或进入贝叶斯优化。")
 
 
 def _trial_result_contract() -> dict[str, Any]:

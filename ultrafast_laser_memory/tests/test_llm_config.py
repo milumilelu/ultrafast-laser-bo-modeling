@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from ultrafast_memory.app.api import app
+from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.core.llm_config import get_llm_config
 
 

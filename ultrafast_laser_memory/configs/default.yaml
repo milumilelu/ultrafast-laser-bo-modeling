@@ -41,6 +41,21 @@ parsers:
     enabled: true
   operator_note:
     enabled: true
+  paddleocr:
+    enabled: true
+    parser_version: "3.x-adapter-1.0"
+
+experimental_features:
+  vision_semantic_analysis:
+    implemented: true
+    enabled: false
+    expose_api: false
+    expose_chat_tool: false
+    allow_rag_ingestion: false
+    allow_knowledge_candidate: false
+    allow_process_recommendation: false
+    allow_bo_usage: false
+    allow_cam_usage: false
 
 bo:
   export_filename: "bo_training_samples.csv"

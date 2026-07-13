@@ -140,6 +140,41 @@ class ProcessWorkflowRepository:
             conn.commit()
         return cursor.rowcount > 0
 
+    def list_campaigns_for_task(self, task_id: str) -> list[dict[str, Any]]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM optimization_campaign WHERE task_id=? ORDER BY created_at",
+                (task_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            value = dict(row)
+            for field in ("material_context", "objectives", "constraints", "search_space", "budget"):
+                value[field] = _load(value.pop(field + "_json"), {})
+            result.append(value)
+        return result
+
+    def list_model_snapshots_for_task(self, task_id: str) -> list[dict[str, Any]]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT snapshot.*
+                FROM model_snapshot AS snapshot
+                JOIN optimization_campaign AS campaign
+                  ON campaign.campaign_id = snapshot.campaign_id
+                WHERE campaign.task_id=?
+                ORDER BY snapshot.created_at
+                """,
+                (task_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            value = dict(row)
+            for field in ("training_sample_ids", "hyperparameters", "metrics"):
+                value[field] = _load(value.pop(field + "_json"), [] if field == "training_sample_ids" else {})
+            result.append(value)
+        return result
+
     def approve_rework(self, campaign_id: str, updated_at: str) -> dict[str, Any] | None:
         with get_connection() as conn:
             row = conn.execute(

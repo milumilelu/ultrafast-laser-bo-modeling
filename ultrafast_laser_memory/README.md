@@ -11,7 +11,7 @@
 | 功能 | 状态 | 可演示 | 数据 | 限制 |
 |---|---|---:|---|---|
 | 任务、设备与混合 Router | implemented | 是 | SQLite 设备 revision | 仍保留旧 Skill 名兼容 |
-| 文献导入与混合 RAG | implemented | 是 | 本地 8,512 个语料 chunks；Demo 可加 1 个忽略的 fixture | 不做自动 OCR/公式视觉理解 |
+| 文献导入与混合 RAG | implemented | 是 | 本地 8,512 个语料 chunks；Demo 可加 1 个忽略的 fixture | 旧导入命令不自动 OCR；扫描件可显式进入 PaddleOCR Job |
 | 真实 BO | implemented | 是 | 旧 BO 数据与受治理训练样本 | `<10` 样本为规则冷启动；文献参数必须过 Gate |
 | Skill 契约与 Domain Pack | implemented | 是 | 45 个校验契约 | 旧别名保留一个兼容周期 |
 | 简化/完整/跳过试切 | implemented | 是 | 版本化 SQLite 表 | 不控制真实设备 |
@@ -84,6 +84,19 @@ python -m ultrafast_memory.app.cli export-bo
 ```powershell
 python -m uvicorn ultrafast_memory.app.api:app --reload --host 127.0.0.1 --port 8000
 ```
+
+### Governed runtime and CAM APIs
+
+The next-stage governed implementation adds:
+
+- persistent `/jobs` create/status/events/cancel/retry endpoints;
+- immutable workflow context and one shared Chat/NDJSON workflow path;
+- strict `BORecommendationService` slicing, eligibility, readiness, versions, and replay;
+- dynamic partial-parameter search spaces and constrained recommendations;
+- versioned `/api/v1/process-recommendations` CAM JSON export and feedback candidate creation;
+- PaddleOCR background-job adapter and a default-disabled, non-public vision skeleton.
+
+See `../docs/governed_runtime_bo_cam_migration.md` for migration, rollback, contract, and known-limit details. A real vendor CAM adapter is intentionally blocked until `ultrafast_laser_codex_task_package/05_CAM_VENDOR_INPUT_TEMPLATE.md` is completed with authoritative vendor material.
 
 接口已按 health/chat/equipment/literature/rag/knowledge/trial/bo/workflows/reports Router 拆分。启动后访问 `/docs` 查看完整 OpenAPI。
 
@@ -346,7 +359,7 @@ BO 默认要求 active equipment profile。没有 active profile 时，系统阻
 
 ## 当前系统不做什么
 
-不做真实机床闭环控制、商业 CAD/CAM 替代、自动 OCR、复杂图像/公式视觉理解、自动下载付费论文、自动生成 `validated_rule`、多用户 RBAC 或完整 Web 管理后台。外部 LLM 可配置，但 Demo/Doctor/回放不依赖外部调用。
+不做真实机床闭环控制、商业 CAD/CAM 替代、旧文献导入流程的隐式 OCR、复杂图像/公式视觉理解、自动下载付费论文、自动生成 `validated_rule`、多用户 RBAC 或完整 Web 管理后台。扫描件可由显式文档摄取服务创建幂等 PaddleOCR 后台任务；外部 LLM 可配置，但 Demo/Doctor/回放不依赖外部调用。
 
 ## 降级与最终性能
 
@@ -479,7 +492,7 @@ ultrafast rag query "diamond CRL femtosecond laser machining"
 
 PDF 使用 PyMuPDF 分页解析，页码统一为 1-based；章节按 Abstract、Methods、Results、
 Discussion、Conclusion 等识别，References 默认不进入主索引。平均每页有效字符数
-低于 50 的 PDF 标记为 `needs_ocr`，保留来源记录但不进入正文索引。本 MVP 不自动 OCR。
+低于 50 的 PDF 标记为 `needs_ocr`，保留来源记录但不进入正文索引。旧 `literature ingest` 不会隐式触发 OCR；显式文档摄取会创建 `paddleocr_document` 后台任务，OCR 数值仅生成待审核候选，不能直接进入 RAG、BO 或 CAM。
 
 查询同时使用 SQLite FTS5（不可用时退化为关键词检索）和本地向量索引，通过 RRF
 融合后执行 metadata filter 和规则 rerank。可过滤：

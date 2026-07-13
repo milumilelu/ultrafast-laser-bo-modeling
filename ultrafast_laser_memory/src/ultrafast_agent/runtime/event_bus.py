@@ -4,10 +4,10 @@ from collections.abc import Callable
 from threading import Lock
 from typing import Any
 
-from ultrafast_agent.runtime.events import PublicEvent, redact_public_data
+from ultrafast_agent.runtime.events import AgentEvent, redact_public_data
 
 
-Subscriber = Callable[[PublicEvent], None]
+Subscriber = Callable[[AgentEvent], None]
 
 
 class EventBus:
@@ -24,7 +24,7 @@ class EventBus:
         self.task_id = task_id
         self.trace_id = trace_id or run_id
         self._sequence = 0
-        self._events: list[PublicEvent] = []
+        self._events: list[AgentEvent] = []
         self._subscribers: list[Subscriber] = []
         self._lock = Lock()
 
@@ -57,11 +57,11 @@ class EventBus:
         parent_event_id: str | None = None,
         visibility: str = "public",
         evidence_refs: list[str] | None = None,
-    ) -> PublicEvent:
+    ) -> AgentEvent:
         with self._lock:
             self._sequence += 1
             safe_data = redact_public_data(data or {})
-            event = PublicEvent(
+            event = AgentEvent(
                 run_id=self.run_id,
                 trace_id=self.trace_id,
                 session_id=self.session_id,
@@ -94,7 +94,7 @@ class EventBus:
         return event
 
     @property
-    def events(self) -> list[PublicEvent]:
+    def events(self) -> list[AgentEvent]:
         with self._lock:
             return list(self._events)
 

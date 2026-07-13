@@ -42,6 +42,7 @@ class ChatResponse(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
     workflow_overview: list[dict[str, Any]] = Field(default_factory=list)
     current_stage: str | None = None
+    current_stage_code: str | None = None
     completed_stages: list[str] = Field(default_factory=list)
     pending_stages: list[str] = Field(default_factory=list)
     blocked_stages: list[str] = Field(default_factory=list)

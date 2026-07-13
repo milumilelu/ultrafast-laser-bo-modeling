@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ultrafast_agent.runtime.events import PublicEvent
+from ultrafast_agent.runtime.events import AgentEvent
 from ultrafast_memory.db.init_db import init_database
 from ultrafast_memory.db.session import get_connection
 from ultrafast_shared.db.unit_of_work import UnitOfWork
@@ -12,7 +12,7 @@ from ultrafast_shared.db.unit_of_work import UnitOfWork
 class RuntimeEventRepository:
     def persist(
         self,
-        event: PublicEvent,
+        event: AgentEvent,
         *,
         session_id: str | None = None,
         task_id: str | None = None,
@@ -74,6 +74,16 @@ class RuntimeEventRepository:
             rows = connection.execute(
                 "SELECT * FROM runtime_public_event WHERE task_id=? ORDER BY created_at, sequence",
                 (task_id,),
+            ).fetchall()
+        return [self._row(dict(row)) for row in rows]
+
+    def list_session_events(self, session_id: str) -> list[dict[str, Any]]:
+        init_database()
+        with get_connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM runtime_public_event WHERE session_id=? "
+                "ORDER BY created_at, sequence",
+                (session_id,),
             ).fetchall()
         return [self._row(dict(row)) for row in rows]
 

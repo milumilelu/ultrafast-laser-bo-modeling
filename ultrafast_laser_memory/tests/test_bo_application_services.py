@@ -25,7 +25,7 @@ def _samples(count: int):
         power = 2.0 + index * 0.25
         frequency = 80.0 + index * 4
         speed = 100.0 + index * 8
-        passes = 2 + index % 5
+        passes = 1 + index % 20
         rows.append(
             {
                 "sample_id": f"sample-{index}",
@@ -51,10 +51,22 @@ def test_cold_start_is_bounded_and_does_not_claim_bo():
         assert BOUNDS[name][0] <= value <= BOUNDS[name][1]
 
 
-def test_hybrid_and_data_driven_modes_use_real_surrogate():
-    hybrid = RecommendationService().recommend({"random_seed": 7}, _samples(12), _machine())
-    data_driven = RecommendationService().recommend({"random_seed": 7}, _samples(30), _machine())
+def test_readiness_governs_cold_hybrid_and_data_driven_modes():
+    low_support = RecommendationService().recommend({"random_seed": 7}, _samples(12), _machine())
+    hybrid = RecommendationService().recommend({"random_seed": 7}, _samples(40), _machine())
+    data_driven = RecommendationService().recommend(
+        {
+            "random_seed": 7,
+            "validation_metrics": {
+                "prediction_interval_coverage": 0.94,
+                "uncertainty_calibration_error": 0.01,
+            },
+        },
+        _samples(40), _machine(),
+    )
 
+    assert low_support["model_status"] == "rule_based_cold_start"
+    assert low_support["bo_invoked"] is False
     assert hybrid["model_status"] == "hybrid_rule_bo"
     assert hybrid["bo_invoked"] is True
     assert hybrid["prediction"]["metric"] == "quality_score"
@@ -101,9 +113,9 @@ def test_agent_export_adapter_calls_real_service(tmp_path):
         {"machine_bounds": BOUNDS, "equipment_revision": "eqrev-explicit"}, str(path)
     )
 
-    assert result["model_status"] == "hybrid_rule_bo"
-    assert result["bo_invoked"] is True
-    assert result["compatibility_adapter"] == "agent_export_v1"
+    assert result["model_status"] == "rule_based_cold_start"
+    assert result["bo_invoked"] is False
+    assert result["training_csv_path"] == str(path)
     assert result["machine_bounds_revision"] == "eqrev-explicit"
 
 
@@ -132,6 +144,6 @@ def test_bo_cannot_use_literature_parameters_without_gate():
 
     assert blocked["model_status"] == "blocked"
     assert blocked["bo_invoked"] is False
-    assert allowed["model_status"] == "hybrid_rule_bo"
-    assert allowed["bo_invoked"] is True
+    assert allowed["model_status"] == "rule_based_cold_start"
+    assert allowed["bo_invoked"] is False
     assert allowed["knowledge_approval_ids"] == ["approval-gate-1"]
