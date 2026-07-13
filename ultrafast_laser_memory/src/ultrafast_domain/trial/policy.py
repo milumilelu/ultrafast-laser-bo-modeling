@@ -86,6 +86,7 @@ def design_trial_plan(
     trial_mode: TrialMode | str,
     machine_bounds: dict[str, list[float | int]],
     domain_pack_name: str | None = None,
+    approved_parameter_candidates: list[dict[str, float | int]] | None = None,
 ) -> TrialPlanDraft:
     mode = TrialMode(trial_mode)
     if mode == TrialMode.SKIP:
@@ -106,7 +107,7 @@ def design_trial_plan(
         "full_geometry": mode == TrialMode.FULL,
         "source": f"domain_pack:{domain_pack_name}" if pack else "process_type_rule",
     }
-    parameter_matrix = _parameter_matrix(machine_bounds, full=mode == TrialMode.FULL)
+    parameter_matrix = list(approved_parameter_candidates or [])
     metrics = list(pack.quality_metrics) if pack else list(task_spec.get("quality_metrics") or [])
     measurement = {
         "required": True,
@@ -117,8 +118,8 @@ def design_trial_plan(
     criteria = _acceptance_criteria(task_spec.get("targets") or {}, metrics)
     stop_conditions = _stop_conditions(task_spec)
     warnings = []
-    if not machine_bounds:
-        warnings.append("parameter matrix is empty because machine bounds are missing")
+    if not parameter_matrix:
+        warnings.append("parameter matrix is empty because no parameter tool output was approved")
     return TrialPlanDraft(
         task_id=task_id,
         trial_mode=mode,

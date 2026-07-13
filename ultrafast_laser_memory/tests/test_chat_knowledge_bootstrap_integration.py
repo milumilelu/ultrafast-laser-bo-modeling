@@ -13,7 +13,7 @@ def test_chat_knowledge_bootstrap_permission_and_review_flow(isolated_root):
 
     first = handle_chat(
         ChatRequest(
-            message="我想做金刚石CRL的飞秒激光加工，帮我查文献并制定方案",
+            message="请查文献和论文解释超快激光损伤机制",
             use_skills=True,
         )
     )

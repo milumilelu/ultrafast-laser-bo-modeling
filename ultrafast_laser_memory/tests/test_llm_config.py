@@ -69,7 +69,12 @@ def test_fastapi_llm_endpoints_do_not_expose_key(isolated_root, monkeypatch):
     config_response = client.get("/llm/config")
     assert config_response.status_code == 200
     assert "sk-test-secret" not in config_response.text
+    monkeypatch.setattr(
+        "ultrafast_memory.llm.openai_compatible.OpenAICompatibleClient.test_connection",
+        lambda self, **kwargs: {"ok": True},
+    )
     test_response = client.post("/llm/test")
     assert test_response.status_code == 200
-    assert test_response.json()["external_call_performed"] is False
+    assert test_response.json()["external_call_performed"] is True
+    assert test_response.json()["valid"] is True
     assert "sk-test-secret" not in test_response.text

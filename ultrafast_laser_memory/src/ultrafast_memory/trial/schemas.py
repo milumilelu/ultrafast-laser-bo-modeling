@@ -23,6 +23,7 @@ class TrialPlanCreateRequest(BaseModel):
     task_spec: dict[str, Any] = Field(default_factory=dict)
     trial_mode: str
     machine_bounds: dict[str, list[float | int]] = Field(default_factory=dict)
+    approved_parameter_candidates: list[dict[str, float | int]] = Field(default_factory=list)
     domain_pack: str | None = None
 
 

@@ -192,6 +192,8 @@ def test_llm_failure_uses_safe_template_for_sync_and_stream(
     assert "不会生成未经验证的工艺参数" in response.assistant_message
     assert response.audit_trace[-1]["status"] == "fallback"
     assert any(event.get("event_type") == "fallback" for event in events)
+    warning = next(event for event in events if event.get("event_type") == "fallback")
+    assert "injected provider detail" not in warning["summary"]
     assert any(
         event.get("type") == "delta" and "不会生成未经验证的工艺参数" in event.get("content", "")
         for event in events

@@ -44,6 +44,7 @@ class TrialApplicationService:
             TrialMode(payload["trial_mode"]),
             payload.get("machine_bounds") or {},
             payload.get("domain_pack"),
+            payload.get("approved_parameter_candidates"),
         )
         result = self.repository.create_plan(draft.to_dict())
         result["warnings"] = draft.warnings

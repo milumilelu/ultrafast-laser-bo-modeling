@@ -19,10 +19,26 @@ def rule_route(message: str, session_state: dict | None = None) -> RoutePlan | N
             state_update=StateUpdate(
                 active_skill=skill,
                 workflow_stage=state.get("workflow_stage") or "clarification",
+                pending_questions=state.get("pending_questions") or [],
             ),
         )
 
     text = message.lower()
+    machining_markers = ["切割", "加工", "打孔", "钻孔", "刻蚀", "去除", "cfrp", "碳纤维", "试切"]
+    if any(marker in text for marker in machining_markers):
+        return RoutePlan(
+            primary_skill="complex_process_task",
+            secondary_skills=["rag_evidence_retrieval", "trial_need_assessment", "trial_strategy_selection",
+                              "knowledge_bootstrap", "expert_review"],
+            intent="complex_process_task", workflow_stage="intake", confidence=0.98,
+            reason="Machining task detected; the mandatory gated process workflow applies.",
+            requires_clarification=True, requires_internal_rag=True, requires_evidence_gap_check=True,
+            allowed_tools=["equipment_memory_tool", "rag_query_tool", "historical_case_tool", "process_rule_tool"],
+            route_source="mandatory_process_rule",
+            clarification_questions=["请确认材料、几何、质量约束和设备配置是否完整。"],
+            state_update=StateUpdate(active_workflow="complex_process_task", active_skill="complex_process_task",
+                                     workflow_stage="clarification", pending_questions=["task_required_fields"]),
+        )
     if text.strip() == "/bootstrap run":
         return RoutePlan(
             primary_skill="knowledge_bootstrap",
@@ -148,12 +164,17 @@ def _hit(text: str, keywords: list[str]) -> bool:
 def _is_continuation(message: str, state: dict) -> bool:
     if not state.get("active_skill"):
         return False
+    if state.get("active_workflow") == "complex_process_task":
+        return True
     if state.get("workflow_stage") != "clarification":
         return False
     if not state.get("pending_questions"):
         return False
     text = message.lower()
-    continuation_markers = ["单晶", "多晶", "1030", "nm", "fs", "w", "可以", "不可以", "后处理", "最大功率"]
+    continuation_markers = ["单晶", "多晶", "金刚石", "设备", "无分层", "压缩空气", "分层加工",
+                            "简化试切", "完整试切", "跳过试切", "cm", "直线", "接受", "焦点",
+                            "探索性候选", "llm兜底",
+                            "1030", "nm", "fs", "w", "可以", "不可以", "后处理", "最大功率"]
     return any(marker in text for marker in continuation_markers)
 
 

@@ -278,6 +278,101 @@ skills:
     allowed_tools: [trace_query_service]
 
   - <<: *defaults
+    name: parameter_recommendation_planning
+    purpose: Plan the deterministic BO to RAG to authorized fallback parameter chain.
+    allowed_tools: [bo_parameter_recommendation_tool, rag_parameter_recommendation_tool, llm_fallback_parameter_tool]
+
+  - <<: *defaults
+    name: data_support_assessment
+    purpose: Assess context-matched validated sample support before candidate generation.
+    allowed_tools: [bo_parameter_recommendation_tool]
+
+  - <<: *defaults
+    name: parameter_source_selection
+    purpose: Select parameter authority using deterministic policy and intended-use permissions.
+    allowed_tools: [parameter_provenance_registry_tool]
+
+  - <<: *defaults
+    name: parameter_recommendation_explanation
+    purpose: Explain public parameter provenance, uncertainty, permissions, and rejection reasons.
+    allowed_tools: [parameter_provenance_registry_tool]
+
+  - <<: *defaults
+    name: optimization_campaign_initialization
+    purpose: Initialize a fidelity-scoped optimization campaign with budget and constraints.
+    allowed_tools: [candidate_registry_tool, experiment_store_tool]
+
+  - <<: *defaults
+    name: iteration_planning
+    purpose: Create an auditable campaign iteration and batch budget.
+    allowed_tools: [candidate_registry_tool]
+
+  - <<: *defaults
+    name: candidate_generation
+    purpose: Register candidates produced by an authorized parameter source.
+    allowed_tools: [candidate_registry_tool]
+
+  - <<: *defaults
+    name: candidate_safety_filter
+    purpose: Reject candidates outside equipment, source, and intended-use constraints.
+    allowed_tools: [parameter_constraint_validation_tool, equipment_bounds_tool]
+
+  - <<: *defaults
+    name: trial_batch_planning
+    purpose: Select a bounded simple or full trial candidate batch.
+    allowed_tools: [candidate_registry_tool, trial_template_tool]
+
+  - <<: *defaults
+    name: observation_ingestion
+    purpose: Ingest fidelity-scoped execution observations without automatic BO admission.
+    allowed_tools: [experiment_store_tool, measurement_parser_tool]
+
+  - <<: *defaults
+    name: observation_validation
+    purpose: Validate traceability and completeness before model use.
+    allowed_tools: [measurement_parser_tool, quality_metric_tool]
+
+  - <<: *defaults
+    name: surrogate_model_update
+    purpose: Update a model only from BO-approved observations and create a snapshot.
+    allowed_tools: [model_snapshot_tool, experiment_store_tool]
+
+  - <<: *defaults
+    name: acquisition_optimization
+    purpose: Optimize acquisition within the approved search space and constraints.
+    allowed_tools: [bo_engine_tool, candidate_registry_tool]
+
+  - <<: *defaults
+    name: iteration_decision
+    purpose: Decide whether to continue, change fidelity, pause, or terminate a campaign.
+    allowed_tools: [candidate_registry_tool, quality_metric_tool]
+
+  - <<: *defaults
+    name: search_space_refinement
+    purpose: Narrow or expand only within approved equipment and process boundaries.
+    allowed_tools: [equipment_bounds_tool, process_prior_tool]
+
+  - <<: *defaults
+    name: fidelity_transition
+    purpose: Gate transitions among simple trial, full trial, formal process, and rework.
+    allowed_tools: [knowledge_approval_tool, candidate_registry_tool]
+
+  - <<: *defaults
+    name: formal_checkpoint_evaluation
+    purpose: Evaluate formal-process checkpoints and deviation levels.
+    allowed_tools: [quality_metric_tool, experiment_store_tool]
+
+  - <<: *defaults
+    name: formal_local_adjustment
+    purpose: Restrict formal adjustments to approved-window local trust regions.
+    allowed_tools: [parameter_constraint_validation_tool, equipment_bounds_tool]
+
+  - <<: *defaults
+    name: campaign_termination
+    purpose: Record success, failure, budget, or manual campaign termination reasons.
+    allowed_tools: [experiment_store_tool, report_writer_tool]
+
+  - <<: *defaults
     name: process_file_ingestion
     version: "1.0.0-compat"
     purpose: Compatibility orchestration for file ingestion through the ingestion service.

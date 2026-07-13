@@ -17,7 +17,7 @@ from ultrafast_memory.agent_runtime.trace_collector import (
 )
 
 
-STAGE_PROGRESS = {
+STAGE_PROGRESS = {  # legacy non-machining workflows only
     "intake_started": 5,
     "basic_info_extracted": 15,
     "missing_slots_identified": 25,
@@ -36,6 +36,43 @@ STAGE_PROGRESS = {
 }
 
 FORBIDDEN_STATUS_KEYS = {"chain_of_thought", "raw_thoughts", "hidden_reasoning", "model_reasoning_tokens"}
+
+
+def inspect_required_fields(message: str, workflow_type: str) -> list[str]:
+    """Pure preflight used to enforce intake before retrieval or recommendation."""
+    return _missing_slots(_parse_task(message), workflow_type, build_machine_bounds())
+
+
+def parse_process_task_fields(message: str) -> dict[str, Any]:
+    """Extract only explicit machining facts; never infer process parameters."""
+    task = _parse_task(message)
+    text = message.lower()
+    length = re.search(r"(\d+(?:\.\d+)?)\s*(cm|mm)\s*(?:直线|长|长度)?", text)
+    if length and not re.search(r"厚\s*" + re.escape(length.group(0)), text):
+        value = float(length.group(1)) * (10 if length.group(2) == "cm" else 1)
+        if value != task.get("thickness_mm"):
+            task["cut_length_mm"] = value
+    if "无效率要求" in text or "无硬性限制" in text or ("；无；" in message and "压缩空气" in text):
+        task["efficiency_requirement"] = "none"
+    if "可多次分层" in text or "允许层切" in text or "分层加工" in text:
+        task["layer_cut_allowed"] = True
+    if "无分层" in text:
+        task["quality_requirement"] = "no_delamination"
+    if "压缩空气" in text:
+        task["auxiliary"] = "compressed_air"
+    if "自动焦点跟踪" in text or "自动z轴" in text:
+        task["focus_tracking"] = True
+    return task
+
+
+PROCESS_REQUIRED_FIELDS = (
+    "material", "process_type", "thickness_mm", "quality_requirement",
+    "cut_length_mm", "efficiency_requirement", "auxiliary", "layer_cut_allowed",
+)
+
+
+def missing_process_fields(task: dict[str, Any]) -> list[str]:
+    return [field for field in PROCESS_REQUIRED_FIELDS if task.get(field) is None]
 
 
 def build_workflow_artifacts(
@@ -126,17 +163,24 @@ def upsert_workflow_progress(
 ) -> dict[str, Any]:
     now = utc_now_iso()
     workflow_id = stable_id("workflow", session_id, workflow_type)
+    completed = completed_steps or []
+    pending = pending_steps or []
+    total = len(completed) + len(pending)
+    calculated_percent = round(len(completed) / total * 100, 2) if total else float(STAGE_PROGRESS.get(current_stage, 0))
     record = {
         "progress_id": stable_id("progress", session_id, workflow_type),
         "session_id": session_id,
         "workflow_id": workflow_id,
         "workflow_type": workflow_type,
         "current_stage": current_stage,
-        "progress_percent": float(STAGE_PROGRESS.get(current_stage, 5)),
+        "progress_percent": calculated_percent,
+        "completed_steps_count": len(completed),
+        "total_steps": total,
+        "percent": calculated_percent,
         "status": status,
         "message": message,
-        "completed_steps": completed_steps or [],
-        "pending_steps": pending_steps or [],
+        "completed_steps": completed,
+        "pending_steps": pending,
         "missing_slots": missing_slots or [],
         "updated_at": now,
     }
@@ -171,6 +215,7 @@ def record_public_trace(
     detail: dict[str, Any] | None = None,
     visibility: str = "public",
 ) -> dict[str, Any]:
+    init_database()
     safe_detail = {k: v for k, v in (detail or {}).items() if k not in FORBIDDEN_STATUS_KEYS}
     now = utc_now_iso()
     record = {
@@ -194,6 +239,27 @@ def record_public_trace(
             )
             """,
             record,
+        )
+        run_id = workflow_id or stable_id("workflow", session_id, "public-trace")
+        sequence = conn.execute(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM public_reasoning_trace WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()[0]
+        public_payload = {
+            "trace_id": record["trace_id"], "sequence": sequence, "stage": event_type,
+            "event_type": event_type, "title": title, "summary": summary,
+            "assumptions": [], "evidence_refs": safe_detail.get("evidence_refs") or [],
+            "alternatives_considered": safe_detail.get("alternatives_considered") or [],
+            "selected_alternative": safe_detail.get("selected_alternative"),
+            "rejection_reasons": safe_detail.get("rejection_reasons") or [],
+            "uncertainty": safe_detail.get("uncertainty") or {},
+            "next_step": safe_detail.get("next_step"), "visibility": "public",
+            "created_at": now,
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO public_reasoning_trace VALUES (?,?,?,?,?,?,?,?,?)",
+            (record["trace_id"], run_id, sequence, event_type, event_type, title, summary,
+             json.dumps(public_payload, ensure_ascii=False), now),
         )
         conn.commit()
     return {key: value for key, value in record.items() if key != "detail_json"}
@@ -297,10 +363,10 @@ def _workflow_type(route_plan: Any | None) -> str:
 
 
 def _stage_for(workflow_type: str, missing_slots: list[str], round_no: int, route_plan: Any | None) -> str:
-    if getattr(route_plan, "requires_evidence_gap_check", False):
-        return "evidence_gap_checking"
     if missing_slots:
         return f"clarification_round_{min(max(round_no, 1), 3)}"
+    if getattr(route_plan, "requires_evidence_gap_check", False):
+        return "evidence_gap_checking"
     if workflow_type == "rag_literature_retrieval":
         return "ready_for_rag"
     if workflow_type == "bo_recommendation":
@@ -313,6 +379,20 @@ def _parse_task(message: str) -> dict[str, Any]:
     task: dict[str, Any] = {}
     if "diamond" in text or "金刚石" in text:
         task["material"] = "diamond"
+    if "cfrp" in text or "碳纤维" in text or "t300" in text:
+        task["material"] = "CFRP_T300" if "t300" in text else "CFRP"
+    thickness = re.search(r"(\d+(?:\.\d+)?)\s*mm\s*(?:厚)?", text)
+    if thickness:
+        task["thickness_mm"] = float(thickness.group(1))
+    if "切割" in text or "cutting" in text:
+        task["process_type"] = "cutting"
+        task["component_type"] = "workpiece"
+    if "无分层" in text or "delamination" in text:
+        task["quality_requirement"] = "no_delamination"
+    if "压缩空气" in text or "compressed air" in text:
+        task["auxiliary"] = "compressed_air"
+    if "允许层切" in text:
+        task["layer_cut_allowed"] = True
     if "crl" in text or "透镜" in text or "x-ray" in text:
         task["component_type"] = "CRL"
     if "飞秒" in text or "femtosecond" in text or "超快" in text:
@@ -330,9 +410,13 @@ def _parse_task(message: str) -> dict[str, Any]:
 
 
 def _missing_slots(task: dict[str, Any], workflow_type: str, equipment_context: dict[str, Any]) -> list[str]:
-    if workflow_type not in {"task_intake", "crl_task_planning", "rag_literature_retrieval", "bo_recommendation"}:
+    if workflow_type not in {"task_intake", "crl_task_planning", "rag_literature_retrieval", "bo_recommendation", "complex_process_task"}:
         return []
     missing = []
+    if workflow_type == "complex_process_task":
+        for slot in ("material", "process_type", "thickness_mm", "quality_requirement"):
+            if not task.get(slot):
+                missing.append(slot)
     if task.get("component_type") == "CRL" or task.get("material") == "diamond":
         for slot in ("diamond_type", "post_processing_allowed"):
             if not task.get(slot):

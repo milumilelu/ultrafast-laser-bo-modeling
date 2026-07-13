@@ -40,7 +40,7 @@ def test_powershell_agent_trace_mode_contract(project_root):
 
     assert "/mode normal|research|debug" in module_text
     assert "agent_trace" in module_text
-    assert '$script:AgentDisplayMode = "normal"' in module_text
+    assert '$script:AgentDisplayMode = "debug"' in module_text
     assert "duration_ms" in module_text
     assert "cache_hit" in module_text
     assert "Show-AgentTrialChoice" in module_text
@@ -48,4 +48,13 @@ def test_powershell_agent_trace_mode_contract(project_root):
     assert "加工助手执行中" in module_text
     assert "加工助手思考中" not in module_text
     assert "Set-AgentStreamMode -Enabled $true" in module_text
-    assert "已启用实时流式执行轨迹" in module_text
+    assert "Debug + full public trace" in module_text
+
+
+def test_powershell_llm_reconfigure_command_restarts_and_validates_backend(project_root):
+    module_text = (project_root / "scripts" / "powershell" / "AgentTui.psm1").read_text(encoding="utf-8")
+
+    assert '"/llm config", "/llm reconfigure"' in module_text
+    assert "Initialize-AgentDeepSeekConfig -Reconfigure" in module_text
+    assert "Start-AgentApiServerBackground -PreferredPort $port -MaxPort $port -RestartExisting" in module_text
+    assert "Test-AgentLlmConnection -BaseUrl $newBaseUrl" in module_text

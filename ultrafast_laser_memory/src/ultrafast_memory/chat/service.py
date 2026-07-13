@@ -23,7 +23,9 @@ from ultrafast_memory.knowledge_bootstrap.schemas import EvidenceGapRequest
 from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge, check_evidence_gap
 from ultrafast_memory.knowledge_review.review_queue import get_review_task
 from ultrafast_memory.llm.factory import create_llm_client
+from ultrafast_memory.llm.openai_compatible import LLMProviderError
 from ultrafast_memory.chat.rag_literature_retrieval import run_rag_literature_retrieval
+from ultrafast_memory.process_workflow.chat_orchestrator import process_progress, run_process_chat_turn
 
 
 def handle_chat(request: ChatRequest) -> ChatResponse:
@@ -145,6 +147,33 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
                 "route_source": route_plan.route_source,
             }
         )
+        if selected_skill == "complex_process_task":
+            process_result = run_process_chat_turn(session_id, request.message)
+            save_message(session_id, "assistant", process_result["content"], {
+                "selected_skill": selected_skill, "process_workflow": process_result["state"],
+                "next_required_action": process_result["next_action"]})
+            response = _build_chat_response(
+                session_id=session_id, assistant_message=process_result["content"], message=request.message,
+                message_id=user_message["message_id"], selected_skill=selected_skill,
+                route_plan=route_plan.model_dump(mode="json"), route_plan_obj=route_plan,
+                audit_trace=audit_trace, status="waiting_user" if process_result["next_action"].get("blocking") else "running")
+            response.current_stage = process_result["state"].get("state")
+            response.next_required_action = process_result["next_action"]
+            process_view = process_progress(process_result["state"], process_result["next_action"])
+            response.workflow_overview = process_view["workflow_overview"]
+            response.completed_stages = process_view["completed_stages"]
+            response.pending_stages = process_view["pending_stages"]
+            response.blocked_stages = process_view["blocked_stages"]
+            response.progress = {"current_stage": process_view["current_stage"],
+                                 "progress_percent": process_view["percent"],
+                                 "completed_steps_count": process_view["completed_steps"],
+                                 "total_steps": process_view["total_steps"],
+                                 "message": process_result["content"].splitlines()[0]}
+            if process_result.get("events"):
+                response.execution_trace = _filter_public_trace(session_id, process_result["events"])
+                response.skill_trace = [event for event in process_result["events"] if event.get("skill")]
+                response.tool_trace = [event for event in process_result["events"] if event.get("tool_name") or event.get("tool")]
+            return response
         bo_guard = _handle_bo_machine_bounds_guard(route_plan, audit_trace, session_id, user_message["message_id"])
         if bo_guard:
             assistant_content = bo_guard["assistant_message"]
@@ -259,7 +288,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
             event_type="fallback",
             stage="llm_chat",
             title="语言模型降级",
-            summary=f"{type(exc).__name__}；已使用不含工艺参数的安全模板。",
+            summary=f"{_safe_llm_error(exc)}；已使用不含工艺参数的安全模板。",
             skill=selected_skill,
             tool="llm_adapter",
             status="completed",
@@ -360,9 +389,11 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
         yield {"type": "meta", "session_id": session_id, "provider": provider, "model": model}
         artifacts = build_workflow_artifacts(session_id, user_message["message_id"], request.message, route_plan)
         yield _progress_event(artifacts["progress"])
-        for item in artifacts["thinking_status"]:
-            yield _thinking_event(item)
-        for item in artifacts["execution_trace"]:
+        trace_mode = _public_trace_mode(session_id)
+        if trace_mode != "off":
+            for item in artifacts["thinking_status"]:
+                yield _thinking_event(item)
+        for item in _filter_public_trace(session_id, artifacts["execution_trace"]):
             yield _agent_trace_event(item)
         yield {"type": "workflow_state", **artifacts["workflow_state"]}
         bo_guard = _handle_bo_machine_bounds_guard(route_plan, [], session_id, user_message["message_id"])
@@ -382,6 +413,29 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
             )
             yield {"type": "trace", "step": "bo_machine_bounds_guard", "status": "blocked_need_user_input"}
             yield {"type": "delta", "content": content}
+            yield {"type": "done"}
+            return
+        if selected_skill == "complex_process_task":
+            if route_plan:
+                route_trace = _record_route_decision_trace(session_id, user_message["message_id"], request.message, route_plan, artifacts["progress"].get("progress_percent"))
+                yield _agent_trace_event(route_trace)
+                yield {"type": "route", "primary_skill": route_plan.primary_skill,
+                       "secondary_skills": route_plan.secondary_skills, "confidence": route_plan.confidence,
+                       "route_source": route_plan.route_source}
+                yield {"type": "trace", "step": "hybrid_router", "status": "success"}
+            process_result = run_process_chat_turn(session_id, request.message)
+            process_view = process_progress(process_result["state"], process_result["next_action"])
+            for event in _filter_public_trace(session_id, process_result.get("events") or []):
+                public_event = dict(event)
+                public_event["type"] = "agent_trace"
+                yield public_event
+            yield {"type": "workflow_state", **process_result["state"], **process_view,
+                   "next_required_action": process_result["next_action"]}
+            save_message(session_id, "assistant", process_result["content"], {
+                "provider": "deterministic_process_workflow", "model": "none",
+                "selected_skill": selected_skill, "route_plan": route_plan.model_dump(mode="json"),
+                "next_required_action": process_result["next_action"]})
+            yield {"type": "delta", "content": process_result["content"]}
             yield {"type": "done"}
             return
         limit_message = _clarification_limit_message(artifacts)
@@ -426,7 +480,6 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
         )
         yield _agent_trace_event(llm_call_trace)
         chunks: list[str] = []
-        done_seen = False
         stream_failure: Exception | None = None
         try:
             for event in client.stream_chat(messages, temperature=0.2):
@@ -434,9 +487,10 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
                     chunks.append(event.get("content", ""))
                     yield event
                 elif event.get("type") == "done":
-                    done_seen = True
+                    continue
                 elif event.get("type") == "error":
-                    stream_failure = RuntimeError("LLM stream returned an error event")
+                    message = event.get("message") if event.get("safe_to_display") is True else None
+                    stream_failure = RuntimeError(message or "语言模型流式调用失败。")
                 else:
                     yield event
         except Exception as exc:
@@ -449,7 +503,7 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
                 "event_type": "fallback",
                 "stage": "llm_chat",
                 "status": "completed",
-                "summary": f"{type(stream_failure).__name__}；已使用安全模板。",
+                "summary": f"{stream_failure}；已使用安全模板。",
             }
             yield {"type": "delta", "content": fallback_content}
         assistant_content = "".join(chunks)
@@ -488,6 +542,12 @@ def _llm_fallback_message() -> str:
         "语言模型当前不可用。已保留任务、设备、证据和工作流状态；"
         "请稍后重试。离线降级不会生成未经验证的工艺参数。"
     )
+
+
+def _safe_llm_error(exc: Exception) -> str:
+    if isinstance(exc, LLMProviderError):
+        return str(exc)
+    return type(exc).__name__
 
 
 def _title_from_message(message: str) -> str:
@@ -571,6 +631,20 @@ def _build_chat_response(
         status=status,
     )
     assistant_message = _clarification_limit_message(artifacts) or assistant_message
+    completed = artifacts["progress"].get("completed_steps") or []
+    pending = artifacts["progress"].get("pending_steps") or []
+    overview = ([{"step": step, "status": "completed"} for step in completed] +
+                [{"step": step, "status": "pending"} for step in pending])
+    missing = artifacts["workflow_state"].get("missing_slots") or []
+    next_action = {
+        "action_type": "submit_required_fields" if missing else "continue_workflow",
+        "required_fields": missing,
+        "blocking": bool(missing),
+    }
+    visible_trace = _filter_public_trace(session_id, artifacts["execution_trace"])
+    visible_thinking = [] if _public_trace_mode(session_id) == "off" else artifacts["thinking_status"]
+    skill_events = [item for item in visible_trace if item.get("skill")]
+    tool_events = [item for item in visible_trace if item.get("tool")]
     return ChatResponse(
         session_id=session_id,
         assistant_message=assistant_message,
@@ -579,13 +653,22 @@ def _build_chat_response(
         evidence_gap=evidence_gap,
         knowledge_bootstrap=knowledge_bootstrap,
         progress=artifacts["progress"],
-        thinking_status=artifacts["thinking_status"],
+        thinking_status=visible_thinking,
         workflow_state=artifacts["workflow_state"],
-        execution_trace=artifacts["execution_trace"],
+        execution_trace=visible_trace,
         tool_calls=tool_calls or [],
         audit_trace=audit_trace or [],
         rag_evidence=rag_evidence,
         citations=citations or [],
+        workflow_overview=overview,
+        current_stage=artifacts["progress"].get("current_stage"),
+        completed_stages=completed,
+        pending_stages=pending,
+        blocked_stages=missing,
+        next_required_action=next_action,
+        skill_trace=skill_events,
+        tool_trace=tool_events,
+        reasoning_trace=visible_thinking,
     )
 
 
@@ -598,6 +681,22 @@ def _progress_event(progress: dict) -> dict:
         "status": progress.get("status"),
         "message": progress.get("message"),
     }
+
+
+def _public_trace_mode(session_id: str) -> str:
+    state = get_session_state(session_id)
+    return str((state.get("collected_slots") or {}).get("public_trace_mode") or "full")
+
+
+def _filter_public_trace(session_id: str, events: list[dict]) -> list[dict]:
+    mode = _public_trace_mode(session_id)
+    if mode == "off":
+        return []
+    if mode == "summary":
+        important = {"decision", "warning", "error", "workflow_end", "workflow_completed",
+                     "workflow_failed", "tool_failed", "approval_required"}
+        return [item for item in events if item.get("event_type") in important or item.get("status") in {"failed", "error"}]
+    return events
 
 
 def _clarification_limit_message(artifacts: dict) -> str | None:

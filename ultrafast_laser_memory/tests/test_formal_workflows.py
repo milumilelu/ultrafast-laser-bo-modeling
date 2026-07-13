@@ -57,10 +57,12 @@ def test_complex_workflow_uses_real_tools_and_persists_monotonic_events(isolated
     result = response.json()
     assert result["status"] == "completed"
     assert result["data"]["geometry_model"]["aspect_ratio"] == 10
-    assert result["data"]["trial_plan"]["trial_mode"] == "simple_trial_cut"
-    assert result["data"]["knowledge_gate_decision"]["status"] == "blocked"
+    assert result["data"]["trial_selection"]["status"] == "TRIAL_MODE_PENDING"
+    assert result["data"]["trial_selection"]["trial_mode"] is None
+    assert "trial_plan" not in result["data"]
+    assert "knowledge_gate_decision" not in result["data"]
     assert "bo_recommendation" not in result["data"]
-    assert result["data"]["execution_plan"]["status"] == "blocked_pending_trial"
+    assert "execution_plan" not in result["data"]
     sequences = [event["sequence"] for event in result["events"]]
     assert sequences == list(range(1, len(sequences) + 1))
     trace = client.get(f"/execution-traces/{result['run_id']}").json()["events"]

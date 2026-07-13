@@ -74,7 +74,9 @@ def test_task_report_writes_markdown_json_and_database_record(isolated_root):
 
 def test_demo_waits_for_explicit_review_then_completes_offline(isolated_root):
     client = TestClient(app)
-    waiting = client.post("/demo/tgv/run", json={"approve_review": False})
+    mode = client.post("/demo/tgv/run", json={"approve_review": False})
+    assert mode.json()["status"] == "waiting_trial_mode"
+    waiting = client.post("/demo/tgv/run", json={"approve_review": False, "selected_trial_mode": "simple_trial_cut"})
 
     assert waiting.status_code == 200, waiting.text
     assert waiting.json()["status"] == "waiting_review"
@@ -82,7 +84,7 @@ def test_demo_waits_for_explicit_review_then_completes_offline(isolated_root):
     assert waiting.json()["external_network"] is False
     assert waiting.json()["llm_call_performed"] is False
 
-    completed = client.post("/demo/tgv/run", json={"approve_review": True})
+    completed = client.post("/demo/tgv/run", json={"approve_review": True, "selected_trial_mode": "simple_trial_cut"})
     assert completed.status_code == 200, completed.text
     body = completed.json()
     assert body["status"] == "completed"
@@ -109,7 +111,8 @@ def test_demo_degrades_to_nonpersistent_preview_for_readonly_database(
 
     assert result["status"] == "read_only_demo"
     assert result["persistence_performed"] is False
-    assert len(result["trial_plan"]["parameter_matrix"]) == 5
+    assert result["trial_plan"]["parameter_matrix"] == []
+    assert any("parameter matrix is empty" in item for item in result["trial_plan"]["warnings"])
     assert result["knowledge_gate"]["status"] == "blocked"
     assert result["formal_execution"]["formal_process_unlocked"] is False
     assert result["external_network"] is False and result["llm_call_performed"] is False

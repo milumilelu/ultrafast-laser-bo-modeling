@@ -20,6 +20,10 @@ def _create_plan(client: TestClient, task_id: str = "task-tgv") -> dict:
                 "frequency_kHz": [50, 500],
                 "passes": [1, 10],
             },
+            "approved_parameter_candidates": [
+                {"laser_power_W": 4, "frequency_kHz": 180, "passes": 3},
+                {"laser_power_W": 5, "frequency_kHz": 220, "passes": 4},
+            ],
             "domain_pack": "tgv",
         },
     )

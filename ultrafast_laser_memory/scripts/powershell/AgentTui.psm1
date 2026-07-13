@@ -16,7 +16,7 @@ $script:DeepSeekModels = @(
     @{ Label = "Pro"; Model = "deepseek-v4-pro" }
 )
 $script:AgentStreamMode = $false
-$script:AgentDisplayMode = "normal"
+$script:AgentDisplayMode = "debug"
 
 function Show-AgentBanner {
     try {
@@ -399,6 +399,38 @@ function Test-AgentEquipmentApiServer {
     }
 }
 
+function Test-AgentLlmConnection {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    try {
+        $result = Invoke-RestMethod -Method Post -Uri "$BaseUrl/llm/test" -TimeoutSec 25
+        if ($result.valid) {
+            Write-Host ("DeepSeek 调用链验证通过：{0}/{1}" -f $result.provider, $result.model) -ForegroundColor Green
+            return $true
+        }
+        $message = if ($result.message) { $result.message } else { "未知验证错误。" }
+        Write-Host ("DeepSeek 调用链验证失败：{0}" -f $message) -ForegroundColor Red
+        Write-Host "请关闭后使用 .\scripts\start_agent_tui.ps1 -Reconfigure 重新配置有效 API Key。" -ForegroundColor Yellow
+        return $false
+    } catch {
+        Write-Host ("DeepSeek 调用链验证请求失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
+        return $false
+    }
+}
+
+function Update-AgentLlmConfigFromChat {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    Write-Host "重新配置 DeepSeek API Key 与模型。凭证输入不会回显。" -ForegroundColor Cyan
+    Initialize-AgentDeepSeekConfig -Reconfigure
+    $port = ([Uri]$BaseUrl).Port
+    $newBaseUrl = Start-AgentApiServerBackground -PreferredPort $port -MaxPort $port -RestartExisting
+    if (-not $newBaseUrl) {
+        Write-Host "LLM 配置已保存，但后端重启失败。" -ForegroundColor Red
+        return $null
+    }
+    Test-AgentLlmConnection -BaseUrl $newBaseUrl | Out-Null
+    return $newBaseUrl
+}
+
 function Format-AgentRestError {
     param($ErrorRecord)
     $message = $ErrorRecord.Exception.Message
@@ -439,18 +471,45 @@ function Test-AgentTcpPortAvailable {
 function Start-AgentApiServerBackground {
     param(
         [int]$PreferredPort = 8000,
-        [int]$MaxPort = 8010
+        [int]$MaxPort = 8010,
+        [switch]$RestartExisting
     )
     if (-not (Test-AgentPythonEnvironment)) { return $false }
     for ($port = $PreferredPort; $port -le $MaxPort; $port++) {
         $baseUrl = "http://127.0.0.1:$port"
         if (Test-AgentApiServer -BaseUrl $baseUrl -Quiet) {
             if (Test-AgentEquipmentApiServer -BaseUrl $baseUrl) {
-                Write-Host ("FastAPI 后端已运行：{0}" -f $baseUrl)
-                return $baseUrl
+                $health = $null
+                try { $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health" -TimeoutSec 3 } catch { $health = $null }
+                $staleWorkflowBackend = ($null -eq $health -or $health.workflow_contract -ne "process-workflow-v3")
+                if ($staleWorkflowBackend) {
+                    Write-Host ("检测到旧版后端，必须重启以加载 process-workflow-v3：{0}" -f $baseUrl) -ForegroundColor Yellow
+                    $RestartExisting = $true
+                }
+                if ($RestartExisting) {
+                    $ownerPid = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                        Select-Object -First 1 -ExpandProperty OwningProcess
+                    if (-not $ownerPid) {
+                        throw "无法确定端口 $port 上现有后端的进程 ID。"
+                    }
+                    Write-Host ("正在重启现有 FastAPI 后端以应用新 LLM 凭证。PID: {0}" -f $ownerPid)
+                    Stop-Process -Id $ownerPid -Force
+                    for ($i = 0; $i -lt 20; $i++) {
+                        Start-Sleep -Milliseconds 200
+                        if (Test-AgentTcpPortAvailable -Port $port) { break }
+                    }
+                    if (-not (Test-AgentTcpPortAvailable -Port $port)) {
+                        throw "端口 $port 上的旧后端未能及时退出。"
+                    }
+                } else {
+                    Write-Host ("FastAPI 后端已运行：{0}" -f $baseUrl)
+                    return $baseUrl
+                }
             }
-            Write-Host ("端口 {0} 已有后端运行，但缺少设备配置接口，尝试下一个端口。" -f $port) -ForegroundColor Yellow
-            continue
+            if (Test-AgentApiServer -BaseUrl $baseUrl -Quiet) {
+                Write-Host ("端口 {0} 已有后端运行，但缺少设备配置接口，尝试下一个端口。" -f $port) -ForegroundColor Yellow
+                continue
+            }
         }
         if (-not (Test-AgentTcpPortAvailable -Port $port)) {
             Write-Host ("端口 {0} 已被占用，尝试下一个端口。" -f $port)
@@ -600,6 +659,26 @@ function Show-AgentWorkflowState {
     param($WorkflowState)
     if ((Get-AgentDisplayMode) -eq "normal") { return }
     if ($null -eq $WorkflowState) { return }
+    if ($WorkflowState.current_stage) {
+        $percent = if ($null -ne $WorkflowState.percent) { $WorkflowState.percent } else { "?" }
+        Write-Host ("[工作流] 当前阶段={0}；总体进度={1}%" -f $WorkflowState.current_stage, $percent) -ForegroundColor Green
+    }
+    if ($WorkflowState.workflow_overview -and (Get-AgentDisplayMode) -eq "debug") {
+        foreach ($step in @($WorkflowState.workflow_overview)) {
+            Write-Host ("  [{0}] {1}" -f $step.status, $step.step) -ForegroundColor DarkGray
+        }
+    }
+    if ($WorkflowState.next_required_action) {
+        Write-Host ("[下一步] {0}" -f $WorkflowState.next_required_action.action_type) -ForegroundColor Yellow
+        if ($WorkflowState.next_required_action.required_fields) {
+            Write-Host ("  必填：{0}" -f (@($WorkflowState.next_required_action.required_fields) -join "、")) -ForegroundColor DarkGray
+        }
+    }
+    $campaign = if ($WorkflowState.formal_campaign) { $WorkflowState.formal_campaign } else { $WorkflowState.campaign }
+    if ($campaign) {
+        Write-Host ("[Campaign] {0}；fidelity={1}；iteration={2}；status={3}" -f `
+            $campaign.campaign_id, $campaign.fidelity_level, $campaign.current_iteration, $campaign.status) -ForegroundColor DarkCyan
+    }
     if ($WorkflowState.equipment_profile_used) {
         Write-Host ("[设备] {0} ({1})" -f $WorkflowState.equipment_profile_used.profile_name, $WorkflowState.equipment_profile_used.revision_id) -ForegroundColor DarkGray
     }
@@ -1118,9 +1197,9 @@ function Start-AgentChat {
 
     Write-Host ""
     Write-Host "进入超快激光智能体聊天模式。输入 exit 退出。" -ForegroundColor Cyan
-    Write-Host "可用命令：/stream on, /stream off, /mode normal|research|debug, /routes, /state, /reset, /skill <name>, /no_skill, /equipment show, /equipment edit"
+    Write-Host "可用命令：/stream on|off, /mode normal|research|debug, /trace summary|full|off, /skills, /tools, /reasoning, /waterfall, /campaign, /model, /llm config, /routes, /state, /reset, /skill <name>, /no_skill, /equipment show|edit"
     Write-Host ""
-    Write-Host "已启用实时流式执行轨迹。输入 /stream off 可切换为非流式。" -ForegroundColor DarkGray
+    Write-Host "已启用 Debug + full public trace。隐藏推理、系统提示词和凭据不会公开。" -ForegroundColor DarkGray
 
     while ($true) {
         $inputText = Read-Host "你"
@@ -1144,6 +1223,11 @@ function Start-AgentChat {
             }
             if ($inputText.Trim() -eq "/equipment edit") {
                 Update-ActiveEquipmentProfileWizard -BaseUrl $baseUrl
+                continue
+            }
+            if ($inputText.Trim() -in @("/llm config", "/llm reconfigure")) {
+                $newBaseUrl = Update-AgentLlmConfigFromChat -BaseUrl $baseUrl
+                if ($newBaseUrl) { $baseUrl = $newBaseUrl }
                 continue
             }
             if ($inputText.Trim().StartsWith("/mode ")) {
@@ -1207,8 +1291,11 @@ function Start-AgentDeepSeekAutoLaunch {
     }
 
     Initialize-AgentLocalBootstrap -Force:$ForceInitialize
-    $baseUrl = Start-AgentApiServerBackground
+    $baseUrl = Start-AgentApiServerBackground -RestartExisting:$Reconfigure
     if (-not $baseUrl) { return }
+    if (-not $SkipLlmConfig) {
+        Test-AgentLlmConnection -BaseUrl $baseUrl | Out-Null
+    }
     try {
         $activeEquipment = Invoke-RestMethod -Method Get -Uri "$baseUrl/equipment/active"
         if (-not $activeEquipment.active) {
@@ -1283,4 +1370,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret

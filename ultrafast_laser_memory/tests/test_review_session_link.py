@@ -10,7 +10,7 @@ from ultrafast_memory.knowledge_review.schemas import ReviewActionRequest
 
 def test_review_action_updates_linked_chat_session_state(isolated_root):
     init_database()
-    first = handle_chat(ChatRequest(message="金刚石 CRL 飞秒加工查文献", use_skills=True))
+    first = handle_chat(ChatRequest(message="查文献和论文解释超快激光损伤机制", use_skills=True))
     second = handle_chat(ChatRequest(session_id=first.session_id, message="可以", use_skills=True))
     candidate_id = second.knowledge_bootstrap["candidate_ids"][0]
     review_ids = second.knowledge_bootstrap["review_task_ids"]

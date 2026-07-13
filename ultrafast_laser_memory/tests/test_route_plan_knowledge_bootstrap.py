@@ -9,7 +9,7 @@ def test_rag_route_requires_evidence_gap_check(isolated_root):
 
     plan = route_message("帮我查文献解释金刚石 CRL 飞秒加工", "session-rag", "message-rag")
 
-    assert plan.primary_skill == "rag_literature_retrieval"
+    assert plan.primary_skill == "complex_process_task"
     assert plan.requires_evidence_gap_check is True
     assert "knowledge_bootstrap" in plan.secondary_skills
 

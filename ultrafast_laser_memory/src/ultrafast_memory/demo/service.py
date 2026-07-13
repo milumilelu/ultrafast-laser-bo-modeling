@@ -22,7 +22,7 @@ class DemoService:
         self.trials = TrialApplicationService()
         self.reports = TaskReportService()
 
-    def run_tgv(self, approve_review: bool = False) -> dict[str, Any]:
+    def run_tgv(self, approve_review: bool = False, selected_trial_mode: str | None = None) -> dict[str, Any]:
         try:
             fixture = self.fixtures.ensure_tgv_evidence()
         except sqlite3.OperationalError as exc:
@@ -33,8 +33,30 @@ class DemoService:
         equipment = self._ensure_equipment()
         task_id = f"demo-tgv-{uuid.uuid4().hex[:10]}"
         request = self._request(task_id, equipment)
+        if not selected_trial_mode:
+            preview = self.workflows.execute("complex_process_task", request)
+            return {"status": "waiting_trial_mode", "task_id": task_id,
+                    "next_required_action": preview["data"]["trial_selection"]["next_required_action"],
+                    "workflow": preview, "fixture": fixture, "external_network": False,
+                    "llm_call_performed": False}
+        request["selected_trial_mode"] = selected_trial_mode
         first = self.workflows.execute("complex_process_task", request)
-        gate = first["data"].get("knowledge_gate_decision") or {}
+        plan = first["data"]["trial_plan"]
+        execution = self.trials.start_execution(
+            plan["trial_plan_id"],
+            {"equipment_revision": equipment["revision_id"],
+             "actual_parameters": (plan.get("parameter_matrix") or [{}])[0],
+             "actual_path": {"type": plan["representative_geometry"]["type"], "demo_fixture": True},
+             "monitoring_summary": {"abnormal": False, "demo_fixture": True}},
+        )
+        result = self.trials.create_result(execution["execution_id"], {
+            "measurements": {"depth_um": 500, "taper_deg": 2.0, "crack_length_um": 0.0,
+                             "through_rate": 1.0, "yield": 1.0}, "defects": []})
+        evaluated = self.trials.evaluate(result["result_id"], {
+            "reviewer_comment": "Deterministic demo fixture result", "confirm_conditional": False})
+        reviewed_request = {**request, "trial_result_validated": True}
+        reviewed = self.workflows.execute("complex_process_task", reviewed_request)
+        gate = reviewed["data"].get("knowledge_gate_decision") or {}
         if gate.get("status") == "approval_required" and not approve_review:
             return {
                 "status": "waiting_review",
@@ -45,7 +67,7 @@ class DemoService:
                     "risk_level": gate.get("risk_level"),
                     "evidence_ids": gate.get("evidence_ids"),
                 },
-                "workflow": first,
+                "workflow": reviewed,
                 "fixture": fixture,
                 "external_network": False,
                 "llm_call_performed": False,
@@ -59,37 +81,11 @@ class DemoService:
                     "approved_payload": {},
                 },
             )
-        planned = self.workflows.execute("complex_process_task", request)
+        planned = self.workflows.execute("complex_process_task", reviewed_request)
         bo = planned["data"].get("bo_recommendation") or {}
-        plan = planned["data"]["trial_plan"]
-        execution = self.trials.start_execution(
-            plan["trial_plan_id"],
-            {
-                "equipment_revision": equipment["revision_id"],
-                "actual_parameters": (plan.get("parameter_matrix") or [{}])[0],
-                "actual_path": {"type": plan["representative_geometry"]["type"], "demo_fixture": True},
-                "monitoring_summary": {"abnormal": False, "demo_fixture": True},
-            },
-        )
-        result = self.trials.create_result(
-            execution["execution_id"],
-            {
-                "measurements": {
-                    "depth_um": 500,
-                    "taper_deg": 2.0,
-                    "crack_length_um": 0.0,
-                    "through_rate": 1.0,
-                    "yield": 1.0,
-                },
-                "defects": [],
-            },
-        )
-        evaluated = self.trials.evaluate(
-            result["result_id"],
-            {"reviewer_comment": "Deterministic demo fixture result", "confirm_conditional": False},
-        )
         final_request = {
-            **request,
+            **reviewed_request,
+            "archive_ready": True,
             "context": {"formal_process_unlocked": evaluated["formal_process_decision"]["unlocked"]},
         }
         final = self.workflows.execute("complex_process_task", final_request)
@@ -222,7 +218,6 @@ class DemoService:
             },
             "equipment_snapshot": equipment,
             "question": "TGV high aspect ratio glass via femtosecond laser drilling parameter range",
-            "selected_trial_mode": "simple_trial_cut",
             "intended_use": "parameter_recommendation",
             "display_mode": "research",
         }

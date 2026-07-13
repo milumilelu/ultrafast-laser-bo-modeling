@@ -13,10 +13,10 @@ def test_chat_service_persists_messages_and_skill_trace(isolated_root, monkeypat
     response = handle_chat(ChatRequest(message="我想加工金刚石 CRL，Ra小于460nm", use_skills=True))
 
     assert response.session_id
-    assert "外部知识冷启动" in response.assistant_message
-    assert response.selected_skill == "crl_task_planning"
-    assert [step["step"] for step in response.audit_trace] == ["hybrid_router", "evidence_gap_check"]
-    assert response.evidence_gap is not None
+    assert "需求确认阶段" in response.assistant_message
+    assert response.selected_skill == "complex_process_task"
+    assert [step["step"] for step in response.audit_trace] == ["hybrid_router"]
+    assert response.evidence_gap is None
 
     with get_connection() as conn:
         messages = conn.execute(
@@ -28,4 +28,4 @@ def test_chat_service_persists_messages_and_skill_trace(isolated_root, monkeypat
             "SELECT selected_skill FROM chat_skill_trace WHERE session_id = ?",
             (response.session_id,),
         ).fetchone()
-        assert trace["selected_skill"] == "crl_task_planning"
+        assert trace["selected_skill"] == "complex_process_task"

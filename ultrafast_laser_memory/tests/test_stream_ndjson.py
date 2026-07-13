@@ -35,6 +35,6 @@ def test_chat_stream_ndjson_returns_route_and_delta_events(isolated_root, monkey
     assert any(event["type"] == "delta" for event in events)
     assert events[-1]["type"] == "done"
     route = next(event for event in events if event["type"] == "route")
-    assert route["primary_skill"] == "crl_task_planning"
-    assert route["route_source"] in {"rule_router", "hybrid_router"}
+    assert route["primary_skill"] == "complex_process_task"
+    assert route["route_source"] in {"mandatory_process_rule", "rule_router", "hybrid_router"}
     assert "api_key" not in response.text.lower()

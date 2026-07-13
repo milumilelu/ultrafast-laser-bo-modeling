@@ -17,6 +17,7 @@ from ultrafast_memory.equipment.bounds import build_machine_bounds
 from ultrafast_memory.knowledge_use.service import KnowledgeUseApplicationService
 from ultrafast_memory.rag.query_service import query_rag
 from ultrafast_memory.trial.service import TrialApplicationService
+from ultrafast_memory.process_workflow.evidence import credibility_summary
 
 
 class TaskWorkflowService:
@@ -48,6 +49,9 @@ class TaskWorkflowService:
             "input_equipment_snapshot": payload.get("equipment_snapshot"),
             "question": payload.get("question"),
             "selected_trial_mode": payload.get("selected_trial_mode"),
+            "trial_result_validated": bool(payload.get("trial_result_validated")),
+            "archive_ready": bool(payload.get("archive_ready")),
+            "approved_parameter_candidates": payload.get("approved_parameter_candidates") or [],
             "intended_use": payload.get("intended_use", "parameter_recommendation"),
             "session_id": payload.get("session_id"),
         }
@@ -78,14 +82,17 @@ class TaskWorkflowService:
         registry = ToolRegistry()
         handlers = {
             "task_intake": ("Normalize the structured task input", self._task_intake),
+            "material_identification": ("Identify material without inventing properties", self._material),
             "equipment_context_loading": ("Load authoritative equipment context", self._equipment),
             "geometry_interpretation": ("Interpret geometry using a domain pack", self._geometry),
+            "constraint_extraction": ("Extract hard and soft constraints", self._constraints),
             "load_domain_pack": ("Load process domain rules", self._load_pack),
             "domain_geometry_check": ("Validate domain-specific geometry", self._geometry),
             "density_and_pitch_check": ("Check microhole density and pitch", self._density_pitch),
             "rag_evidence_retrieval": ("Query the internal literature index", self._rag),
             "similar_case_retrieval": ("Retrieve comparable completed process cases", self._similar),
             "process_route_planning": ("Construct a bounded process route", self._route),
+            "process_risk_assessment": ("Assess process risks", self._risk),
             "trial_need_assessment": ("Assess required trial depth", self._trial_assess),
             "trial_strategy_selection": ("Select an allowed trial mode", self._trial_select),
             "simple_trial_design": ("Persist a simple representative trial plan", self._trial_design),
@@ -113,6 +120,22 @@ class TaskWorkflowService:
 
     def _equipment(self, payload: dict, context: dict) -> dict:
         return context.get("input_equipment_snapshot") or build_machine_bounds()
+
+    def _material(self, payload: dict, context: dict) -> dict:
+        task = context.get("task_spec") or context.get("input_task_spec") or {}
+        return {"material": task.get("material"), "grade": task.get("material_grade"),
+                "batch": task.get("material_batch"), "status": "identified" if task.get("material") else "missing"}
+
+    def _constraints(self, payload: dict, context: dict) -> dict:
+        task = context.get("task_spec") or {}
+        return {"hard_constraints": task.get("hard_constraints") or task.get("quality_requirements") or [],
+                "soft_constraints": task.get("soft_constraints") or [], "equipment_bounds_are_process_parameters": False}
+
+    def _risk(self, payload: dict, context: dict) -> dict:
+        task = context.get("task_spec") or {}
+        material = str(task.get("material") or "").lower()
+        risks = ["delamination", "thermal_accumulation"] if "cfrp" in material or "carbon" in material else ["equipment_boundary", "quality_nonconformance"]
+        return {"risks": risks, "requires_trial": True, "formal_parameters_authorized": False}
 
     def _pack_name(self, context: dict) -> str:
         task = context.get("task_spec") or context.get("input_task_spec") or {}
@@ -159,7 +182,10 @@ class TaskWorkflowService:
         query = context.get("question") or " ".join(
             str(task.get(key) or "") for key in ("material", "component_type", "process_type")
         )
-        return query_rag({"query": query.strip() or "ultrafast laser process", "top_k": 8})
+        result = query_rag({"query": query.strip() or "ultrafast laser process", "top_k": 8})
+        result["credibility_summary"] = credibility_summary(result.get("hits") or [], task)
+        result["evidence_status"] = result["credibility_summary"]["evidence_status"]
+        return result
 
     def _similar(self, payload: dict, context: dict) -> dict:
         cases = find_similar_process_cases(context.get("task_spec") or {})
@@ -196,7 +222,19 @@ class TaskWorkflowService:
                 evidence_status=(context.get("evidence_pack") or {}).get("evidence_status", "insufficient"),
                 valid_sample_count=len(list_bo_training_samples()),
             ).to_dict()
-        selected = context.get("selected_trial_mode") or assessment["recommended_mode"]
+        selected = context.get("selected_trial_mode")
+        if not selected:
+            return {
+                "status": "TRIAL_MODE_PENDING",
+                "trial_mode": None,
+                "recommended_mode": assessment["recommended_mode"],
+                "allowed_modes": ["simple_trial_cut", "full_trial_cut", "skip_trial"],
+                "next_required_action": {
+                    "action_type": "select_trial_mode",
+                    "allowed_values": ["simple_trial_cut", "full_trial_cut", "skip_trial"],
+                    "blocking": True,
+                },
+            }
         mode = select_trial_mode(assessment, selected)
         return {"trial_mode": mode.value, "recommended_mode": assessment["recommended_mode"], "user_overrode": mode.value != assessment["recommended_mode"]}
 
@@ -210,6 +248,7 @@ class TaskWorkflowService:
                 "trial_mode": selection["trial_mode"],
                 "machine_bounds": (context.get("equipment_snapshot") or {}).get("machine_bounds") or {},
                 "domain_pack": self._pack_name(context),
+                "approved_parameter_candidates": context.get("approved_parameter_candidates") or [],
             },
         )
 

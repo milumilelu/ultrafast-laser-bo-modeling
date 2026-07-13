@@ -17,7 +17,8 @@ def test_task_intake_progress_after_chat(isolated_root):
 
     response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=True))
 
-    assert response.progress["progress_percent"] > 0
+    assert response.progress["progress_percent"] == 0
+    assert response.current_stage == "REQUIREMENTS_PENDING"
     assert response.workflow_state["missing_slots"]
     assert response.workflow_state["clarification_round"] <= 3
 
@@ -27,9 +28,11 @@ def test_clarification_round_one_progress_percent(isolated_root):
 
     response = handle_chat(ChatRequest(message="我想加工普通任务", use_skills=True))
 
-    assert response.progress["current_stage"] in {"clarification_round_1", "task_spec_confirmed", "intake_started"}
+    assert response.progress["current_stage"] in {"REQUIREMENTS_PENDING", "clarification_round_1", "task_spec_confirmed", "intake_started"}
     if response.progress["current_stage"] == "clarification_round_1":
-        assert response.progress["progress_percent"] == 40
+        completed = len(response.progress["completed_steps"])
+        total = completed + len(response.progress["pending_steps"])
+        assert response.progress["progress_percent"] == round(completed / total * 100, 2)
 
 
 def test_workflow_completed_progress_is_100(isolated_root):

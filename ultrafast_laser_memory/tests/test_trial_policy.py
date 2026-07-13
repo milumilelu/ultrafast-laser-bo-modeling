@@ -58,12 +58,17 @@ def test_skip_only_allowed_for_exact_verified_repeat():
 
 def test_simple_and_full_plan_have_representative_geometry_and_stop_conditions():
     bounds = {"laser_power_W": [1, 10], "frequency_kHz": [50, 500], "passes": [1, 10]}
+    approved = [
+        {"laser_power_W": 2 + index, "frequency_kHz": 100 + index * 20, "passes": 2 + index}
+        for index in range(9)
+    ]
     simple = design_trial_plan(
         "task-crl",
         {"process_type": "CRL", "targets": {"form_error_max_um": 2.0}},
         "simple_trial_cut",
         bounds,
         "crl",
+        approved_parameter_candidates=approved[:5],
     )
     full = design_trial_plan(
         "task-crl",
@@ -71,6 +76,7 @@ def test_simple_and_full_plan_have_representative_geometry_and_stop_conditions()
         "full_trial_cut",
         bounds,
         "crl",
+        approved_parameter_candidates=approved,
     )
 
     assert simple.representative_geometry["type"] == "shallow_paraboloid_segment_or_scaled_lens"

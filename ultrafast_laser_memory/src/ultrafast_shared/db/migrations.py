@@ -168,6 +168,25 @@ BASELINE_MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_task_report_task ON task_report(task_id, created_at)",
         ),
     ),
+    Migration(
+        migration_id="0006_process_workflow_v3",
+        description="Add formal closure, optimization campaign, provenance, snapshots and public trace records",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS formal_process_plan (plan_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, trial_result_id TEXT, parameter_recommendation_id TEXT, equipment_revision TEXT NOT NULL, approved_window_json TEXT NOT NULL, toolpath_json TEXT NOT NULL, monitoring_plan_json TEXT NOT NULL, stop_conditions_json TEXT NOT NULL, release_status TEXT NOT NULL, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS formal_process_execution (execution_id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, actual_parameters_json TEXT NOT NULL, actual_path_json TEXT NOT NULL, runtime_log_json TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS process_checkpoint (checkpoint_id TEXT PRIMARY KEY, execution_id TEXT NOT NULL, checkpoint_type TEXT NOT NULL, progress_percent REAL, observation_json TEXT NOT NULL, decision TEXT NOT NULL, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS inspection_record (inspection_id TEXT PRIMARY KEY, execution_id TEXT NOT NULL, measurement_plan_json TEXT NOT NULL, measurements_json TEXT NOT NULL, defects_json TEXT NOT NULL, files_json TEXT NOT NULL, completeness_status TEXT NOT NULL, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS quality_decision (quality_decision_id TEXT PRIMARY KEY, inspection_id TEXT NOT NULL, decision TEXT NOT NULL, passed_metrics_json TEXT NOT NULL, failed_metrics_json TEXT NOT NULL, missing_metrics_json TEXT NOT NULL, basis_json TEXT NOT NULL, reviewer_comment TEXT, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS experiment_record (experiment_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, execution_id TEXT NOT NULL, record_json TEXT NOT NULL, validation_status TEXT NOT NULL, bo_eligible INTEGER NOT NULL, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS optimization_campaign (campaign_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, campaign_type TEXT NOT NULL, fidelity_level TEXT NOT NULL, material_context_json TEXT NOT NULL, equipment_revision TEXT NOT NULL, objectives_json TEXT NOT NULL, constraints_json TEXT NOT NULL, search_space_json TEXT NOT NULL, budget_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS optimization_iteration (iteration_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, iteration_index INTEGER NOT NULL, model_mode TEXT NOT NULL, model_snapshot_id TEXT, data_support_json TEXT NOT NULL, proposed_candidates_json TEXT NOT NULL, selected_candidates_json TEXT NOT NULL, decision TEXT, decision_reason TEXT, started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS optimization_candidate (candidate_id TEXT PRIMARY KEY, iteration_id TEXT NOT NULL, parameters_json TEXT NOT NULL, parameter_sources_json TEXT NOT NULL, predicted_objectives_json TEXT NOT NULL, uncertainty_json TEXT NOT NULL, feasibility_probability REAL, risk_level TEXT NOT NULL, status TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS optimization_observation (observation_id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, execution_id TEXT, measurements_json TEXT NOT NULL, quality_metrics_json TEXT NOT NULL, constraint_results_json TEXT NOT NULL, data_quality_status TEXT NOT NULL, bo_eligible INTEGER NOT NULL, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS model_snapshot (model_snapshot_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, iteration_index INTEGER NOT NULL, model_type TEXT NOT NULL, training_sample_ids_json TEXT NOT NULL, hyperparameters_json TEXT NOT NULL, metrics_json TEXT NOT NULL, artifact_path TEXT, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS parameter_provenance (provenance_id TEXT PRIMARY KEY, recommendation_id TEXT NOT NULL, parameter_name TEXT NOT NULL, value_json TEXT NOT NULL, unit TEXT NOT NULL, source_type TEXT NOT NULL, source_refs_json TEXT NOT NULL, authority_level TEXT NOT NULL, permissions_json TEXT NOT NULL, created_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS public_reasoning_trace (trace_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, stage TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, trace_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(run_id, sequence))""",
+        ),
+    ),
 )
 
 
