@@ -142,7 +142,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
             }
         )
         if selected_skill == "complex_process_task":
-            process_result = run_process_chat_turn(session_id, request.message)
+            process_result = run_process_chat_turn(session_id, request.message, user_message["message_id"])
             process_trace = _record_process_public_reasoning(
                 session_id, user_message["message_id"], process_result
             )

@@ -34,6 +34,10 @@ class OpenAICompatibleClient(BaseLLMClient):
             "messages": messages,
             "temperature": kwargs.get("temperature", 0.2),
         }
+        if kwargs.get("response_format") is not None:
+            payload["response_format"] = kwargs["response_format"]
+        if kwargs.get("max_tokens") is not None:
+            payload["max_tokens"] = kwargs["max_tokens"]
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             url,

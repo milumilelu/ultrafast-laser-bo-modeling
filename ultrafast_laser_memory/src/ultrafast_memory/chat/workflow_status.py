@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from ultrafast_agent.task_intake.deterministic_extractor import legacy_task_snapshot
+from ultrafast_agent.task_intake.missing_field_service import MissingFieldService
 from ultrafast_memory.core.ids import stable_id
 from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.db.init_db import init_database
@@ -40,39 +42,11 @@ FORBIDDEN_STATUS_KEYS = {"chain_of_thought", "raw_thoughts", "hidden_reasoning",
 
 def inspect_required_fields(message: str, workflow_type: str) -> list[str]:
     """Pure preflight used to enforce intake before retrieval or recommendation."""
-    return _missing_slots(_parse_task(message), workflow_type, build_machine_bounds())
-
-
-def parse_process_task_fields(message: str) -> dict[str, Any]:
-    """Extract only explicit machining facts; never infer process parameters."""
-    task = _parse_task(message)
-    text = message.lower()
-    length = re.search(r"(\d+(?:\.\d+)?)\s*(cm|mm)\s*(?:直线|长|长度)?", text)
-    if length and not re.search(r"厚\s*" + re.escape(length.group(0)), text):
-        value = float(length.group(1)) * (10 if length.group(2) == "cm" else 1)
-        if value != task.get("thickness_mm"):
-            task["cut_length_mm"] = value
-    if "无效率要求" in text or "无硬性限制" in text or ("；无；" in message and "压缩空气" in text):
-        task["efficiency_requirement"] = "none"
-    if "可多次分层" in text or "允许层切" in text or "分层加工" in text:
-        task["layer_cut_allowed"] = True
-    if "无分层" in text:
-        task["quality_requirement"] = "no_delamination"
-    if "压缩空气" in text:
-        task["auxiliary"] = "compressed_air"
-    if "自动焦点跟踪" in text or "自动z轴" in text:
-        task["focus_tracking"] = True
-    return task
-
-
-PROCESS_REQUIRED_FIELDS = (
-    "material", "process_type", "thickness_mm", "quality_requirement",
-    "cut_length_mm", "efficiency_requirement", "auxiliary", "layer_cut_allowed",
-)
+    return _missing_slots(legacy_task_snapshot(message), workflow_type, build_machine_bounds())
 
 
 def missing_process_fields(task: dict[str, Any]) -> list[str]:
-    return [field for field in PROCESS_REQUIRED_FIELDS if task.get(field) is None]
+    return MissingFieldService.evaluate(task)
 
 
 def build_workflow_artifacts(
@@ -86,7 +60,7 @@ def build_workflow_artifacts(
 ) -> dict[str, Any]:
     init_database()
     workflow_type = _workflow_type(route_plan)
-    task = _parse_task(message)
+    task = legacy_task_snapshot(message)
     equipment_context = build_machine_bounds()
     missing_slots = _missing_slots(task, workflow_type, equipment_context)
     round_no = _clarification_round(session_id, missing_slots, stage)
@@ -372,41 +346,6 @@ def _stage_for(workflow_type: str, missing_slots: list[str], round_no: int, rout
     if workflow_type == "bo_recommendation":
         return "ready_for_bo"
     return "task_spec_confirmed"
-
-
-def _parse_task(message: str) -> dict[str, Any]:
-    text = message.lower()
-    task: dict[str, Any] = {}
-    if "diamond" in text or "金刚石" in text:
-        task["material"] = "diamond"
-    if "cfrp" in text or "碳纤维" in text or "t300" in text:
-        task["material"] = "CFRP_T300" if "t300" in text else "CFRP"
-    thickness = re.search(r"(\d+(?:\.\d+)?)\s*mm\s*(?:厚)?", text)
-    if thickness:
-        task["thickness_mm"] = float(thickness.group(1))
-    if "切割" in text or "cutting" in text:
-        task["process_type"] = "cutting"
-        task["component_type"] = "workpiece"
-    if "无分层" in text or "delamination" in text:
-        task["quality_requirement"] = "no_delamination"
-    if "压缩空气" in text or "compressed air" in text:
-        task["auxiliary"] = "compressed_air"
-    if "允许层切" in text:
-        task["layer_cut_allowed"] = True
-    if "crl" in text or "透镜" in text or "x-ray" in text:
-        task["component_type"] = "CRL"
-    if "飞秒" in text or "femtosecond" in text or "超快" in text:
-        task["process_type"] = "femtosecond_laser_micromachining"
-    roughness = re.search(r"ra\s*[<小于]*\s*(\d+(\.\d+)?)\s*(nm|um|µm)?", message, re.IGNORECASE)
-    if roughness:
-        task["roughness_target"] = f"Ra < {roughness.group(1)} {roughness.group(3) or 'nm'}"
-    if "单晶" in message or "single crystal" in text:
-        task["diamond_type"] = "single_crystal"
-    if any(marker in text for marker in ["1030", "515", "800", "fs", "khz", "w"]):
-        task["laser_system"] = "mentioned"
-    if "后处理" in message:
-        task["post_processing_allowed"] = "mentioned"
-    return task
 
 
 def _missing_slots(task: dict[str, Any], workflow_type: str, equipment_context: dict[str, Any]) -> list[str]:

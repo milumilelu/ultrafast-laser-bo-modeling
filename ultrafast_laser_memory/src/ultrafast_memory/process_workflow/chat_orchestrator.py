@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
-from ultrafast_memory.chat.session_state import get_session_state, update_session_state
-from ultrafast_memory.chat.workflow_status import (
-    missing_process_fields,
-    parse_process_task_fields,
-    upsert_workflow_progress,
+from ultrafast_agent.task_intake import (
+    ClarificationContextService,
+    HybridTaskFieldExtractionService,
+    MissingFieldService,
+    TaskFieldNormalizer,
+    TaskFieldValidator,
+    TaskSpecMergeService,
 )
+from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
+from ultrafast_memory.chat.session_state import get_session_state, update_session_state
+from ultrafast_memory.chat.workflow_status import record_public_trace, upsert_workflow_progress
+from ultrafast_memory.core.llm_config import get_llm_config
+from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.trial.service import TrialApplicationService
 from ultrafast_memory.reports.task_report_service import TaskReportService
 from ultrafast_memory.workflows.service import TaskWorkflowService
@@ -31,7 +39,7 @@ TRIAL_CHOICES = {
 }
 
 PROCESS_STAGES = [
-    "REQUIREMENTS_PENDING", "REQUIREMENTS_CONFIRMED", "EQUIPMENT_LOADING", "EVIDENCE_RETRIEVAL", "EVIDENCE_ASSESSMENT",
+    "REQUIREMENTS_PENDING", "PARSER_STALL", "REQUIREMENTS_CONFIRMED", "EQUIPMENT_LOADING", "EVIDENCE_RETRIEVAL", "EVIDENCE_ASSESSMENT",
     "TRIAL_ASSESSMENT", "TRIAL_MODE_PENDING", "TRIAL_PLAN_READY", "TRIAL_RESULT_PENDING",
     "TRIAL_RESULT_EVALUATION", "KNOWLEDGE_APPROVAL_PENDING", "BO_READY", "BO_RUNNING",
     "FORMAL_PROCESS_READY", "FORMAL_RELEASE_PENDING", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
@@ -66,31 +74,98 @@ def process_progress(state: dict[str, Any], next_action: dict[str, Any]) -> dict
             "total_steps": len(PROCESS_STAGES), "percent": round(completed_count / len(PROCESS_STAGES) * 100)}
 
 
-def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
+def run_process_chat_turn(session_id: str, message: str, message_id: str | None = None) -> dict[str, Any]:
     state = get_session_state(session_id)
     collected = dict(state.get("collected_slots") or {})
     task = dict(collected.get("process_task_spec") or {})
-    task.update(parse_process_task_fields(message))
     workflow = dict(collected.get("process_workflow") or {})
-    missing = missing_process_fields(task)
+    context = ClarificationContextService.build(state, "complex_process_task", task)
+    extraction = HybridTaskFieldExtractionService(
+        create_llm_client(get_llm_config())
+    ).extract(message, task, context)
+    normalized = TaskFieldNormalizer.normalize(extraction)
+    validated = TaskFieldValidator.validate(normalized, task, context)
+    merge_result = TaskSpecMergeService.merge(
+        task,
+        validated,
+        current_provenance=collected.get("process_task_field_provenance") or {},
+        revision_history=collected.get("process_task_revision_history") or [],
+        message_id=message_id,
+        context=context,
+    )
+    task = merge_result.task_spec
+    missing = MissingFieldService.evaluate(task, context)
+    extraction_events = _record_field_extraction_events(
+        session_id, message_id, message, validated, merge_result, workflow.get("state") or "INTAKE"
+    )
     collected["process_task_spec"] = task
+    collected["process_task_field_provenance"] = merge_result.field_provenance
+    collected["process_task_revision_history"] = merge_result.revision_history
+    collected["process_task_extraction_history"] = [
+        *(collected.get("process_task_extraction_history") or [])[-19:],
+        {
+            "message_id": message_id,
+            "evidence": message,
+            "pending_fields": context.pending_fields,
+            "applied_fields": [item.field_name for item in merge_result.applied],
+            "conflicts": merge_result.conflicts,
+            "ambiguities": validated.ambiguities,
+            "degraded": validated.degraded,
+            "extractor_version": validated.extraction_version,
+        },
+    ]
     if missing:
         clarification_round = min(int(workflow.get("clarification_round") or 0) + 1, 3)
-        workflow.update({"state": "REQUIREMENTS_PENDING", "missing_fields": missing,
+        parser_guard, parser_stall = _parser_guard(workflow, context.pending_fields, message, merge_result)
+        previous_questions = [
+            *(workflow.get("previous_questions") or [])[-9:],
+            {
+                "clarification_round": clarification_round,
+                "fields": missing,
+                "questions": [FIELD_QUESTIONS.get(field, field) for field in missing],
+            },
+        ]
+        workflow.update({"state": "PARSER_STALL" if parser_stall else "REQUIREMENTS_PENDING", "missing_fields": missing,
                          "clarification_round": clarification_round,
-                         "max_clarification_rounds": 3})
+                         "max_clarification_rounds": 3,
+                         "ordered_fields": missing,
+                         "previous_questions": previous_questions,
+                         "parser_guard": parser_guard,
+                         "field_conflicts": merge_result.conflicts,
+                         "task_spec": task,
+                         "field_provenance": merge_result.field_provenance,
+                         "revision_history": merge_result.revision_history})
         collected["process_workflow"] = workflow
         update_session_state(session_id, {"collected_slots": collected,
             "active_workflow": "complex_process_task", "active_skill": "complex_process_task",
-            "workflow_stage": "clarification", "pending_questions": missing})
+            "workflow_stage": "parser_stall" if parser_stall else "clarification", "pending_questions": missing})
         upsert_workflow_progress(
-            session_id, "complex_process_task", "REQUIREMENTS_PENDING", "waiting_user",
-            "等待用户补充加工要求。", completed_steps=["工作流路由完成"],
+            session_id, "complex_process_task", workflow["state"], "waiting_user",
+            "字段解析停滞，等待结构化输入。" if parser_stall else "等待用户补充加工要求。",
+            completed_steps=["工作流路由完成"],
             pending_steps=missing, missing_slots=missing,
         )
-        return {"content": _requirements_message(task, missing, clarification_round), "state": workflow,
-                "next_action": {"action_type": "submit_required_fields", "required_fields": missing, "blocking": True},
-                "events": []}
+        if parser_stall:
+            extraction_events.append(_record_parser_stall(session_id, message_id, message, missing))
+        return {
+            "content": _parser_stall_message(message, missing) if parser_stall else _requirements_message(task, missing, clarification_round),
+            "state": workflow,
+            "next_action": {
+                "action_type": "submit_structured_fields" if parser_stall else "submit_required_fields",
+                "required_fields": missing,
+                "blocking": True,
+            },
+            "events": extraction_events,
+        }
+
+    workflow.update({
+        "parser_guard": {},
+        "missing_fields": [],
+        "task_spec": task,
+        "field_provenance": merge_result.field_provenance,
+        "revision_history": merge_result.revision_history,
+        "field_conflicts": merge_result.conflicts,
+    })
 
     selected = _trial_choice(message) or workflow.get("selected_trial_mode")
     if not selected:
@@ -102,12 +177,15 @@ def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
                                           "pending_questions": ["trial_mode"]})
         return {"content": _trial_choice_message(selection), "state": workflow,
                 "next_action": selection.get("next_required_action") or {"action_type": "select_trial_mode",
-                    "allowed_values": list(TRIAL_CHOICES.values()), "blocking": True}, "events": result["events"],
+                    "allowed_values": list(TRIAL_CHOICES.values()), "blocking": True},
+                "events": [*extraction_events, *result["events"]],
                 "workflow_result": result}
 
     if workflow.get("state") in {"FORMAL_PROCESS_READY", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
                                  "FINAL_INSPECTION_PENDING", "QUALITY_DECISION", "REPORT_PENDING", "ARCHIVE_PENDING"}:
-        return _run_formal_turn(session_id, message, collected, workflow, task)
+        formal_result = _run_formal_turn(session_id, message, collected, workflow, task)
+        formal_result["events"] = [*extraction_events, *(formal_result.get("events") or [])]
+        return formal_result
 
     if not workflow.get("trial_plan"):
         allow_exploration = any(marker in message for marker in ("允许探索性候选", "同意探索性候选", "允许LLM兜底"))
@@ -130,7 +208,7 @@ def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
             return {"content": content, "state": workflow,
                     "next_action": {"action_type": "resolve_parameter_evidence" if allow_exploration else "approve_llm_fallback",
                                     "allowed_values": ["允许探索性候选"] if not allow_exploration else [], "blocking": True},
-                    "events": []}
+                    "events": extraction_events}
         candidate = {item.name: item.value for item in recommendation.parameters if item.value is not None}
         provenance = parameter_provenance_registry_tool(recommendation)
         result = _execute_workflow(session_id, task, selected_trial_mode=selected,
@@ -138,7 +216,8 @@ def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
         plan = result["data"].get("trial_plan")
         if not plan:
             return {"content": "试切模式不允许或试切方案生成失败，流程已阻塞。", "state": {"state": "BLOCKED"},
-                    "next_action": {"action_type": "review_trial_mode", "blocking": True}, "events": result["events"]}
+                    "next_action": {"action_type": "review_trial_mode", "blocking": True},
+                    "events": [*extraction_events, *result["events"]]}
         workflow.update({"state": "TRIAL_RESULT_PENDING", "selected_trial_mode": selected,
                          "trial_plan": plan, "parameter_provenance": provenance,
                          "workflow_run_id": result["run_id"]})
@@ -147,12 +226,13 @@ def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
         update_session_state(session_id, {"collected_slots": collected, "workflow_stage": "trial_result_pending",
                                           "pending_questions": ["trial_result"]})
         return {"content": _trial_plan_message(plan), "state": workflow,
-                "next_action": _trial_result_contract(), "events": result["events"], "workflow_result": result}
+                "next_action": _trial_result_contract(), "events": [*extraction_events, *result["events"]],
+                "workflow_result": result}
 
     payload = _json_payload(message)
     if payload is None:
         return {"content": "当前等待试切结果。请按下方 JSON 输入契约提交，不得以文字确认代替实测数据。",
-                "state": workflow, "next_action": _trial_result_contract(), "events": []}
+                "state": workflow, "next_action": _trial_result_contract(), "events": extraction_events}
     evaluation = _ingest_and_evaluate(workflow["trial_plan"], payload)
     workflow.update({"state": "TRIAL_RESULT_EVALUATION", "trial_evaluation": evaluation,
                      "verified_trial_payload": payload})
@@ -184,7 +264,7 @@ def run_process_chat_turn(session_id: str, message: str) -> dict[str, Any]:
     else:
         content = f"试切结果已完成结构化评价：{decision}。流程不能进入正式加工。"
         next_action = {"action_type": "review_trial_failure", "blocking": True}
-    return {"content": content, "state": workflow, "next_action": next_action, "events": []}
+    return {"content": content, "state": workflow, "next_action": next_action, "events": extraction_events}
 
 
 def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], workflow: dict[str, Any],
@@ -387,6 +467,185 @@ def _ingest_and_evaluate(plan: dict[str, Any], payload: dict[str, Any]) -> dict[
     return service.evaluate(result["result_id"], {
         "reviewer_comment": payload.get("reviewer_comment"),
         "confirm_conditional": bool(payload.get("confirm_conditional"))})
+
+
+def _record_field_extraction_events(
+    session_id: str,
+    message_id: str | None,
+    message: str,
+    patch,
+    merge_result,
+    stage: str,
+) -> list[dict[str, Any]]:
+    events = [record_agent_trace_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type="field_extraction_started",
+        stage=stage,
+        title="字段抽取开始",
+        summary="开始执行上下文候选抽取、归一、校验和受控合并。",
+        skill="complex_process_task",
+        tool="hybrid_task_field_extractor",
+        input_summary=message[:240],
+        status="running",
+    )]
+    for candidate in patch.updates:
+        events.append(record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="field_candidate_extracted",
+            stage=stage,
+            title=f"识别字段候选：{candidate.field_name}",
+            summary=(
+                f"识别到 {FIELD_LABELS.get(candidate.field_name, candidate.field_name)}，"
+                f"证据为“{candidate.evidence}”。"
+            ),
+            skill="complex_process_task",
+            tool="hybrid_task_field_extractor",
+            output_summary=(
+                f"field={candidate.field_name}; source={candidate.extraction_source}; "
+                f"confidence={candidate.confidence:.2f}; operation={candidate.operation}"
+            ),
+            status="completed",
+        ))
+    for rejected in patch.rejected_candidates:
+        events.append(record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="field_candidate_rejected",
+            stage=stage,
+            title=f"拒绝字段候选：{rejected.get('field_name') or 'unknown'}:{rejected.get('reason') or 'unknown'}",
+            summary=(
+                f"字段 {rejected.get('field_name') or 'unknown'} 未通过确定性校验："
+                f"{rejected.get('reason') or 'unknown'}。"
+            ),
+            skill="complex_process_task",
+            tool="task_field_validator",
+            status="completed",
+        ))
+    for conflict in merge_result.conflicts:
+        events.append(record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="field_conflict_detected",
+            stage=stage,
+            title=f"检测到字段冲突：{conflict['field_name']}",
+            summary=(
+                f"{FIELD_LABELS.get(conflict['field_name'], conflict['field_name'])}已有确认值，"
+                "新候选不含明确修正语义，已拒绝覆盖。"
+            ),
+            skill="complex_process_task",
+            tool="task_spec_merge_service",
+            status="completed",
+        ))
+    if merge_result.applied:
+        fields = [item.field_name for item in merge_result.applied]
+        events.append(record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="task_spec_patched",
+            stage=stage,
+            title="更新任务字段",
+            summary="已通过治理层写入：" + "、".join(FIELD_LABELS.get(field, field) for field in fields) + "。",
+            skill="complex_process_task",
+            tool="task_spec_merge_service",
+            output_summary="fields=" + ",".join(fields),
+            status="completed",
+        ))
+        for candidate in merge_result.applied:
+            record_public_trace(
+                session_id,
+                "task_spec_patched",
+                "更新任务字段",
+                (
+                    f"识别到{FIELD_LABELS.get(candidate.field_name, candidate.field_name)} "
+                    f"{candidate.normalized_value}，来源为用户文本“{candidate.evidence}”。"
+                ),
+                message_id=message_id,
+                detail={"field_name": candidate.field_name, "source": candidate.extraction_source},
+            )
+    if patch.degraded:
+        events.append(record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="field_extraction_degraded",
+            stage=stage,
+            title="字段抽取降级",
+            summary="LLM 结构化抽取不可用或返回无效结果；已保留确定性候选和现有任务状态。",
+            skill="complex_process_task",
+            tool="llm_task_field_extractor",
+            status="completed",
+        ))
+    return events
+
+
+def _parser_guard(
+    workflow: dict[str, Any],
+    pending_fields: list[str],
+    message: str,
+    merge_result,
+) -> tuple[dict[str, Any], bool]:
+    prior = dict(workflow.get("parser_guard") or {})
+    evidence = re.sub(r"[\s；;，,。]+", "", message).lower()
+    effective_fields = {
+        item.field_name for item in [*merge_result.applied, *merge_result.unchanged]
+        if item.field_name in pending_fields
+    }
+    failed = bool(pending_fields) and not effective_fields
+    same_pending = list(prior.get("pending_fields") or []) == list(pending_fields)
+    same_evidence = prior.get("evidence") == evidence
+    if failed:
+        failures = int(prior.get("consecutive_failures") or 0) + 1 if same_pending and same_evidence else 1
+    else:
+        failures = 0
+    guard = {
+        "pending_fields": list(pending_fields),
+        "evidence": evidence,
+        "raw_evidence": message,
+        "consecutive_failures": failures,
+    }
+    return guard, failures >= 2
+
+
+def _record_parser_stall(
+    session_id: str,
+    message_id: str | None,
+    message: str,
+    missing: list[str],
+) -> dict[str, Any]:
+    return record_agent_trace_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type="clarification_parser_failed",
+        stage="PARSER_STALL",
+        title="澄清解析停滞",
+        summary="连续两次未从等价回答生成有效 Patch，已切换为字段化输入模板。",
+        skill="complex_process_task",
+        tool="parser_stall_guard",
+        input_summary=message[:240],
+        output_summary="pending_fields=" + ",".join(missing),
+        status="waiting_user",
+    )
+
+
+def _parser_stall_message(message: str, missing: list[str]) -> str:
+    examples = {
+        "material": "material=CFRP_T300",
+        "process_type": "process_type=cutting",
+        "thickness_mm": "thickness_mm=5 mm",
+        "quality_requirement": "quality_requirement=no_delamination",
+        "cut_length_mm": "cut_length_mm=100 mm；contour_type=straight",
+        "efficiency_requirement": "efficiency_requirement=none",
+        "auxiliary": "auxiliary=compressed_air",
+        "layer_cut_allowed": "layer_cut_allowed=true",
+    }
+    template = "；".join(examples[field] for field in missing if field in examples)
+    return (
+        "系统未能可靠解析以下回答：\n"
+        f"“{message}”\n\n"
+        "已保留此前确认的全部字段，不会进入 BO。请按下列字段化格式重试：\n"
+        f"{template}"
+    )
 
 
 def _requirements_message(task: dict[str, Any], missing: list[str], clarification_round: int = 1) -> str:

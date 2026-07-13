@@ -24,6 +24,13 @@ VALID_EVENT_TYPES = {
     "warning",
     "error",
     "workflow_end",
+    "field_extraction_started",
+    "field_candidate_extracted",
+    "field_candidate_rejected",
+    "field_conflict_detected",
+    "task_spec_patched",
+    "field_extraction_degraded",
+    "clarification_parser_failed",
 }
 
 

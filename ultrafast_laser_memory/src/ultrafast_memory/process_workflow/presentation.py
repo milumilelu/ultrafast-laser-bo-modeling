@@ -6,6 +6,7 @@ from typing import Any
 STAGE_LABELS = {
     "INTAKE": "任务接收",
     "REQUIREMENTS_PENDING": "等待补充加工要求",
+    "PARSER_STALL": "字段解析停滞",
     "REQUIREMENTS_CONFIRMED": "加工要求已确认",
     "EQUIPMENT_LOADING": "读取设备配置",
     "EVIDENCE_RETRIEVAL": "检索文献与历史案例",
@@ -71,6 +72,7 @@ FIELD_QUESTIONS = {
 
 ACTION_LABELS = {
     "submit_required_fields": "补充加工要求",
+    "submit_structured_fields": "按字段模板补充加工要求",
     "select_trial_mode": "选择试切方式",
     "approve_llm_fallback": "授权探索性参数候选",
     "resolve_parameter_evidence": "补充参数证据",
