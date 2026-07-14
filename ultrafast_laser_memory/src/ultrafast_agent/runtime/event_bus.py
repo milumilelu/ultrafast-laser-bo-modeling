@@ -18,12 +18,13 @@ class EventBus:
         session_id: str | None = None,
         task_id: str | None = None,
         trace_id: str | None = None,
+        initial_sequence: int = 0,
     ):
         self.run_id = run_id
         self.session_id = session_id
         self.task_id = task_id
         self.trace_id = trace_id or run_id
-        self._sequence = 0
+        self._sequence = initial_sequence
         self._events: list[AgentEvent] = []
         self._subscribers: list[Subscriber] = []
         self._lock = Lock()
@@ -57,6 +58,9 @@ class EventBus:
         parent_event_id: str | None = None,
         visibility: str = "public",
         evidence_refs: list[str] | None = None,
+        workflow_id: str | None = None,
+        message_id: str | None = None,
+        step: str | None = None,
     ) -> AgentEvent:
         with self._lock:
             self._sequence += 1
@@ -65,6 +69,8 @@ class EventBus:
                 run_id=self.run_id,
                 trace_id=self.trace_id,
                 session_id=self.session_id,
+                workflow_id=workflow_id,
+                message_id=message_id,
                 task_id=self.task_id,
                 sequence=self._sequence,
                 event_type=event_type,
@@ -74,6 +80,7 @@ class EventBus:
                 status=status,
                 progress=progress,
                 skill=skill,
+                step=step,
                 tool=tool,
                 duration_ms=round(duration_ms, 3) if duration_ms is not None else None,
                 cache_hit=cache_hit,
@@ -84,6 +91,8 @@ class EventBus:
                 parent_event_id=parent_event_id,
                 visibility=visibility,
                 data=safe_data,
+                public_summary=summary,
+                payload=safe_data,
             )
             self._events.append(event)
             subscribers = tuple(self._subscribers)

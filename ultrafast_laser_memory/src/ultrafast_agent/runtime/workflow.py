@@ -9,7 +9,7 @@ from typing import Any, Callable, Iterator
 
 from ultrafast_agent.runtime.event_bus import EventBus
 from ultrafast_agent.runtime.events import AgentEvent
-from ultrafast_agent.runtime.cancellation import CancellationToken, WorkflowCancelled
+from ultrafast_agent.runtime.cancellation import WorkflowCancelled
 from ultrafast_agent.runtime.execution_context import RunContext
 from ultrafast_agent.runtime.retry_policy import attempt_count
 from ultrafast_agent.runtime.timeout_policy import WorkflowTimeout, resolve_timeout_ms

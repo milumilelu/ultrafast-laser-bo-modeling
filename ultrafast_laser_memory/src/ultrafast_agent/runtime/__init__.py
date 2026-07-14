@@ -1,5 +1,7 @@
 from ultrafast_agent.runtime.event_bus import EventBus
 from ultrafast_agent.runtime.events import AgentEvent, redact_public_data
+from ultrafast_agent.runtime.event_service import AgentEventService, canonical_agent_events
+from ultrafast_agent.runtime.sinks import AgentEventSink, DatabaseEventSink, InMemoryTraceSink
 from ultrafast_agent.runtime.tools import ToolContract, ToolRegistry
 from ultrafast_agent.runtime.cancellation import CancellationToken, WorkflowCancelled
 from ultrafast_agent.runtime.execution_context import RunContext
@@ -17,8 +19,12 @@ from ultrafast_agent.runtime.workflow import (
 __all__ = [
     "CancellationToken",
     "AgentEvent",
+    "AgentEventService",
+    "AgentEventSink",
+    "DatabaseEventSink",
     "AgentRuntime",
     "EventBus",
+    "InMemoryTraceSink",
     "RunContext",
     "ToolContract",
     "ToolRegistry",
@@ -33,4 +39,5 @@ __all__ = [
     "ToolExecutor",
     "ToolExecutionResult",
     "redact_public_data",
+    "canonical_agent_events",
 ]

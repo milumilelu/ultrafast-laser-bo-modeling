@@ -3,37 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ultrafast_memory.core.ids import stable_id
-from ultrafast_memory.core.time_utils import utc_now_iso
-from ultrafast_memory.db.init_db import init_database
-from ultrafast_memory.db.session import get_connection
+from ultrafast_agent.runtime.event_service import canonical_agent_events
+from ultrafast_agent.runtime.events import redact_public_data
+from ultrafast_integrations.storage.runtime_event_repository import RuntimeEventRepository
 
 
 FORBIDDEN_TRACE_KEYS = {"chain_of_thought", "raw_thoughts", "hidden_reasoning", "model_reasoning_tokens"}
-VALID_EVENT_TYPES = {
-    "workflow_start",
-    "workflow_progress",
-    "state_update",
-    "thinking_summary",
-    "tool_call",
-    "tool_result",
-    "knowledge_lookup",
-    "device_lookup",
-    "equipment_profile_loaded",
-    "question_generated",
-    "decision",
-    "warning",
-    "error",
-    "workflow_end",
-    "field_extraction_started",
-    "field_candidate_extracted",
-    "field_candidate_rejected",
-    "field_conflict_detected",
-    "task_spec_patched",
-    "field_extraction_degraded",
-    "clarification_parser_failed",
-}
-
-
 def record_agent_trace_event(
     session_id: str,
     event_type: str,
@@ -47,62 +22,42 @@ def record_agent_trace_event(
     input_summary: str | None = None,
     output_summary: str | None = None,
     status: str | None = None,
+    workflow_id: str | None = None,
+    visibility: str = "public",
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    init_database()
-    if event_type not in VALID_EVENT_TYPES:
-        event_type = "state_update"
-    safe = _strip_forbidden(
-        {
-            "session_id": session_id,
-            "message_id": message_id,
-            "event_type": event_type,
-            "stage": stage,
-            "title": title,
-            "summary": summary,
-            "progress": int(progress) if progress is not None else None,
-            "skill": skill,
-            "tool": tool,
-            "input_summary": input_summary,
-            "output_summary": output_summary,
-            "status": status,
-            "created_at": utc_now_iso(),
-        }
+    run_id = stable_id("agent-run", session_id, message_id or "session")
+    workflow_id = workflow_id or stable_id("workflow", session_id, skill or "chat")
+    safe_payload = redact_public_data({
+        **(payload or {}),
+        "input_summary": input_summary,
+        "output_summary": output_summary,
+    })
+    event = canonical_agent_events.emit(
+        run_id=run_id,
+        session_id=session_id,
+        message_id=message_id,
+        workflow_id=workflow_id,
+        event_type=event_type,
+        stage=stage or "chat",
+        step=stage or event_type,
+        title=title,
+        public_summary=summary,
+        status=status or "completed",
+        progress=int(progress) if progress is not None else None,
+        skill=skill,
+        tool=tool,
+        payload=safe_payload,
+        visibility=visibility,
     )
-    safe["event_id"] = stable_id("agenttrace", session_id, message_id or "", event_type, title, safe["created_at"])
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO agent_trace_event VALUES (
-              :event_id, :session_id, :message_id, :event_type, :stage, :title,
-              :summary, :progress, :skill, :tool, :input_summary,
-              :output_summary, :status, :created_at
-            )
-            """,
-            safe,
-        )
-        conn.commit()
-    return safe
+    return event.to_dict()
 
 
 def list_agent_trace_events(session_id: str, message_id: str | None = None) -> list[dict[str, Any]]:
-    init_database()
-    params: list[Any] = [session_id]
-    where = "session_id = ?"
+    events = RuntimeEventRepository().list_session_events(session_id)
     if message_id is not None:
-        where += " AND message_id = ?"
-        params.append(message_id)
-    with get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT event_id, session_id, message_id, event_type, stage, title, summary,
-                   progress, skill, tool, input_summary, output_summary, status, created_at
-            FROM agent_trace_event
-            WHERE {where}
-            ORDER BY created_at, event_id
-            """,
-            params,
-        ).fetchall()
-    return [dict(row) for row in rows]
+        events = [event for event in events if event.get("message_id") == message_id]
+    return events
 
 
 def trace_from_progress(session_id: str, message_id: str | None, progress: dict[str, Any], skill: str | None = None) -> dict[str, Any]:
@@ -141,4 +96,6 @@ def trace_from_public_status(session_id: str, message_id: str | None, status_eve
 
 
 def _strip_forbidden(record: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in record.items() if key not in FORBIDDEN_TRACE_KEYS}
+    return redact_public_data(
+        {key: value for key, value in record.items() if key not in FORBIDDEN_TRACE_KEYS}
+    )

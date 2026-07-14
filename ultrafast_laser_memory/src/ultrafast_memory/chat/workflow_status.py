@@ -14,7 +14,6 @@ from ultrafast_memory.agent_runtime.trace_collector import (
     list_agent_trace_events,
     record_agent_trace_event,
     trace_from_progress,
-    trace_from_public_status,
 )
 
 
@@ -91,8 +90,6 @@ def build_workflow_artifacts(
         status="running",
     )
     trace_from_progress(session_id, message_id, progress, workflow_type)
-    for item in thinking:
-        trace_from_public_status(session_id, message_id, item, workflow_type)
     if missing_slots:
         record_agent_trace_event(
             session_id=session_id,
@@ -184,54 +181,19 @@ def record_public_trace(
     detail: dict[str, Any] | None = None,
     visibility: str = "public",
 ) -> dict[str, Any]:
-    init_database()
     safe_detail = {k: v for k, v in (detail or {}).items() if k not in FORBIDDEN_STATUS_KEYS}
-    now = utc_now_iso()
-    record = {
-        "trace_id": stable_id("rst", session_id, message_id or "", event_type, title, summary, now),
-        "session_id": session_id,
-        "message_id": message_id,
-        "workflow_id": workflow_id,
-        "event_type": event_type,
-        "title": title,
-        "summary": summary,
-        "detail_json": json.dumps(safe_detail, ensure_ascii=False),
-        "visibility": visibility,
-        "created_at": now,
-    }
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO reasoning_status_trace VALUES (
-              :trace_id, :session_id, :message_id, :workflow_id, :event_type,
-              :title, :summary, :detail_json, :visibility, :created_at
-            )
-            """,
-            record,
-        )
-        run_id = workflow_id or stable_id("workflow", session_id, "public-trace")
-        sequence = conn.execute(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM public_reasoning_trace WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()[0]
-        public_payload = {
-            "trace_id": record["trace_id"], "sequence": sequence, "stage": event_type,
-            "event_type": event_type, "title": title, "summary": summary,
-            "assumptions": [], "evidence_refs": safe_detail.get("evidence_refs") or [],
-            "alternatives_considered": safe_detail.get("alternatives_considered") or [],
-            "selected_alternative": safe_detail.get("selected_alternative"),
-            "rejection_reasons": safe_detail.get("rejection_reasons") or [],
-            "uncertainty": safe_detail.get("uncertainty") or {},
-            "next_step": safe_detail.get("next_step"), "visibility": "public",
-            "created_at": now,
-        }
-        conn.execute(
-            "INSERT OR REPLACE INTO public_reasoning_trace VALUES (?,?,?,?,?,?,?,?,?)",
-            (record["trace_id"], run_id, sequence, event_type, event_type, title, summary,
-             json.dumps(public_payload, ensure_ascii=False), now),
-        )
-        conn.commit()
-    return {key: value for key, value in record.items() if key != "detail_json"}
+    return record_agent_trace_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type=event_type,
+        stage=str(safe_detail.get("stage") or event_type),
+        title=title,
+        summary=summary,
+        workflow_id=workflow_id,
+        visibility=visibility,
+        payload=safe_detail,
+        status="completed",
+    )
 
 
 def record_default_public_traces(
@@ -293,18 +255,22 @@ def get_latest_progress(session_id: str) -> dict[str, Any] | None:
 
 
 def list_public_thinking_status(session_id: str) -> list[dict[str, Any]]:
-    init_database()
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT trace_id, session_id, message_id, workflow_id, event_type, title, summary, visibility, created_at
-            FROM reasoning_status_trace
-            WHERE session_id = ? AND visibility = 'public'
-            ORDER BY created_at
-            """,
-            (session_id,),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        event
+        for event in list_agent_trace_events(session_id)
+        if event.get("visibility") == "public"
+        and event.get("event_type") in {
+            "thinking_summary",
+            "decision",
+            "knowledge_lookup",
+            "device_lookup",
+            "equipment_profile_loaded",
+            "task_parsed",
+            "slot_check",
+            "evidence_gap_check",
+            "tool_call_started",
+        }
+    ]
 
 
 def mark_workflow_completed(session_id: str, workflow_type: str = "task_intake") -> dict[str, Any]:

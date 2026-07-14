@@ -83,7 +83,11 @@ def test_workflow_ndjson_is_monotonic_and_public(isolated_root):
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
     assert events[0]["event_type"] == "workflow_started"
     assert events[-1]["event_type"] == "workflow_completed"
-    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+    assert [event["render_sequence"] for event in events] == list(range(1, len(events) + 1))
+    canonical = [event for event in events if event.get("sequence") is not None]
+    assert [event["sequence"] for event in canonical] == sorted(
+        {event["sequence"] for event in canonical}
+    )
     rendered = response.text.lower()
     assert "chain_of_thought" not in rendered
     assert "hidden_reasoning" not in rendered
@@ -121,4 +125,8 @@ def test_chat_ndjson_adds_monotonic_sequence(isolated_root, monkeypatch):
     )
 
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
-    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+    assert [event["render_sequence"] for event in events] == list(range(1, len(events) + 1))
+    canonical = [event for event in events if event.get("sequence") is not None]
+    assert [event["sequence"] for event in canonical] == sorted(
+        {event["sequence"] for event in canonical}
+    )

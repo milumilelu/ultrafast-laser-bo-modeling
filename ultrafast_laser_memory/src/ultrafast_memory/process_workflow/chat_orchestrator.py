@@ -15,7 +15,7 @@ from ultrafast_agent.task_intake import (
 from ultrafast_agent.task_intake.schemas import MergeResult, TaskSpecPatch
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
-from ultrafast_memory.chat.workflow_status import record_public_trace, upsert_workflow_progress
+from ultrafast_memory.chat.workflow_status import upsert_workflow_progress
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.trial.service import TrialApplicationService
@@ -624,18 +624,6 @@ def _record_field_extraction_events(
             output_summary="fields=" + ",".join(fields),
             status="completed",
         ))
-        for candidate in merge_result.applied:
-            record_public_trace(
-                session_id,
-                "task_spec_patched",
-                "更新任务字段",
-                (
-                    f"识别到{FIELD_LABELS.get(candidate.field_name, candidate.field_name)} "
-                    f"{candidate.normalized_value}，来源为用户文本“{candidate.evidence}”。"
-                ),
-                message_id=message_id,
-                detail={"field_name": candidate.field_name, "source": candidate.extraction_source},
-            )
     if patch.degraded:
         events.append(record_agent_trace_event(
             session_id=session_id,
@@ -651,7 +639,7 @@ def _record_field_extraction_events(
     events.append(record_agent_trace_event(
         session_id=session_id,
         message_id=message_id,
-        event_type="state_update",
+        event_type="field_extraction_completed",
         stage=stage,
         title="字段抽取结果",
         summary=(

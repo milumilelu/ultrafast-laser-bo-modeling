@@ -50,6 +50,9 @@ class RuntimeEventRepository:
                             "evidence_refs": value.get("evidence_refs") or [],
                             "parent_event_id": value.get("parent_event_id"),
                             "visibility": value.get("visibility", "public"),
+                            "workflow_id": value.get("workflow_id"),
+                            "message_id": value.get("message_id"),
+                            "step": value.get("step"),
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -59,6 +62,15 @@ class RuntimeEventRepository:
             )
             uow.commit()
         return {"event_id": event_id, **value}
+
+    def max_sequence(self, run_id: str) -> int:
+        init_database()
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) FROM runtime_public_event WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        return int(row[0])
 
     def list_run_events(self, run_id: str) -> list[dict[str, Any]]:
         init_database()
@@ -97,6 +109,9 @@ class RuntimeEventRepository:
             "evidence_refs",
             "parent_event_id",
             "visibility",
+            "workflow_id",
+            "message_id",
+            "step",
         ):
             if key in data:
                 row[key] = data.pop(key)

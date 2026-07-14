@@ -84,9 +84,13 @@ def test_public_reasoning_summary_is_persisted_without_hidden_reasoning(isolated
     record_public_trace("s1", "decision_rationale", "参数来源选择", "BO 不足，转入 RAG。",
                         workflow_id="run-1", detail={"chain_of_thought": "must not persist"})
     with get_connection() as connection:
-        trace_json = connection.execute("SELECT trace_json FROM public_reasoning_trace").fetchone()[0]
-    assert "chain_of_thought" not in trace_json
-    assert "BO 不足" in trace_json
+        row = connection.execute(
+            "SELECT summary, data_json FROM runtime_public_event WHERE session_id = 's1'"
+        ).fetchone()
+        legacy_count = connection.execute("SELECT COUNT(*) FROM public_reasoning_trace").fetchone()[0]
+    assert "chain_of_thought" not in row[1]
+    assert "BO 不足" in row[0]
+    assert legacy_count == 0
 
 
 def test_v3_skills_are_registered_and_trace_off_is_enforced(isolated_root):

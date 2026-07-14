@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from ultrafast_agent.observability import DebugTraceRenderer, TUIRenderer
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.prompt_builder import build_system_prompt
 from ultrafast_memory.chat.legacy_status_parser import LegacyTaskSpecAdapter
@@ -16,7 +17,7 @@ from ultrafast_memory.chat.session_store import (
     save_skill_trace,
     session_exists,
 )
-from ultrafast_memory.chat.workflow_status import build_workflow_artifacts, record_public_trace
+from ultrafast_memory.chat.workflow_status import build_workflow_artifacts
 from ultrafast_memory.core.config import load_config
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.equipment.bounds import build_machine_bounds, require_machine_bounds_for_bo
@@ -341,8 +342,14 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     }
     if response.progress:
         yield _progress_event(response.progress)
-    for item in response.thinking_status:
-        yield _thinking_event(item)
+    thinking_event_ids = {
+        item["event_id"] for item in response.thinking_status if item.get("event_id")
+    }
+    for item in response.execution_trace:
+        if item.get("event_id") in thinking_event_ids:
+            yield _thinking_event(item)
+        else:
+            yield _agent_trace_event(item)
     if route:
         yield {
             "type": "route", "primary_skill": route.get("primary_skill"),
@@ -350,8 +357,6 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
             "confidence": route.get("confidence"), "route_source": route.get("route_source"),
         }
         yield {"type": "trace", "step": "hybrid_router", "status": "success", "selected_skill": route.get("primary_skill")}
-    for item in response.execution_trace:
-        yield _agent_trace_event(item)
     for item in response.audit_trace:
         if item.get("status") == "fallback":
             yield {
@@ -465,15 +470,6 @@ def _record_process_public_reasoning(
         skill="complex_process_task",
         status="completed",
     )
-    record_public_trace(
-        session_id,
-        "thinking_summary",
-        "公开推理摘要",
-        summary,
-        message_id=message_id,
-        workflow_id=process_result.get("run_id"),
-        detail={"stage": view["current_stage_code"], "next_step": view["next_required_action"].get("action_type")},
-    )
     events = [agent_event]
     equipment = build_machine_bounds()
     if equipment.get("active"):
@@ -492,15 +488,6 @@ def _record_process_public_reasoning(
             skill="complex_process_task",
             tool="equipment_memory_tool",
             status="completed",
-        )
-        record_public_trace(
-            session_id,
-            "equipment_profile_loaded",
-            "读取设备配置",
-            equipment_summary,
-            message_id=message_id,
-            workflow_id=process_result.get("run_id"),
-            detail={"equipment_profile_id": equipment.get("equipment_profile_id"), "revision_id": equipment.get("revision_id")},
         )
         events.append(equipment_event)
     return events
@@ -702,28 +689,11 @@ def _clarification_limit_message(artifacts: dict) -> str | None:
 
 
 def _thinking_event(item: dict) -> dict:
-    return {
-        "type": "thinking_status",
-        "event_type": item.get("event_type"),
-        "title": item.get("title"),
-        "summary": item.get("summary"),
-    }
+    return TUIRenderer().render(item)
 
 
 def _agent_trace_event(item: dict) -> dict:
-    return {
-        "type": "agent_trace",
-        "event_type": item.get("event_type"),
-        "stage": item.get("stage"),
-        "title": item.get("title"),
-        "summary": item.get("summary"),
-        "progress": item.get("progress"),
-        "skill": item.get("skill"),
-        "tool": item.get("tool"),
-        "input_summary": item.get("input_summary"),
-        "output_summary": item.get("output_summary"),
-        "status": item.get("status"),
-    }
+    return DebugTraceRenderer().render(item)
 
 
 def _maybe_handle_evidence_gap(message: str, session_id: str, message_id: str | None, route_plan, audit_trace: list[dict]) -> dict | None:

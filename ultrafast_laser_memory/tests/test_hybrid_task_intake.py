@@ -15,6 +15,7 @@ from ultrafast_agent.task_intake import (
 )
 from ultrafast_agent.task_intake.schemas import ClarificationContext, TaskFieldCandidate, TaskSpecPatch
 from ultrafast_memory.apps.api.main import app
+from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.equipment.schemas import EquipmentProfileCreate
 from ultrafast_memory.equipment.service import create_equipment_profile
 
@@ -188,6 +189,8 @@ def test_cutting_clarification_log_regression(isolated_root, monkeypatch):
     )
     client = TestClient(app)
     session_id = _session(client)
+    _chat(client, session_id, "/mode debug")
+    _chat(client, session_id, "/trace full")
     _chat(client, session_id, "切割5mm厚型号为T300的碳纤维复合板")
     result = _chat(client, session_id, "切缝区域无分层;100mm直线；无效率要求；压缩空气；允许")
 
@@ -207,6 +210,21 @@ def test_cutting_clarification_log_regression(isolated_root, monkeypatch):
     event_types = {item["event_type"] for item in result["execution_trace"]}
     assert "field_candidate_extracted" in event_types
     assert "task_spec_patched" in event_types
+    assert sum(
+        item["event_type"] == "field_extraction_completed"
+        for item in result["execution_trace"]
+    ) == 1
+    with get_connection() as conn:
+        canonical = conn.execute(
+            "SELECT COUNT(*) FROM runtime_public_event WHERE session_id=? AND event_type=?",
+            (session_id, "field_extraction_completed"),
+        ).fetchone()[0]
+        legacy = conn.execute(
+            "SELECT COUNT(*) FROM agent_trace_event WHERE session_id=?", (session_id,)
+        ).fetchone()[0]
+    assert canonical == 2  # one completion event for each intake message
+    assert legacy == 0
+    assert "chain_of_thought" not in json.dumps(result["execution_trace"], ensure_ascii=False)
 
 
 def test_contextual_boolean_short_answer_is_accepted():

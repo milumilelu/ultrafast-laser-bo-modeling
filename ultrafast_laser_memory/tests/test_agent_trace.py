@@ -4,6 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+from ultrafast_agent.observability import DebugTraceRenderer, NDJSONRenderer, TUIRenderer
 from ultrafast_memory.agent_runtime.trace_collector import list_agent_trace_events, record_agent_trace_event
 from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.schemas import ChatRequest
@@ -16,7 +17,7 @@ from ultrafast_memory.db.session import get_connection
 FORBIDDEN = {"chain_of_thought", "raw_thoughts", "hidden_reasoning", "model_reasoning_tokens"}
 
 
-def test_agent_trace_table_exists_and_filters_hidden_fields(isolated_root):
+def test_legacy_trace_adapter_writes_only_canonical_event_store(isolated_root):
     init_database()
 
     event = record_agent_trace_event(
@@ -29,7 +30,37 @@ def test_agent_trace_table_exists_and_filters_hidden_fields(isolated_root):
 
     assert not (FORBIDDEN & set(event))
     with get_connection() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM agent_trace_event WHERE session_id = ?", ("trace-session",)).fetchone()[0]
+        canonical = conn.execute(
+            "SELECT COUNT(*) FROM runtime_public_event WHERE session_id = ?", ("trace-session",)
+        ).fetchone()[0]
+        legacy = conn.execute(
+            "SELECT COUNT(*) FROM agent_trace_event WHERE session_id = ?", ("trace-session",)
+        ).fetchone()[0]
+    assert canonical == 1
+    assert legacy == 0
+
+
+def test_renderers_share_one_canonical_event_without_extra_write(isolated_root):
+    event = record_agent_trace_event(
+        "render-session", "field_extraction_completed", "字段抽取结果", "已完成字段抽取。"
+    )
+    assert {
+        "event_id", "sequence", "timestamp", "session_id", "workflow_id",
+        "event_type", "stage", "step", "tool", "skill", "status",
+        "public_summary", "payload",
+    } <= set(event)
+
+    rendered = [
+        NDJSONRenderer().render(event, render_sequence=1, mode="debug"),
+        TUIRenderer().render(event),
+        DebugTraceRenderer().render(event),
+    ]
+    assert {item["event_id"] for item in rendered} == {event["event_id"]}
+    assert {item["sequence"] for item in rendered} == {event["sequence"]}
+    with get_connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM runtime_public_event WHERE session_id = 'render-session'"
+        ).fetchone()[0]
     assert count == 1
 
 

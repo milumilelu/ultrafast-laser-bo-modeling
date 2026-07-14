@@ -51,10 +51,13 @@ class AgentEvent:
     event_id: str = field(default_factory=lambda: f"agent-event-{uuid.uuid4().hex}")
     trace_id: str | None = None
     session_id: str | None = None
+    workflow_id: str | None = None
+    message_id: str | None = None
     task_id: str | None = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     progress: int | None = None
     skill: str | None = None
+    step: str | None = None
     tool: str | None = None
     tool_name: str | None = None
     duration_ms: float | None = None
@@ -66,10 +69,14 @@ class AgentEvent:
     parent_event_id: str | None = None
     visibility: str = "public"
     data: dict[str, Any] = field(default_factory=dict)
+    public_summary: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.trace_id = self.trace_id or self.run_id
         self.tool_name = self.tool_name or self.tool
+        self.public_summary = self.public_summary or self.summary
+        self.payload = self.payload or self.data
 
     def to_dict(self) -> dict[str, Any]:
         value = redact_public_data(asdict(self))
