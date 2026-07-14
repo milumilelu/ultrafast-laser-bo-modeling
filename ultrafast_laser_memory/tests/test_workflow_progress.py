@@ -45,6 +45,17 @@ def test_workflow_completed_progress_is_100(isolated_root):
     assert progress["progress_percent"] == 100
 
 
+def test_legacy_projection_reuses_canonical_session_task_spec(isolated_root):
+    init_database()
+    first = handle_chat(ChatRequest(message="我想加工金刚石 CRL", use_skills=False))
+    second = handle_chat(
+        ChatRequest(session_id=first.session_id, message="允许", use_skills=False)
+    )
+
+    assert first.workflow_state["task_spec"]["material"] == "diamond"
+    assert second.workflow_state["task_spec"] == first.workflow_state["task_spec"]
+
+
 def test_llm_failure_keeps_state_and_repeats_strict_template(isolated_root):
     init_database()
     first = handle_chat(ChatRequest(message="我想加工金刚石", use_skills=True))

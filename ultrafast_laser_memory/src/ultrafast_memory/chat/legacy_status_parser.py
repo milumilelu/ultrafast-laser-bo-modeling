@@ -4,6 +4,20 @@ import re
 from typing import Any
 
 
+class LegacyTaskSpecAdapter:
+    """Compatibility entry for legacy non-process chat only.
+
+    The adapter produces a candidate snapshot for the canonical session task
+    document. It is forbidden for the formal complex_process_task path.
+    """
+
+    @staticmethod
+    def adapt(message: str, workflow_type: str) -> dict[str, Any]:
+        if workflow_type == "complex_process_task":
+            raise ValueError("complex_process_task must use the canonical Task Intake path")
+        return legacy_non_process_status_snapshot(message)
+
+
 def legacy_non_process_status_snapshot(message: str) -> dict[str, Any]:
     """Compatibility-only status hints for legacy non-process workflows.
 

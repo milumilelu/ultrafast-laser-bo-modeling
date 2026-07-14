@@ -5,8 +5,6 @@ import re
 from typing import Any
 
 from ultrafast_agent.task_intake.missing_field_service import MissingFieldService
-from ultrafast_agent.task_intake.schemas import PROCESS_REQUIRED_FIELDS
-from ultrafast_memory.chat.legacy_status_parser import legacy_non_process_status_snapshot
 from ultrafast_memory.core.ids import stable_id
 from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.db.init_db import init_database
@@ -41,13 +39,6 @@ STAGE_PROGRESS = {  # legacy non-machining workflows only
 FORBIDDEN_STATUS_KEYS = {"chain_of_thought", "raw_thoughts", "hidden_reasoning", "model_reasoning_tokens"}
 
 
-def inspect_required_fields(message: str, workflow_type: str) -> list[str]:
-    """Pure preflight used to enforce intake before retrieval or recommendation."""
-    if workflow_type == "complex_process_task":
-        return list(PROCESS_REQUIRED_FIELDS)
-    return _missing_slots(legacy_non_process_status_snapshot(message), workflow_type, build_machine_bounds())
-
-
 def missing_process_fields(task: dict[str, Any]) -> list[str]:
     return MissingFieldService.evaluate(task)
 
@@ -55,7 +46,7 @@ def missing_process_fields(task: dict[str, Any]) -> list[str]:
 def build_workflow_artifacts(
     session_id: str,
     message_id: str | None,
-    message: str,
+    task_spec: dict[str, Any],
     route_plan: Any | None = None,
     stage: str | None = None,
     status: str | None = None,
@@ -63,7 +54,7 @@ def build_workflow_artifacts(
 ) -> dict[str, Any]:
     init_database()
     workflow_type = _workflow_type(route_plan)
-    task = {} if workflow_type == "complex_process_task" else legacy_non_process_status_snapshot(message)
+    task = dict(task_spec)
     equipment_context = build_machine_bounds()
     missing_slots = _missing_slots(task, workflow_type, equipment_context)
     round_no = _clarification_round(session_id, missing_slots, stage)
@@ -115,6 +106,7 @@ def build_workflow_artifacts(
             status="waiting_user",
         )
     workflow_state = {
+        "task_spec": task,
         "missing_slots": missing_slots,
         "clarification_round": round_no,
         "max_clarification_rounds": 3,

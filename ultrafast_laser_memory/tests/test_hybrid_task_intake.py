@@ -544,5 +544,7 @@ def test_workflow_status_has_no_general_semantic_parser(project_root: Path):
     assert "def _parse_task" not in source
     assert "task.update(parse_process_task_fields" not in source
     assert "deterministic_extractor" not in source
+    assert "legacy_status_parser" not in source
+    assert "legacy_non_process_status_snapshot" not in source
     assert not (project_root / "src/ultrafast_agent/task_intake/deterministic_extractor.py").exists()
     assert not (project_root / "src/ultrafast_agent/task_intake/candidate_resolver.py").exists()

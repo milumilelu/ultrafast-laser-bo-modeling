@@ -4,6 +4,7 @@ from collections.abc import Iterator
 
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.prompt_builder import build_system_prompt
+from ultrafast_memory.chat.legacy_status_parser import LegacyTaskSpecAdapter
 from ultrafast_memory.chat.router.debug_commands import handle_debug_command
 from ultrafast_memory.chat.router.hybrid_router import route_message
 from ultrafast_memory.chat.schemas import ChatRequest, ChatResponse
@@ -596,10 +597,18 @@ def _build_chat_response(
     rag_evidence: dict | None = None,
     citations: list[dict] | None = None,
 ) -> ChatResponse:
+    workflow_type = getattr(route_plan_obj, "primary_skill", None) or selected_skill or "task_intake"
+    session = get_session_state(session_id)
+    collected = dict(session.get("collected_slots") or {})
+    current_task_spec = dict(collected.get("task_spec") or {})
+    candidate = LegacyTaskSpecAdapter.adapt(message, workflow_type)
+    task_spec = {**current_task_spec, **candidate}
+    collected["task_spec"] = task_spec
+    update_session_state(session_id, {"collected_slots": collected})
     artifacts = build_workflow_artifacts(
         session_id=session_id,
         message_id=message_id,
-        message=message,
+        task_spec=task_spec,
         route_plan=route_plan_obj,
         stage=stage,
         status=status,
