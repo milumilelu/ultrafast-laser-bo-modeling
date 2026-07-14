@@ -10,10 +10,10 @@
 
 | 功能 | 状态 | 可演示 | 数据 | 限制 |
 |---|---|---:|---|---|
-| 任务、设备与混合 Router | implemented | 是 | SQLite 设备 revision | 仍保留旧 Skill 名兼容 |
+| 任务、设备与能力提示 Router | implemented | 是 | SQLite 设备 revision | Router 只给非绑定建议 |
 | 文献导入与混合 RAG | implemented | 是 | 本地 8,512 个语料 chunks；Demo 可加 1 个忽略的 fixture | 旧导入命令不自动 OCR；扫描件可显式进入 PaddleOCR Job |
 | 真实 BO | implemented | 是 | 旧 BO 数据与受治理训练样本 | `<10` 样本为规则冷启动；文献参数必须过 Gate |
-| Skill 契约与 Domain Pack | implemented | 是 | 45 个校验契约 | 旧别名保留一个兼容周期 |
+| Skill Registry 与 Domain Pack | implemented | 是 | 6 个可组合 Skill 描述符 | 旧名只在读取边界解析 |
 | 简化/完整/跳过试切 | implemented | 是 | 版本化 SQLite 表 | 不控制真实设备 |
 | KnowledgeUseGate 与单次聚合审核 | implemented | 是 | append-only 审计 | 单用户显式审核，不是多用户 RBAC |
 | Runtime/NDJSON/性能 waterfall | implemented | 是 | 单调公开事件 | 不公开 hidden reasoning |
@@ -102,7 +102,7 @@ See `../docs/governed_runtime_bo_cam_migration.md` for migration, rollback, cont
 
 ## 聊天功能
 
-`/chat` 是超快激光智能体的 Agent Orchestrator 入口，不是普通 LLM proxy。MVP 流程为：PowerShell TUI -> `/chat` -> rule-based skill router -> LLM adapter or MockLLM -> session persistence -> audit trace。
+`/chat` 是超快激光智能体的 Agent Orchestrator 入口，不是普通 LLM proxy。执行链为：PowerShell TUI -> `/chat` -> 非绑定能力提示 -> Main Agent -> Skill 动态加载 / Tool 调用循环 -> session persistence -> audit trace。
 
 启动后端：
 
@@ -140,7 +140,7 @@ curl -X POST http://127.0.0.1:8000/chat \
 
 ## Streaming Chat 与混合 Router
 
-`/chat` 返回兼容字段 `selected_skill`，同时返回结构化 `route_plan`。混合 Router 按以下顺序判断：session continuation、手动 `/skill` 覆盖、规则路由、LLM 路由、低置信 fallback。路由主记录写入 `chat_route_trace`，会话状态写入 `chat_session_state`。
+`/chat` 返回兼容字段 `selected_skill`，同时返回结构化 `route_plan`。Router 结果仅是能力提示，不会激活 Skill、限制 Tool 或推进状态。Main Agent 通过 `load_skill` / `unload_skill` 决定本轮组合；路由记录写入 `chat_route_trace`，Agent 状态写入 `chat_session_state`。
 
 流式接口：
 
@@ -212,7 +212,7 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 
 聊天集成：
 
-- 新材料、新结构、查文献、基于文献制定方案、BO 参数推荐证据不足时，`/chat` 会先执行 evidence gap check；
+- 需要外部证据时，Main Agent 必须先加载 `evidence_research` 并调用受审批保护的 `bootstrap_external_knowledge`；
 - 内部证据不足且配置要求授权时，聊天会请求用户确认；
 - 用户输入“可以 / 同意 / 允许 / 执行冷启动 / yes / ok”后才会执行 mock bootstrap；
 - `/bootstrap status` 查看当前会话候选知识和审核状态；
@@ -223,15 +223,13 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 
 ## 任务进度与公开思考状态
 
-聊天任务解析阶段会返回规则型 workflow 进度，避免连续追问时用户不知道流程是否结束。进度百分比不是实际计算耗时，而是当前阶段的可解释状态，例如 `clarification_round_1 = 40%`、`evidence_gap_checking = 85%`、`blocked_need_expert_review = 90%`。
+聊天返回 Agent 步骤、Skill 加载、ToolResult 和 BusinessState 投影。进度百分比是展示信息，不是动作门槛；澄清只由下一项具体工具所需上下文触发，不再执行全局固定表单。
 
-系统最多进行 3 轮澄清。第 3 轮后仍缺少关键字段时，应给出当前已知信息、仍缺失信息和可继续的保守方案，不能无限追问，也不能进入确定性 BO 参数推荐。
+所有启用 Skill 的聊天统一进入 Main Agent Loop：主 LLM 读取渐进式 `TaskSpec`、已加载 Skill 指导、当前可发现 Tool Schema、上一轮工具观察和状态投影，决定加载能力、直接回答、澄清或连续调用工具。用户明确提供或修正任务信息时，主 Agent 调用 `update_task_context`；LLM 不直接写会话状态或数据库。
 
-加工任务采用 Agent-native 工具主链：主 LLM读取当前 `TaskSpec`、`BusinessState`、待补字段、上一轮问题、当前 `TrialCampaign` 和最近工具结果，决定直接回答、澄清或调用工具。用户明确提供或修正任务信息时，主 Agent 调用 `update_task_spec`；LLM 不直接写会话状态或数据库。
+`update_task_context` 只接受已经结构化的字段更新，不理解自然语言。工具内部统一执行字段白名单、类型、枚举、单位、适用性、原文 evidence、冲突和修正语义校验，再通过 `TaskSpecMergeService` 更新 canonical `TaskSpec`、provenance 和 revision history。孔类事实同时投影到嵌套 `geometry`。工具失败保持原状态，由主 Agent 重新规划或澄清。
 
-`update_task_spec` 只接受已经结构化的字段更新，不理解自然语言。工具内部统一执行字段白名单、类型、枚举、单位、适用性、原文 evidence、冲突和修正语义校验，再通过 `TaskSpecMergeService` 更新 canonical `TaskSpec`、provenance 和 revision history。显式 `字段名=值` 仅保留为离线兼容入口；自由文本不会先进入独立字段解析器。工具失败保持原状态，由主 Agent 重新规划或澄清；正式流程不再写入 `PARSER_STALL`。
-
-每个 `BusinessState` 只公开允许动作集合，Agent 在集合内选择下一动作，Tool 自己检查前置条件。Tool 权限分四级：认知操作、受控写入、必须人工批准和禁止操作；设备控制、硬边界修改及自动绕过审批属于禁止操作。
+`BusinessState` 仅投影已发生事件，用于进度、审计和恢复，不再裁剪 Agent 的工具集合。Tool Registry 向 Agent 公开能力与 Schema；每个 Tool 自行检查动作所需上下文、设备边界、权限与审批。Tool 权限分四级：认知操作、受控写入、必须人工批准和禁止操作；设备控制、硬边界修改及自动绕过审批属于禁止操作。
 
 系统不展示模型原始隐藏推理链。返回和 TUI 展示的是可公开的 Agent 执行轨迹、任务状态、工具调用状态、证据检查结果和简要推理摘要，字段使用 `progress`、`thinking_status`、`workflow_state`、`execution_trace`、`audit_trace`。
 

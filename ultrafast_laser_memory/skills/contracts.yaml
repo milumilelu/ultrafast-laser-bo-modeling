@@ -1,443 +1,60 @@
-defaults: &defaults
-  version: "1.0.0"
-  inputs: [task_context]
-  outputs: [structured_result]
-  preconditions: []
-  side_effects: []
-  allowed_tools: []
-  forbidden_tools: [sqlite, database_connection, raw_sql, llm_knowledge_write]
-  failure_modes: [invalid_input, dependency_unavailable]
-  timeout_ms: 30000
-  cache_policy: none
-  emitted_events: [skill_started, skill_completed, skill_failed]
-
 skills:
-  - <<: *defaults
-    name: task_intake
-    purpose: Convert raw user requirements into a traceable task draft and bounded clarifications.
-    inputs: [raw_request, attachments, session_state]
-    outputs: [task_spec, missing_fields, clarification_questions]
-    allowed_tools: [attachment_reader]
+  - name: task_understanding
+    version: 2.0.0
+    description: 渐进理解用户任务，规范术语、单位、材料、几何、目标与约束，并维护可修订的 TaskSpec。
+    when_to_use: [新任务、自然语言补充、字段纠正、附件带来新任务事实]
+    guidance:
+      - 只提交用户明确给出或可靠解析出的事实，不猜测材料牌号、几何或设备参数。
+      - TaskSpec 可渐进补充；仅当下一步工具确实需要时才追问缺失字段。
+      - 孔类几何写入 geometry.hole_diameter_mm、geometry.hole_depth_mm、geometry.through_hole。
+    recommended_tools: [update_task_context, get_equipment_context, ingest_files]
 
-  - <<: *defaults
-    name: task_normalization
-    purpose: Normalize task vocabulary, units, material/process names, and revisions.
-    inputs: [task_spec]
-    outputs: [normalized_task_spec]
-    allowed_tools: [unit_normalization_service]
-    cache_policy: by_task_revision
+  - name: evidence_research
+    version: 2.0.0
+    description: 检索已审核内部知识，并在明确授权后将外部证据转为待审核知识候选。
+    when_to_use: [需要文献证据、历史经验、证据缺口、外部知识冷启动]
+    guidance:
+      - 区分内部已审核证据与外部候选；未审核候选不得进入正式 RAG 或 BO。
+      - 检索结果必须保留来源、适用范围与不确定性。
+      - 外部知识引入需要用户授权，正式采用需要专家审核。
+    recommended_tools: [search_knowledge, bootstrap_external_knowledge, ingest_files, review_knowledge_candidate]
 
-  - <<: *defaults
-    name: equipment_context_loading
-    purpose: Load the authoritative active equipment snapshot and immutable revision.
-    outputs: [equipment_snapshot]
-    allowed_tools: [equipment_context_service]
-    cache_policy: by_equipment_revision
+  - name: process_planning
+    version: 2.0.0
+    description: 基于任务、设备边界和证据组合工艺路线、质量计划、测量计划与试验策略。
+    when_to_use: [制定工艺方案、评估风险、选择试验层级、生成执行计划]
+    guidance:
+      - 先读取设备边界；区分硬约束、质量约束和可优化变量。
+      - 路线是建议，不得伪装成已验证工艺。
+      - 是否试验由证据和风险决定，不由固定状态机强制决定。
+    recommended_tools: [get_equipment_context, search_knowledge, recommend_parameters_rag, manage_trial, generate_report]
 
-  - <<: *defaults
-    name: material_identification
-    purpose: Identify material family and grade without inventing unknown composition.
-    inputs: [task_spec, attachments]
-    outputs: [material_identity, confidence, missing_fields]
-    allowed_tools: [material_registry_service, attachment_reader]
+  - name: parameter_recommendation
+    version: 2.0.0
+    description: 根据数据支持度选择 BO、RAG 或探索性参数来源，并说明边界、证据与适用权限。
+    when_to_use: [推荐加工参数、评估 BO 就绪度、需要保守初始参数]
+    guidance:
+      - 有合格上下文匹配数据时优先 BO；否则使用已审核 RAG；再否则仅给探索性参数。
+      - 所有候选必须满足权威设备边界，且明确参数来源与 intended use。
+      - 不得把探索性建议表述为最优参数或正式工艺。
+    recommended_tools: [get_equipment_context, recommend_parameters_bo, recommend_parameters_rag, propose_exploratory_parameters]
 
-  - <<: *defaults
-    name: geometry_interpretation
-    purpose: Convert component geometry into process-relevant geometric constraints.
-    inputs: [task_spec, domain_pack]
-    outputs: [geometry_model, geometric_risks]
-    allowed_tools: [geometry_service, domain_pack_loader]
+  - name: experiment_optimization
+    version: 2.0.0
+    description: 管理试验与 BO 迭代，摄取观测、更新模型、生成下一批候选并作继续/停止判断。
+    when_to_use: [创建或推进试验、摄取观测、运行 BO 迭代、调整搜索空间]
+    guidance:
+      - 仅使用校验合格且与上下文匹配的观测更新模型。
+      - 每轮记录候选、约束过滤、模型快照、预算和停止理由。
+      - 正式加工、危险动作和知识晋升仍需真实的安全或人工审批守卫。
+    recommended_tools: [manage_trial, run_bo_iteration, record_process_result, get_equipment_context]
 
-  - <<: *defaults
-    name: constraint_extraction
-    purpose: Separate hard physical, quality, safety, time, and user constraints.
-    inputs: [task_spec, equipment_snapshot]
-    outputs: [constraint_set]
-
-  - <<: *defaults
-    name: rag_evidence_retrieval
-    purpose: Build a traceable evidence pack from the internal literature index.
-    inputs: [task_spec, query_intent, filters]
-    outputs: [evidence_pack, citations, evidence_gaps]
-    allowed_tools: [rag_query_service]
-    cache_policy: by_index_revision_and_query
-
-  - <<: *defaults
-    name: historical_case_retrieval
-    purpose: Retrieve internal completed process cases with provenance.
-    outputs: [historical_cases]
-    allowed_tools: [historical_case_service]
-    cache_policy: by_dataset_revision
-
-  - <<: *defaults
-    name: similar_case_retrieval
-    purpose: Rank comparable cases by material, process, equipment, and geometry.
-    inputs: [task_spec, historical_cases]
-    outputs: [similar_cases, similarity_explanation]
-    allowed_tools: [similarity_service]
-
-  - <<: *defaults
-    name: process_route_planning
-    purpose: Select a process route from hard constraints, evidence, and domain rules.
-    inputs: [task_spec, equipment_snapshot, evidence_pack, domain_pack]
-    outputs: [process_route, alternatives, blockers]
-    allowed_tools: [domain_pack_loader]
-
-  - <<: *defaults
-    name: parameter_space_construction
-    purpose: Construct a bounded parameter space from equipment and approved knowledge only.
-    inputs: [equipment_snapshot, approved_knowledge, task_constraints]
-    outputs: [parameter_space, source_trace]
-    allowed_tools: [parameter_space_service, knowledge_use_gate_service]
-
-  - <<: *defaults
-    name: toolpath_strategy_selection
-    purpose: Select a geometry-appropriate path strategy without machine control.
-    inputs: [geometry_model, process_route, domain_pack]
-    outputs: [toolpath_strategy, path_risks]
-    allowed_tools: [domain_pack_loader]
-
-  - <<: *defaults
-    name: quality_plan_generation
-    purpose: Define measurable quality metrics, acceptance criteria, and defect checks.
-    inputs: [task_spec, process_route, domain_pack]
-    outputs: [quality_plan]
-    allowed_tools: [domain_pack_loader]
-
-  - <<: *defaults
-    name: measurement_plan_generation
-    purpose: Define instruments, regions, units, timing, and measurement traceability.
-    inputs: [quality_plan, domain_pack]
-    outputs: [measurement_plan]
-    allowed_tools: [domain_pack_loader]
-
-  - <<: *defaults
-    name: trial_need_assessment
-    purpose: Determine whether trial cutting can be skipped or is required.
-    inputs: [task_spec, equipment_snapshot, evidence_status, approved_priors, similar_cases]
-    outputs: [trial_required, recommended_mode, reasons]
-    allowed_tools: [trial_service]
-
-  - <<: *defaults
-    name: trial_strategy_selection
-    purpose: Select simple, full, or skip trial mode while preserving user choice.
-    inputs: [trial_assessment, user_selection]
-    outputs: [trial_mode, selection_trace]
-    allowed_tools: [trial_service]
-
-  - <<: *defaults
-    name: simple_trial_design
-    purpose: Design a minimal representative geometry, parameter matrix, and acceptance plan.
-    inputs: [task_spec, parameter_space, domain_pack]
-    outputs: [trial_plan]
-    allowed_tools: [trial_service, domain_pack_loader]
-
-  - <<: *defaults
-    name: full_trial_design
-    purpose: Design full-geometry validation with monitoring and stop conditions.
-    inputs: [task_spec, parameter_space, domain_pack]
-    outputs: [trial_plan]
-    allowed_tools: [trial_service, domain_pack_loader]
-
-  - <<: *defaults
-    name: knowledge_use_gate
-    purpose: Decide whether evidence may be used for the requested decision.
-    inputs: [task_spec, intended_use, evidence_pack, equipment_snapshot]
-    outputs: [knowledge_use_decision]
-    allowed_tools: [knowledge_use_gate_service]
-
-  - <<: *defaults
-    name: process_risk_assessment
-    purpose: Aggregate process, material, equipment, evidence, and quality risks.
-    outputs: [risk_register, risk_level]
-
-  - <<: *defaults
-    name: equipment_capability_match
-    purpose: Check process and parameter requirements against the equipment revision.
-    inputs: [equipment_snapshot, process_route, parameter_space]
-    outputs: [capability_match, violations]
-    allowed_tools: [equipment_context_service]
-
-  - <<: *defaults
-    name: bo_mode_selection
-    purpose: Select cold-start, hybrid, or data-driven BO from validated sample count.
-    inputs: [bo_dataset_status]
-    outputs: [model_status]
-    allowed_tools: [bo_status_service]
-
-  - <<: *defaults
-    name: bo_recommendation
-    purpose: Request a bounded recommendation from the real BO application service.
-    inputs: [task_spec, parameter_space, approved_knowledge, validated_samples]
-    outputs: [bo_recommendation, model_status, uncertainty]
-    preconditions: [equipment_gate_allowed, knowledge_gate_allowed]
-    allowed_tools: [bo_recommendation_service]
-    timeout_ms: 60000
-
-  - <<: *defaults
-    name: candidate_validation
-    purpose: Validate candidates against equipment, trial, safety, and knowledge gates.
-    inputs: [candidate, equipment_snapshot, task_constraints, approvals]
-    outputs: [candidate_validation]
-    allowed_tools: [candidate_validation_service]
-
-  - <<: *defaults
-    name: formal_process_gate
-    purpose: Unlock or block formal processing from trial and approval state.
-    inputs: [trial_result, knowledge_decisions, candidate_validation]
-    outputs: [formal_process_decision]
-    allowed_tools: [formal_process_gate_service]
-
-  - <<: *defaults
-    name: execution_plan_generation
-    purpose: Generate an auditable non-machine-control execution plan.
-    inputs: [process_plan, trial_result, approved_parameters]
-    outputs: [execution_plan]
-
-  - <<: *defaults
-    name: in_process_monitoring_plan
-    purpose: Define observable signals, thresholds, and stop actions.
-    inputs: [process_plan, domain_pack]
-    outputs: [monitoring_plan]
-    allowed_tools: [domain_pack_loader]
-
-  - <<: *defaults
-    name: trial_result_ingestion
-    purpose: Ingest actual trial parameters, monitoring summaries, and measurements.
-    inputs: [trial_execution_payload, measurement_payload]
-    outputs: [trial_result]
-    side_effects: [create_trial_result]
-    allowed_tools: [trial_service]
-
-  - <<: *defaults
-    name: trial_acceptance_evaluation
-    purpose: Evaluate a trial as pass, conditional pass, or fail.
-    inputs: [trial_plan, trial_result]
-    outputs: [trial_decision, formal_process_unlock]
-    allowed_tools: [trial_service]
-
-  - <<: *defaults
-    name: trial_to_process_transition
-    purpose: Apply the trial decision to formal-process eligibility.
-    inputs: [trial_decision, knowledge_decisions]
-    outputs: [formal_process_decision]
-    allowed_tools: [formal_process_gate_service]
-
-  - <<: *defaults
-    name: quality_evaluation
-    purpose: Evaluate measurements against the declared quality plan.
-    inputs: [quality_plan, measurements]
-    outputs: [quality_status, defects]
-    allowed_tools: [quality_evaluation_service]
-
-  - <<: *defaults
-    name: result_ingestion
-    purpose: Ingest completed process results without auto-promoting knowledge or BO data.
-    inputs: [execution_result, measurements]
-    outputs: [result_record, validation_requirements]
-    side_effects: [create_process_result]
-    allowed_tools: [result_ingestion_service]
-
-  - <<: *defaults
-    name: knowledge_candidate_generation
-    purpose: Create traceable reviewable candidates from observations and evidence.
-    inputs: [result_record, evidence]
-    outputs: [knowledge_candidates]
-    side_effects: [create_knowledge_candidate]
-    allowed_tools: [knowledge_candidate_service]
-
-  - <<: *defaults
-    name: process_prior_promotion
-    purpose: Promote only explicitly approved candidates to scoped process priors.
-    inputs: [knowledge_candidate, approval]
-    outputs: [process_prior]
-    preconditions: [human_approval]
-    side_effects: [create_process_prior]
-    allowed_tools: [knowledge_review_service]
-
-  - <<: *defaults
-    name: report_generation
-    purpose: Generate Markdown and JSON task reports from structured workflow outputs.
-    inputs: [task_context, workflow_outputs, execution_trace]
-    outputs: [task_report_markdown, task_report_json]
-    side_effects: [write_task_report]
-    allowed_tools: [task_report_service]
-
-  - <<: *defaults
-    name: latency_diagnostics
-    purpose: Summarize per-stage latency, cache, retry, and fallback behavior.
-    inputs: [execution_trace]
-    outputs: [latency_waterfall]
-    allowed_tools: [trace_query_service]
-
-  - <<: *defaults
-    name: execution_trace_summary
-    purpose: Produce a public trace summary without hidden model reasoning.
-    inputs: [execution_trace, display_mode]
-    outputs: [public_trace_summary]
-    allowed_tools: [trace_query_service]
-
-  - <<: *defaults
-    name: parameter_recommendation_planning
-    purpose: Plan the deterministic BO to RAG to authorized fallback parameter chain.
-    allowed_tools: [bo_parameter_recommendation_tool, rag_parameter_recommendation_tool, llm_fallback_parameter_tool]
-
-  - <<: *defaults
-    name: data_support_assessment
-    purpose: Assess context-matched validated sample support before candidate generation.
-    allowed_tools: [bo_parameter_recommendation_tool]
-
-  - <<: *defaults
-    name: parameter_source_selection
-    purpose: Select parameter authority using deterministic policy and intended-use permissions.
-    allowed_tools: [parameter_provenance_registry_tool]
-
-  - <<: *defaults
-    name: parameter_recommendation_explanation
-    purpose: Explain public parameter provenance, uncertainty, permissions, and rejection reasons.
-    allowed_tools: [parameter_provenance_registry_tool]
-
-  - <<: *defaults
-    name: optimization_campaign_initialization
-    purpose: Initialize a fidelity-scoped optimization campaign with budget and constraints.
-    allowed_tools: [candidate_registry_tool, experiment_store_tool]
-
-  - <<: *defaults
-    name: iteration_planning
-    purpose: Create an auditable campaign iteration and batch budget.
-    allowed_tools: [candidate_registry_tool]
-
-  - <<: *defaults
-    name: candidate_generation
-    purpose: Register candidates produced by an authorized parameter source.
-    allowed_tools: [candidate_registry_tool]
-
-  - <<: *defaults
-    name: candidate_safety_filter
-    purpose: Reject candidates outside equipment, source, and intended-use constraints.
-    allowed_tools: [parameter_constraint_validation_tool, equipment_bounds_tool]
-
-  - <<: *defaults
-    name: trial_batch_planning
-    purpose: Select a bounded simple or full trial candidate batch.
-    allowed_tools: [candidate_registry_tool, trial_template_tool]
-
-  - <<: *defaults
-    name: observation_ingestion
-    purpose: Ingest fidelity-scoped execution observations without automatic BO admission.
-    allowed_tools: [experiment_store_tool, measurement_parser_tool]
-
-  - <<: *defaults
-    name: observation_validation
-    purpose: Validate traceability and completeness before model use.
-    allowed_tools: [measurement_parser_tool, quality_metric_tool]
-
-  - <<: *defaults
-    name: surrogate_model_update
-    purpose: Update a model only from BO-approved observations and create a snapshot.
-    allowed_tools: [model_snapshot_tool, experiment_store_tool]
-
-  - <<: *defaults
-    name: acquisition_optimization
-    purpose: Optimize acquisition within the approved search space and constraints.
-    allowed_tools: [bo_engine_tool, candidate_registry_tool]
-
-  - <<: *defaults
-    name: iteration_decision
-    purpose: Decide whether to continue, change fidelity, pause, or terminate a campaign.
-    allowed_tools: [candidate_registry_tool, quality_metric_tool]
-
-  - <<: *defaults
-    name: search_space_refinement
-    purpose: Narrow or expand only within approved equipment and process boundaries.
-    allowed_tools: [equipment_bounds_tool, process_prior_tool]
-
-  - <<: *defaults
-    name: fidelity_transition
-    purpose: Gate transitions among simple trial, full trial, formal process, and rework.
-    allowed_tools: [knowledge_approval_tool, candidate_registry_tool]
-
-  - <<: *defaults
-    name: formal_checkpoint_evaluation
-    purpose: Evaluate formal-process checkpoints and deviation levels.
-    allowed_tools: [quality_metric_tool, experiment_store_tool]
-
-  - <<: *defaults
-    name: formal_local_adjustment
-    purpose: Restrict formal adjustments to approved-window local trust regions.
-    allowed_tools: [parameter_constraint_validation_tool, equipment_bounds_tool]
-
-  - <<: *defaults
-    name: campaign_termination
-    purpose: Record success, failure, budget, or manual campaign termination reasons.
-    allowed_tools: [experiment_store_tool, report_writer_tool]
-
-  - <<: *defaults
-    name: process_file_ingestion
-    version: "1.0.0-compat"
-    purpose: Compatibility orchestration for file ingestion through the ingestion service.
-    inputs: [file_paths, parser_hints]
-    outputs: [ingestion_summary]
-    side_effects: [archive_original_copy, create_ingestion_records]
-    allowed_tools: [ingestion_service]
-
-  - <<: *defaults
-    name: knowledge_bootstrap
-    version: "1.0.0-compat"
-    purpose: Compatibility workflow for permissioned external evidence bootstrap into review candidates.
-    inputs: [task_spec, query, user_permission]
-    outputs: [knowledge_candidates, review_tasks]
-    preconditions: [user_permission]
-    side_effects: [create_knowledge_candidate, create_review_task]
-    allowed_tools: [knowledge_bootstrap_service]
-
-  - <<: *defaults
-    name: expert_review
-    version: "1.0.0-compat"
-    purpose: Compatibility entry for explicit human review actions.
-    inputs: [review_task, human_action]
-    outputs: [review_result]
-    preconditions: [human_action]
-    side_effects: [append_review_action]
-    allowed_tools: [knowledge_review_service]
-
-  - <<: *defaults
-    name: bo_dataset_governance
-    version: "1.0.0-compat"
-    purpose: Compatibility entry delegating to dataset validation and export services.
-    inputs: [run_records]
-    outputs: [bo_dataset_status]
-    allowed_tools: [dataset_validation_service]
-
-  - <<: *defaults
-    name: rag_literature_retrieval
-    version: "1.0.0-compat"
-    purpose: Deprecated alias for rag_evidence_retrieval.
-    outputs: [evidence_pack]
-    allowed_tools: [rag_evidence_retrieval]
-    emitted_events: [deprecated_skill_used, skill_started, skill_completed, skill_failed]
-
-  - <<: *defaults
-    name: experience_memory_update
-    version: "1.0.0-compat"
-    purpose: Deprecated alias for knowledge_candidate_generation.
-    outputs: [knowledge_candidates]
-    allowed_tools: [knowledge_candidate_generation]
-    emitted_events: [deprecated_skill_used, skill_started, skill_completed, skill_failed]
-
-  - <<: *defaults
-    name: crl_task_planning
-    version: "1.0.0-compat"
-    purpose: Deprecated CRL entry delegating to optical_component_task_workflow and the CRL domain pack.
-    inputs: [task_context]
-    outputs: [optical_component_plan]
-    allowed_tools: [optical_component_task_workflow, domain_pack_loader]
-    emitted_events: [deprecated_skill_used, skill_started, skill_completed, skill_failed]
-
-  - <<: *defaults
-    name: skill_router
-    version: "1.0.0-compat"
-    purpose: Compatibility alias for the runtime route planner.
-    inputs: [raw_request, session_state]
-    outputs: [route_plan]
-    allowed_tools: [route_planner]
+  - name: result_learning
+    version: 2.0.0
+    description: 记录加工和测量结果，生成可审核知识候选与任务报告，不自动晋升知识。
+    when_to_use: [提交试验或加工结果、沉淀经验、生成报告、审核知识候选]
+    guidance:
+      - 原始结果、质量判断、候选知识和已批准知识必须分层存储。
+      - 创建知识候选不等于进入 RAG；必须保留证据与适用范围。
+      - 报告只汇总可追溯事实，不补造缺失测量值。
+    recommended_tools: [record_process_result, create_knowledge_candidate, generate_report, review_knowledge_candidate]

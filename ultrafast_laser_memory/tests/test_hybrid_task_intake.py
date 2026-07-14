@@ -179,7 +179,7 @@ def test_llm_primary_real_log_with_comma_and_contextual_short_answers(isolated_r
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
-        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        "ultrafast_memory.chat.service.create_llm_client",
         lambda config: llm,
     )
     client = TestClient(app)
@@ -196,14 +196,14 @@ def test_llm_primary_real_log_with_comma_and_contextual_short_answers(isolated_r
     assert task["auxiliary"] == "compressed_air"
     assert task["layer_cut_allowed"] is True
     assert result["workflow_state"]["missing_slots"] == []
-    assert llm.calls == 2
+    assert llm.calls == 4  # one planning call plus one post-tool decision per turn
 
 
 def test_exact_reported_two_turn_chat_uses_llm_context(isolated_root, monkeypatch):
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
-        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        "ultrafast_memory.chat.service.create_llm_client",
         lambda config: llm,
     )
     client = TestClient(app)
@@ -222,7 +222,7 @@ def test_exact_reported_two_turn_chat_uses_llm_context(isolated_root, monkeypatc
     assert result["workflow_state"]["missing_slots"] == []
     completed = next(
         item for item in result["execution_trace"]
-        if item["event_type"] == "tool_completed" and item["tool"] == "update_task_spec"
+        if item["event_type"] == "tool_completed" and item["tool"] == "update_task_context"
     )
     assert completed["payload"]["applied"] == [
         "cut_length_mm", "efficiency_requirement", "auxiliary", "layer_cut_allowed",
@@ -234,7 +234,7 @@ def test_contextual_100mm_and_allowed_chat_turn(isolated_root, monkeypatch):
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
-        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        "ultrafast_memory.chat.service.create_llm_client",
         lambda config: llm,
     )
     client = TestClient(app)
@@ -257,7 +257,7 @@ def test_cutting_clarification_log_regression(isolated_root, monkeypatch):
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
-        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        "ultrafast_memory.chat.service.create_llm_client",
         lambda config: llm,
     )
     client = TestClient(app)
@@ -277,22 +277,22 @@ def test_cutting_clarification_log_regression(isolated_root, monkeypatch):
     assert state["field_provenance"]["cut_length_mm"]["evidence"] == "100mm"
     assert state["field_provenance"]["cut_length_mm"]["source"] == "main_agent_tool_call"
     assert state["field_provenance"]["cut_length_mm"]["extractor_version"] == \
-        "agent-update-task-spec-v1"
+        "agent-update-task-context-v2"
     assert state["agent_action"]["provider"] == "deepseek"
     assert state["agent_action"]["model"] == "deepseek-v4-flash"
-    assert state["last_tool_result"]["remaining_missing"] == []
+    assert state["last_tool_result"]["data"]["remaining_missing"] == []
     event_types = {item["event_type"] for item in result["execution_trace"]}
     assert "agent_decision" in event_types
-    assert "tool_started" in event_types
+    assert "tool_call_started" in event_types
     assert sum(
-        item["event_type"] == "tool_completed" and item.get("tool") == "update_task_spec"
+        item["event_type"] == "tool_completed" and item.get("tool") == "update_task_context"
         for item in result["execution_trace"]
     ) == 1
     with get_connection() as conn:
         canonical = conn.execute(
             "SELECT COUNT(*) FROM runtime_public_event "
             "WHERE session_id=? AND event_type=? AND tool=?",
-            (session_id, "tool_completed", "update_task_spec"),
+            (session_id, "tool_completed", "update_task_context"),
         ).fetchone()[0]
         legacy = conn.execute(
             "SELECT COUNT(*) FROM agent_trace_event WHERE session_id=?", (session_id,)
@@ -593,27 +593,27 @@ def test_unrecognized_answer_never_creates_parser_business_state(isolated_root, 
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
-        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        "ultrafast_memory.chat.service.create_llm_client",
         lambda config: llm,
     )
     client = TestClient(app)
     session_id = _session(client)
     first = _chat(client, session_id, "切割5mm厚型号为T300的碳纤维复合板")
-    assert first["workflow_state"]["current_stage_code"] == "REQUIREMENTS_PENDING"
+    assert first["workflow_state"]["current_stage_code"] == "task_spec_confirmed"
     _chat(client, session_id, "无法识别的回答")
     result = _chat(client, session_id, "无法识别的回答")
-    assert result["workflow_state"]["current_stage_code"] == "REQUIREMENTS_PENDING"
+    assert result["workflow_state"]["current_stage_code"] == "task_spec_confirmed"
     assert "字段化格式" not in result["assistant_message"]
     assert result["workflow_state"]["task_spec"]["thickness_mm"] == 5
-    assert result["next_required_action"]["action_type"] == "submit_required_fields"
-    assert "update_task_spec" in result["workflow_state"]["allowed_actions"]
+    assert result["next_required_action"]["action_type"] == "continue_workflow"
+    assert "update_task_context" in result["workflow_state"]["discoverable_tools"]
 
 
 def test_stream_and_non_stream_workflow_state_are_consistent(isolated_root, monkeypatch):
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
-        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        "ultrafast_memory.chat.service.create_llm_client",
         lambda config: llm,
     )
     client = TestClient(app)

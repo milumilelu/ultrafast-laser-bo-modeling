@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -30,7 +30,9 @@ class DocumentElement:
             raise ValueError("page number must be positive")
 
     def to_dict(self) -> dict[str, Any]:
-        value = asdict(self); value["bbox"] = list(self.bbox) if self.bbox else None; return value
+        value = asdict(self)
+        value["bbox"] = list(self.bbox) if self.bbox else None
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,4 +75,3 @@ class VisionAnalysisCandidate:
         for name in ("observations", "regions", "limitations"):
             value[name] = list(value[name])
         return value
-

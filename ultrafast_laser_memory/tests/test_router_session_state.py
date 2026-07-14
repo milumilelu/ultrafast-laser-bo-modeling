@@ -5,7 +5,7 @@ from ultrafast_memory.chat.session_state import get_session_state
 from ultrafast_memory.db.init_db import init_database
 
 
-def test_router_uses_session_state_for_clarification_continuation(isolated_root):
+def test_router_persists_only_a_non_binding_hint(isolated_root):
     init_database()
     session_id = "session-continuation"
 
@@ -13,9 +13,7 @@ def test_router_uses_session_state_for_clarification_continuation(isolated_root)
     state = get_session_state(session_id)
     second = route_message("单晶，1030 nm，300 fs，允许后处理", session_id, "message-2")
 
-    assert first.primary_skill == "complex_process_task"
-    assert first.requires_clarification is True
-    assert state["active_skill"] == "complex_process_task"
-    assert state["pending_questions"]
-    assert second.primary_skill == "complex_process_task"
-    assert second.route_source == "session_state"
+    assert first.primary_skill == "task_understanding"
+    assert state.get("active_skill") is None
+    assert state["suggested_skill_hint"]["primary_skill"] == "task_understanding"
+    assert second.route_source != "session_state"

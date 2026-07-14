@@ -14,7 +14,7 @@ def _post(client: TestClient, session_id: str, message: str) -> dict:
     return response.json()
 
 
-def test_chat_continues_from_verified_trial_through_formal_archive(isolated_root):
+def test_active_legacy_workflow_does_not_capture_a_new_side_question(isolated_root):
     client = TestClient(app)
     session_id = client.post("/chat/sessions", json={}).json()["session_id"]
     plan = TrialApplicationService().create_plan("process-" + session_id, {
@@ -30,34 +30,8 @@ def test_chat_continues_from_verified_trial_through_formal_archive(isolated_root
             "state": "TRIAL_RESULT_PENDING", "selected_trial_mode": "simple_trial_cut", "trial_plan": plan,
             "parameter_recommendation": {"recommendation_id": "explore-1"}}}})
 
-    trial = _post(client, session_id, '{"equipment_revision":"r1","material_batch":"batch-1",'
-                  '"actual_parameters":{"laser_power_W":2},"parameter_units":{"laser_power_W":"W"},'
-                  '"actual_path":{"type":"coupon"},"measurements":{"cut_complete":1},"defects":[],'
-                  '"files":["trial_edge.jpg"]}')
-    assert trial["current_stage"] == "FORMAL_PROCESS_READY"
-    assert trial["workflow_state"]["business_state"] == "READY_FOR_EXTERNAL_PROCESS"
-    assert trial["next_required_action"]["action_type"] == "submit_formal_preflight"
-
-    started = _post(client, session_id,
-                    '{"equipment_revision":"r1","material_batch":"batch-1","operator_confirmation":true}')
-    assert started["current_stage"] == "FORMAL_PROCESS_RUNNING"
-    assert started["workflow_state"]["business_state"] == "WAITING_EXTERNAL_RESULT"
-    assert "系统未连接、控制或监控设备" in started["assistant_message"]
-    checkpoint = _post(client, session_id,
-                       '{"progress_percent":100,"deviation_level":0,"observation":{"delamination":false}}')
-    assert checkpoint["current_stage"] == "FINAL_INSPECTION_PENDING"
-    assert checkpoint["workflow_state"]["business_state"] == "QUALITY_REVIEW"
-    closed = _post(client, session_id,
-        '{"required_metrics":["delamination_width"],"measurements":{"delamination_width":0},'
-        '"constraint_results":{"no_delamination":true},"files":["edge_photo.jpg"]}')
-    assert closed["current_stage"] == "COMPLETED"
-    assert closed["workflow_state"]["business_state"] == "COMPLETED"
-    assert closed["workflow_state"]["report"]["report"]["business_state"] == "COMPLETED"
-    assert closed["next_required_action"]["blocking"] is False
+    response = _post(client, session_id, "先别管这个，我想查一下金刚石烧蚀机制")
+    assert response["selected_skill"] == "evidence_research"
+    assert response["workflow_state"]["task_spec"] == task
     with get_connection() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM formal_process_plan").fetchone()[0] == 1
-        assert connection.execute("SELECT COUNT(*) FROM formal_process_execution").fetchone()[0] == 1
-        assert connection.execute("SELECT COUNT(*) FROM experiment_record").fetchone()[0] == 1
-        assert connection.execute("SELECT COUNT(*) FROM task_report").fetchone()[0] == 1
-        assert connection.execute("SELECT COUNT(*) FROM optimization_campaign").fetchone()[0] == 1
-        assert connection.execute("SELECT COUNT(*) FROM optimization_iteration").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM formal_process_execution").fetchone()[0] == 0

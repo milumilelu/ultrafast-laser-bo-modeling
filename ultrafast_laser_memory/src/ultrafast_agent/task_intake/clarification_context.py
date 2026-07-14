@@ -5,7 +5,6 @@ from typing import Any
 from ultrafast_agent.task_intake.schemas import (
     ClarificationContext,
     EXPECTED_ANSWER_TYPES,
-    PROCESS_REQUIRED_FIELDS,
 )
 
 
@@ -19,9 +18,8 @@ class ClarificationContextService:
         collected = session_state.get("collected_slots") or {}
         workflow = collected.get("process_workflow") or {}
         pending = list(workflow.get("missing_fields") or session_state.get("pending_questions") or [])
-        if not pending:
-            spec = current_spec or collected.get("process_task_spec") or {}
-            pending = [field for field in PROCESS_REQUIRED_FIELDS if spec.get(field) is None]
+        # A pending list is created by the tool that actually needs the data.
+        # Absence from the general TaskSpec is not itself a reason to block.
         pending = [field for field in pending if field in EXPECTED_ANSWER_TYPES]
         stored_round = int(workflow.get("clarification_round") or 0)
         current_round = stored_round + 1 if workflow.get("state") in {"REQUIREMENTS_PENDING", "PARSER_STALL"} else stored_round

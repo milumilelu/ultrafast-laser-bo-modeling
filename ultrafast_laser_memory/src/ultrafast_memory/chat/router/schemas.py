@@ -34,7 +34,6 @@ class RoutePlan(BaseModel):
     requires_user_permission: bool = False
     requires_expert_review: bool = False
     clarification_questions: list[str] = Field(default_factory=list)
-    allowed_tools: list[str] = Field(default_factory=list)
     blocked_tools: list[BlockedTool] = Field(default_factory=list)
     state_update: StateUpdate = Field(default_factory=StateUpdate)
     route_source: str = "unknown"
@@ -45,12 +44,12 @@ class RoutePlan(BaseModel):
 
 def fallback_route(reason: str = "Router confidence is low; fallback to task intake.") -> RoutePlan:
     return RoutePlan(
-        primary_skill="task_intake",
-        intent="task_intake",
+        primary_skill="task_understanding",
+        intent="task_understanding",
         workflow_stage="clarification",
         confidence=0.3,
         reason=reason,
         requires_clarification=True,
         route_source="fallback",
-        state_update=StateUpdate(active_skill="task_intake", workflow_stage="clarification"),
+        state_update=StateUpdate(workflow_stage="agent_planning"),
     )

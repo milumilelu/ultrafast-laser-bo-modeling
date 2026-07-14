@@ -15,10 +15,10 @@ from ultrafast_agent.task_intake.merge_service import TaskSpecMergeService
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
 
 
-TOOL_VERSION = "agent-update-task-spec-v1"
+TOOL_VERSION = "agent-update-task-context-v2"
 
 
-def update_task_spec(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def update_task_context(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Validate and commit already-structured Agent interpretations to canonical TaskSpec."""
     session_id = str(context["session_id"])
     user_message = str(context["user_message"])
@@ -72,9 +72,11 @@ def update_task_spec(payload: dict[str, Any], context: dict[str, Any]) -> dict[s
         message_id=context.get("message_id"),
         context=clarification,
     )
-    remaining = MissingFieldEvaluator.evaluate(merged.task_spec, clarification)
+    projected_spec = _with_geometry_projection(merged.task_spec)
+    remaining = MissingFieldEvaluator.evaluate(projected_spec, clarification)
     collected.update({
-        "process_task_spec": merged.task_spec,
+        "process_task_spec": projected_spec,
+        "task_spec": projected_spec,
         "process_task_field_provenance": merged.field_provenance,
         "process_task_revision_history": merged.revision_history,
     })
@@ -89,17 +91,17 @@ def update_task_spec(payload: dict[str, Any], context: dict[str, Any]) -> dict[s
         "rejected": rejected_items,
         "conflicts": merged.conflicts,
         "remaining_missing": remaining,
-        "task_spec": merged.task_spec,
+        "task_spec": projected_spec,
         "field_provenance": merged.field_provenance,
         "revision_history": merged.revision_history,
     }
 
 
-def update_task_spec_contract() -> ToolContract:
+def update_task_context_contract() -> ToolContract:
     return ToolContract(
-        name="update_task_spec",
-        purpose="Validate and commit structured task fields interpreted by the main Agent.",
-        handler=update_task_spec,
+        name="update_task_context",
+        purpose="Validate and commit progressive structured task facts with provenance.",
+        handler=update_task_context,
         version=TOOL_VERSION,
         input_schema={"type": "object", "required": ["updates"]},
         output_schema={
@@ -110,4 +112,25 @@ def update_task_spec_contract() -> ToolContract:
         side_effects=("canonical_task_spec", "field_provenance", "revision_history"),
         timeout_ms=5_000,
         permission_level=2,
+        exposed_by_default=True,
     )
+
+
+def _with_geometry_projection(task_spec: dict[str, Any]) -> dict[str, Any]:
+    result = dict(task_spec)
+    geometry = dict(result.get("geometry") or {})
+    for source, target in (
+        ("hole_diameter_mm", "hole_diameter_mm"),
+        ("hole_depth_mm", "hole_depth_mm"),
+        ("through_hole", "through_hole"),
+    ):
+        if source in result:
+            geometry[target] = result[source]
+    if geometry:
+        result["geometry"] = geometry
+    return result
+
+
+# Python API compatibility only; it is not registered as a second Agent tool.
+update_task_spec = update_task_context
+update_task_spec_contract = update_task_context_contract

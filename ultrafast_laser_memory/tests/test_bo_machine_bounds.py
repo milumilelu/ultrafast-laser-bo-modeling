@@ -2,21 +2,26 @@ from __future__ import annotations
 
 import pytest
 
-from ultrafast_memory.chat.schemas import ChatRequest
-from ultrafast_memory.chat.service import handle_chat
+from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
+from ultrafast_agent.runtime import ToolExecutor
 from ultrafast_memory.db.init_db import init_database
 from ultrafast_memory.equipment.bounds import apply_task_level_override, require_machine_bounds_for_bo, validate_candidate_within_bounds
 from ultrafast_memory.equipment.schemas import EquipmentProfileCreate
 from ultrafast_memory.equipment.service import create_equipment_profile
 
 
-def test_bo_recommendation_blocks_without_active_profile(isolated_root):
+def test_bo_tool_reports_missing_action_context_without_active_profile(isolated_root):
     init_database()
 
-    response = handle_chat(ChatRequest(message="请用 BO 推荐金刚石 CRL 下一轮实验参数", use_skills=True))
+    execution = ToolExecutor(build_main_agent_tool_registry()).execute(
+        "recommend_parameters_bo",
+        {},
+        {"task_spec": {"material": "diamond", "process_type": "ablation"}},
+    )
 
-    assert "当前没有 active 设备配置，无法进行 BO 参数推荐" in response.assistant_message
-    assert any(item["step"] == "bo_machine_bounds_guard" for item in response.audit_trace)
+    assert execution.status == "insufficient_data"
+    assert "task_spec.objective" in execution.output["missing"]
+    assert "equipment_snapshot.machine_bounds" in execution.output["missing"]
 
 
 def test_bo_reads_active_machine_bounds(isolated_root):

@@ -41,11 +41,11 @@ class TaskFieldNormalizer:
         raw = candidate.raw_value
         value: Any = raw
         unit = candidate.unit
-        if field in {"thickness_mm", "cut_length_mm"}:
+        if field in {"thickness_mm", "cut_length_mm", "hole_diameter_mm", "hole_depth_mm"}:
             number, parsed_unit = cls._length(raw, unit)
             value = number * _LENGTH_FACTORS[parsed_unit]
             unit = "mm"
-        elif field == "layer_cut_allowed":
+        elif field in {"layer_cut_allowed", "through_hole"}:
             value = cls._boolean(raw)
         elif field == "auxiliary":
             value = cls._enum(raw, {"压缩空气": "compressed_air", "氮气": "nitrogen", "无": "none"})
@@ -55,7 +55,13 @@ class TaskFieldNormalizer:
             text = str(raw).strip().lower()
             value = "none" if text in {"无", "无要求", "无效率要求", "时间无所谓", "none"} else raw
         elif field == "process_type":
-            value = cls._enum(raw, {"切割": "cutting", "打孔": "drilling", "刻蚀": "engraving"})
+            value = cls._enum(raw, {
+                "通孔": "hole_drilling",
+                "钻孔": "drilling",
+                "打孔": "drilling",
+                "切割": "cutting",
+                "刻蚀": "engraving",
+            })
         elif field == "material":
             value = cls._enum(raw, {
                 "碳纤维复合板": "CFRP",

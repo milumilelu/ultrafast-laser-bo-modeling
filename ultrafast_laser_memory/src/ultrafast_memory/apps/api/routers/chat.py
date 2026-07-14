@@ -88,10 +88,17 @@ def chat_session_progress(session_id: str) -> dict:
 
     init_database()
     progress = get_latest_progress(session_id)
+    state = get_session_state(session_id)
+    collected = state.get("collected_slots") or {}
+    workflow = collected.get("process_workflow") or {}
+    if progress is not None and workflow:
+        projection = WorkflowProjectionService.build_process(
+            task_spec=collected.get("process_task_spec") or workflow.get("task_spec") or {},
+            workflow_state=workflow,
+            next_action=workflow.get("next_action") or {},
+        )
+        progress["business_state"] = projection.business_state
     if progress is None:
-        state = get_session_state(session_id)
-        collected = state.get("collected_slots") or {}
-        workflow = collected.get("process_workflow") or {}
         if workflow:
             projection = WorkflowProjectionService.build_process(
                 task_spec=collected.get("process_task_spec") or workflow.get("task_spec") or {},

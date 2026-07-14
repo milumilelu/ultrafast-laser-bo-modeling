@@ -11,7 +11,10 @@ from ultrafast_agent.task_intake.schemas import (
 )
 
 
-_PROCESS_TYPES = {"cutting", "drilling", "engraving", "ablation", "femtosecond_laser_micromachining"}
+_PROCESS_TYPES = {
+    "cutting", "drilling", "hole_drilling", "engraving", "ablation",
+    "femtosecond_laser_micromachining",
+}
 _CONTOUR_TYPES = {"straight", "curve", "arc", "circle"}
 _AUXILIARY_TYPES = {"compressed_air", "nitrogen", "oxygen", "argon", "none"}
 _CORRECTION_MARKERS = ("改为", "改成", "更正", "说错了", "不是", "应为")
@@ -72,10 +75,12 @@ class TaskSpecPatchValidator:
         value = candidate.normalized_value
         if value is None:
             return "normalized_value_missing"
-        if candidate.field_name in {"thickness_mm", "cut_length_mm"}:
+        if candidate.field_name in {
+            "thickness_mm", "cut_length_mm", "hole_diameter_mm", "hole_depth_mm"
+        }:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
                 return "length_must_be_positive"
-        if candidate.field_name == "layer_cut_allowed" and not isinstance(value, bool):
+        if candidate.field_name in {"layer_cut_allowed", "through_hole"} and not isinstance(value, bool):
             return "boolean_required"
         if candidate.field_name == "process_type" and value not in _PROCESS_TYPES:
             return "process_type_not_allowed"
@@ -83,12 +88,20 @@ class TaskSpecPatchValidator:
             return "contour_type_not_allowed"
         if candidate.field_name == "auxiliary" and value not in _AUXILIARY_TYPES:
             return "auxiliary_not_allowed"
-        if candidate.field_name in {"material", "quality_requirement", "efficiency_requirement"}:
+        if candidate.field_name in {
+            "material", "quality_requirement", "efficiency_requirement", "objective",
+            "taper_requirement", "entrance_quality", "exit_quality",
+        }:
             if not isinstance(value, str) or not value.strip():
                 return "non_empty_string_required"
         if candidate.field_name in {"cut_length_mm", "layer_cut_allowed", "contour_type"}:
             if process_type != "cutting":
                 return "field_not_applicable_to_process"
+        if candidate.field_name in {
+            "hole_diameter_mm", "hole_depth_mm", "through_hole", "taper_requirement",
+            "entrance_quality", "exit_quality",
+        } and process_type not in {"drilling", "hole_drilling"}:
+            return "field_not_applicable_to_process"
         if not candidate.evidence.strip():
             return "evidence_required"
         if user_message is not None and not TaskSpecPatchValidator._evidence_present(

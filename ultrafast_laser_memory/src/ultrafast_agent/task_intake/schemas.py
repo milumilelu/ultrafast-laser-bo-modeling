@@ -7,23 +7,30 @@ from pydantic import BaseModel, Field
 
 EXTRACTION_VERSION = "llm-task-intake-v1"
 
-PROCESS_REQUIRED_FIELDS = (
-    "material",
-    "process_type",
-    "thickness_mm",
-    "quality_requirement",
-    "cut_length_mm",
-    "efficiency_requirement",
-    "auxiliary",
-    "layer_cut_allowed",
-)
-
+# This is a vocabulary, not a completeness gate.  Individual tools declare
+# the fields they need for the action they perform.
 ALLOWED_TASK_FIELDS = frozenset(
     {
-        *PROCESS_REQUIRED_FIELDS,
-        "contour_type",
-        "focus_tracking",
+        "material",
+        "process_type",
+        "thickness_mm",
+        "quality_requirement",
+        "efficiency_requirement",
+        "objective",
+        "auxiliary",
         "component_type",
+        "focus_tracking",
+        # Cutting geometry.
+        "cut_length_mm",
+        "contour_type",
+        "layer_cut_allowed",
+        # Hole-drilling geometry and quality.
+        "hole_diameter_mm",
+        "hole_depth_mm",
+        "through_hole",
+        "taper_requirement",
+        "entrance_quality",
+        "exit_quality",
     }
 )
 
@@ -34,9 +41,16 @@ EXPECTED_ANSWER_TYPES = {
     "quality_requirement": "quality_requirement",
     "cut_length_mm": "length_with_contour",
     "efficiency_requirement": "efficiency_requirement",
+    "objective": "optimization_objective",
     "auxiliary": "auxiliary_medium",
     "layer_cut_allowed": "boolean",
     "contour_type": "contour_enum",
+    "hole_diameter_mm": "length",
+    "hole_depth_mm": "length",
+    "through_hole": "boolean",
+    "taper_requirement": "quality_requirement",
+    "entrance_quality": "quality_requirement",
+    "exit_quality": "quality_requirement",
 }
 
 

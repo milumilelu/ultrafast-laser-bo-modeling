@@ -100,8 +100,8 @@ def test_public_reasoning_summary_is_persisted_without_hidden_reasoning(isolated
 
 def test_v3_skills_are_registered_and_trace_off_is_enforced(isolated_root):
     names = {item.name for item in get_default_skill_registry().list()}
-    assert {"parameter_recommendation_planning", "optimization_campaign_initialization",
-            "observation_validation", "formal_local_adjustment", "campaign_termination"} <= names
+    assert names == {"task_understanding", "evidence_research", "process_planning",
+                     "parameter_recommendation", "experiment_optimization", "result_learning"}
     session = handle_chat(ChatRequest(message="/trace off"))
     response = handle_chat(ChatRequest(session_id=session.session_id, message="普通咨询"))
     assert response.execution_trace == []

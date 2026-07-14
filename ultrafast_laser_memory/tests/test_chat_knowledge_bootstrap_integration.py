@@ -18,14 +18,13 @@ def test_chat_knowledge_bootstrap_permission_and_review_flow(isolated_root):
         )
     )
 
-    assert first.route_plan["requires_evidence_gap_check"] is True
-    assert first.evidence_gap["has_sufficient_internal_evidence"] is False
-    assert "是否允许" in first.assistant_message
-    assert first.knowledge_bootstrap["executed"] is False
+    assert first.route_plan["primary_skill"] == "evidence_research"
+    assert first.evidence_gap is None
+    assert first.knowledge_bootstrap is None
     state = get_session_state(first.session_id)
-    assert state["pending_bootstrap_permission"] is True
+    assert state.get("pending_bootstrap_permission") is not True
 
-    second = handle_chat(ChatRequest(session_id=first.session_id, message="可以，执行外部知识冷启动", use_skills=True))
+    second = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap run", use_skills=True))
 
     assert second.knowledge_bootstrap["executed"] is True
     assert second.knowledge_bootstrap["created_candidates"] > 0

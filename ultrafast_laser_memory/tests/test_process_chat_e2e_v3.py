@@ -26,7 +26,7 @@ def _stream(client: TestClient, session_id: str, message: str) -> tuple[list[dic
     return events, "".join(item.get("content", "") for item in events if item.get("type") == "delta")
 
 
-def test_streaming_process_chat_accumulates_fields_and_requires_trial_choice(isolated_root):
+def test_streaming_main_agent_accumulates_progressive_task_fields(isolated_root):
     _equipment()
     client = TestClient(app)
     session_id = client.post("/chat/sessions", json={}).json()["session_id"]
@@ -34,29 +34,24 @@ def test_streaming_process_chat_accumulates_fields_and_requires_trial_choice(iso
     first_events, first = _stream(
         client, session_id, "加工类型=切割；材料=CFRP_T300；厚度=5mm"
     )
-    assert "等待补充加工要求" in first
-    assert "请回答" in first
+    assert "已保存" in first
     assert "推荐参数" not in first
     assert len([item for item in first_events if item.get("type") == "progress"]) == 1
     assert next(item for item in first_events if item.get("type") == "meta")["model"] == \
-        "agent-native-tools-v1"
+        "main-agent-loop-v1"
     state = next(item for item in first_events if item.get("type") == "workflow_state")
-    assert state["current_stage"] == "等待补充加工要求"
-    assert state["current_stage_code"] == "REQUIREMENTS_PENDING"
-    assert state["next_required_action"]["action_label"] == "补充加工要求"
-    assert any(item.get("title") == "公开推理摘要" for item in first_events)
-    assert not any(item.get("event_type") == "device_lookup" for item in first_events)
-    _, second = _stream(
+    assert state["task_spec"]["process_type"] == "cutting"
+    assert state["task_spec"]["material"] == "CFRP_T300"
+    assert state["task_spec"]["thickness_mm"] == 5.0
+    assert state["next_required_action"]["action_type"] == "continue_workflow"
+    _stream(
         client, session_id, "质量要求=切缝碳纤维无分层；允许分层切割=true"
     )
-    assert "等待补充加工要求" in second
-    events, third = _stream(
+    events, _ = _stream(
         client, session_id,
         "切割长度=10cm；轮廓=直线；效率要求=无；辅助介质=压缩空气",
     )
-    assert "等待选择试切方式" in third
-    assert "[简化试切] [完整试切] [跳过试切]" in third
-    assert any(item.get("event_type") == "tool_started" for item in events)
-    _, fourth = _stream(client, session_id, "选择简化试切")
-    assert "BO 与 RAG 均不足" in fourth
-    assert "允许探索性候选" in fourth
+    final_state = next(item for item in events if item.get("type") == "workflow_state")
+    assert final_state["task_spec"]["cut_length_mm"] == 100
+    assert final_state["task_spec"]["layer_cut_allowed"] is True
+    assert "selected_trial_mode" not in final_state

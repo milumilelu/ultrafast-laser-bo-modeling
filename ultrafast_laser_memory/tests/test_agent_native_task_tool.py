@@ -7,7 +7,7 @@ from ultrafast_agent.task_intake.update_task_spec_tool import update_task_spec
 from ultrafast_agent.runtime import ToolContract, ToolExecutor, ToolRegistry
 from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.session_state import get_session_state
-from ultrafast_memory.process_workflow.business_state import BusinessState, allowed_agent_actions
+from ultrafast_memory.chat.main_agent_tools import BASE_TOOL_NAMES, build_main_agent_tool_registry
 from ultrafast_memory.process_workflow.agent_controller import ProcessAgentController
 
 
@@ -46,15 +46,11 @@ def test_update_task_spec_tool_rejects_invalid_unit_without_state_pollution(isol
     assert get_session_state(session_id)["collected_slots"]["process_task_spec"] == {}
 
 
-def test_business_state_exposes_permissions_instead_of_parser_status() -> None:
-    intake = allowed_agent_actions(BusinessState.INTAKE)
-    optimization = allowed_agent_actions(BusinessState.OPTIMIZATION)
-
-    assert "update_task_spec" in intake
-    assert "run_bo_recommendation" not in intake
-    assert "run_bo_recommendation" in optimization
-    assert "update_task_spec" not in optimization
-    assert "production_approve" not in optimization
+def test_business_state_projects_progress_without_gating_agent_tools() -> None:
+    registry = build_main_agent_tool_registry()
+    assert BASE_TOOL_NAMES == {"update_task_context", "get_equipment_context"}
+    assert registry.get("recommend_parameters_bo")
+    assert registry.get("review_knowledge_candidate").requires_human_approval is True
 
 
 def test_tool_executor_enforces_human_approval_and_prohibition() -> None:
@@ -106,10 +102,10 @@ def test_main_agent_native_action_selects_update_tool() -> None:
         task_spec={"process_type": "cutting"},
         business_state="INTAKE",
         context=_context("cut_length_mm"),
-        allowed_actions=allowed_agent_actions(BusinessState.INTAKE),
+        available_tools=build_main_agent_tool_registry().schemas_for_agent(),
     )
 
     assert action.action == "call_tool"
-    assert action.tool_name == "update_task_spec"
+    assert action.tool_name == "update_task_context"
     assert action.arguments["updates"][0]["value"] == 100
     assert action.provider == "deepseek"

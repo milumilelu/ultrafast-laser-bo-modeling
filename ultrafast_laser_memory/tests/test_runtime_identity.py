@@ -20,10 +20,10 @@ def test_health_exposes_loaded_runtime_identity(project_root: Path) -> None:
     health = TestClient(app).get("/health").json()
     identity = health["runtime_identity"]
 
-    assert health["task_intake_contract"] == "agent-native-tools-v1"
+    assert health["agent_capability_contract"] == "skill-discovery-v2"
     assert Path(identity["python"]).resolve() == Path(sys.executable).resolve()
     assert Path(identity["package_root"]).resolve() == (project_root / "src").resolve()
-    assert Path(identity["chat_orchestrator"]).is_relative_to(project_root.resolve())
+    assert Path(identity["main_agent_loop"]).is_relative_to(project_root.resolve())
     assert Path(identity["main_agent_controller"]).is_relative_to(project_root.resolve())
     assert Path(identity["update_task_spec_tool"]).is_relative_to(project_root.resolve())
     assert identity["backend_pid"] > 0

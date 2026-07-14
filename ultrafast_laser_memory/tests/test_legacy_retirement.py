@@ -94,10 +94,4 @@ def test_formal_modules_cannot_import_legacy_runtime_or_projection(project_root)
 
 
 def test_formal_orchestrator_does_not_branch_on_substatus(project_root):
-    source = (
-        project_root / "src/ultrafast_memory/process_workflow/chat_orchestrator.py"
-    ).read_text(encoding="utf-8")
-    assert 'workflow.get("substatus") in' not in source
-    assert 'state = workflow["substatus"]' not in source
-    assert "legacy_projection_adapter" not in source
-    assert "agent_runtime.trace_collector" not in source
+    assert not (project_root / "src/ultrafast_memory/process_workflow/chat_orchestrator.py").exists()

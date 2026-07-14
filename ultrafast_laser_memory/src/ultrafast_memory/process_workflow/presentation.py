@@ -43,6 +43,12 @@ FIELD_LABELS = {
     "efficiency_requirement": "效率要求",
     "auxiliary": "辅助介质或辅助气体",
     "layer_cut_allowed": "是否允许分层多次切割",
+    "hole_diameter_mm": "孔径（mm）",
+    "hole_depth_mm": "孔深（mm）",
+    "through_hole": "是否通孔",
+    "taper_requirement": "锥度要求",
+    "entrance_quality": "入口质量",
+    "exit_quality": "出口质量",
     "equipment_revision": "设备版本",
     "material_batch": "材料批次",
     "actual_parameters": "实际加工参数",
@@ -68,6 +74,12 @@ FIELD_QUESTIONS = {
     "efficiency_requirement": "请说明是否有加工时间或效率要求；没有可回答“无效率要求”。",
     "auxiliary": "请说明辅助介质，例如压缩空气、氮气；不使用可回答“无辅助气体”。",
     "layer_cut_allowed": "请确认是否允许多次分层切割，请回答“允许”或“不允许”。",
+    "hole_diameter_mm": "请提供孔径，单位为 mm。",
+    "hole_depth_mm": "请提供孔深，单位为 mm。",
+    "through_hole": "请确认是否为通孔。",
+    "taper_requirement": "请说明孔锥度要求。",
+    "entrance_quality": "请说明入口崩边或表面质量要求。",
+    "exit_quality": "请说明出口崩边或表面质量要求。",
 }
 
 ACTION_LABELS = {

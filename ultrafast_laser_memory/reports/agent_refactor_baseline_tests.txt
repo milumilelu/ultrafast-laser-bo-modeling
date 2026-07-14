@@ -1,0 +1,5 @@
+Baseline captured before the capability-discovery refactor
+Date: 2026-07-14
+Command: python -m pytest -q
+Result: 255 passed, 8 warnings
+Warnings: sklearn Gaussian-process convergence warnings only

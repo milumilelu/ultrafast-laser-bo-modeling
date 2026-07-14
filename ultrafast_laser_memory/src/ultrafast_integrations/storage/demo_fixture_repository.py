@@ -4,7 +4,6 @@ import json
 
 from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.db.init_db import init_database
-from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.rag.index_service import create_index, index_pending_chunks
 from ultrafast_shared.db.unit_of_work import UnitOfWork
 

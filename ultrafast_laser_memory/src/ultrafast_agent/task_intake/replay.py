@@ -80,7 +80,11 @@ def run_replay_case(case: ReplayCase, client: Any | None = None) -> dict[str, An
     llm = client or FixtureStructuredClient(case.structured_outputs)
     previous_questions: list[dict[str, Any]] = []
     for turn_number, message in enumerate(case.turns, start=1):
-        pending = MissingFieldEvaluator.evaluate(task)
+        # Replay expectations are an explicit test-action contract, not a
+        # production-wide required-field list.
+        pending = MissingFieldEvaluator.evaluate(
+            task, required_fields=case.expected_missing_fields
+        )
         context = ClarificationContext(
             workflow_type="complex_process_task",
             stage="REQUIREMENTS_PENDING",
@@ -109,9 +113,13 @@ def run_replay_case(case: ReplayCase, client: Any | None = None) -> dict[str, An
         rejected.extend(patch.rejected_candidates)
         previous_questions = [
             {"field": field, "question": f"请补充 {field}"}
-            for field in MissingFieldEvaluator.evaluate(task)
+            for field in MissingFieldEvaluator.evaluate(
+                task, required_fields=case.expected_missing_fields
+            )
         ]
-    missing = MissingFieldEvaluator.evaluate(task)
+    missing = MissingFieldEvaluator.evaluate(
+        task, required_fields=case.expected_missing_fields
+    )
     business_state = "TRIAL" if not missing else "INTAKE"
     return {
         "case_id": case.case_id,

@@ -43,47 +43,6 @@ BUSINESS_STATE_LABELS = {
 }
 
 
-ALLOWED_AGENT_ACTIONS = {
-    BusinessState.INTAKE: (
-        "get_task_state", "update_task_spec", "ask_user", "direct_answer",
-        "get_equipment_profile",
-    ),
-    BusinessState.EVIDENCE: (
-        "search_rag", "retrieve_historical_cases", "assess_evidence", "ask_user",
-        "direct_answer", "get_equipment_profile",
-    ),
-    BusinessState.TRIAL: (
-        "recommend_process_parameters", "create_trial_campaign", "submit_trial_feedback",
-        "ask_user", "direct_answer", "get_equipment_profile",
-    ),
-    BusinessState.REVIEW: (
-        "request_review", "submit_trial_feedback", "assess_bo_readiness", "ask_user",
-        "direct_answer",
-    ),
-    BusinessState.OPTIMIZATION: (
-        "assess_bo_readiness", "run_bo_recommendation", "create_trial_campaign",
-        "request_review", "ask_user", "direct_answer",
-    ),
-    BusinessState.READY_FOR_EXTERNAL_PROCESS: (
-        "generate_cam_export", "request_formal_release", "ask_user", "direct_answer",
-    ),
-    BusinessState.WAITING_EXTERNAL_RESULT: (
-        "report_external_processing", "submit_final_inspection", "ask_user", "direct_answer",
-    ),
-    BusinessState.QUALITY_REVIEW: (
-        "submit_final_inspection", "request_review", "ask_user", "direct_answer",
-    ),
-    BusinessState.COMPLETED: ("direct_answer",),
-    BusinessState.BLOCKED: (
-        "get_task_state", "get_equipment_profile", "ask_user", "direct_answer",
-        "request_review",
-    ),
-}
-
-
-def allowed_agent_actions(state: BusinessState | str) -> list[str]:
-    return list(ALLOWED_AGENT_ACTIONS[BusinessState(str(state))])
-
 ALLOWED_BUSINESS_TRANSITIONS = {
     BusinessState.INTAKE: {BusinessState.EVIDENCE, BusinessState.TRIAL, BusinessState.BLOCKED},
     BusinessState.EVIDENCE: {BusinessState.TRIAL, BusinessState.REVIEW, BusinessState.OPTIMIZATION, BusinessState.BLOCKED},
@@ -156,7 +115,6 @@ class BusinessStateController:
         workflow["state"] = substatus  # read compatibility for persisted V3 records
         workflow.setdefault("execution_step", substatus)
         workflow["business_state"] = business_state.value
-        workflow["allowed_actions"] = allowed_agent_actions(business_state)
         workflow["business_state_changed"] = False
         return workflow
 
@@ -170,14 +128,15 @@ class BusinessStateController:
                 previous_state != business_state
                 and business_state not in ALLOWED_BUSINESS_TRANSITIONS[previous_state]
             ):
-                raise ValueError(
-                    f"illegal business transition: {previous_state.value} -> {business_state.value}"
+                # State is an event projection.  Unexpected movement is auditable,
+                # but it must not suppress an otherwise permitted tool call.
+                workflow["state_projection_warning"] = (
+                    f"non_linear_projection:{previous_state.value}->{business_state.value}"
                 )
         workflow["substatus"] = substatus
         workflow["state"] = substatus  # legacy read adapter; not a second state calculation
         workflow["execution_step"] = substatus
         workflow["business_state"] = business_state.value
-        workflow["allowed_actions"] = allowed_agent_actions(business_state)
         changed = previous != business_state.value
         workflow["business_state_changed"] = changed
         if changed:

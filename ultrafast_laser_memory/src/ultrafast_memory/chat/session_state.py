@@ -22,6 +22,16 @@ STATE_DEFAULTS = {
     "active_knowledge_bootstrap": {},
     "pending_review_task_ids": [],
     "pending_bootstrap_permission": False,
+    "active_skills_json": [],
+    "agent_observations_json": [],
+    "agent_step_count": 0,
+    "last_agent_action_json": {},
+    "suggested_skill_hint": {},
+}
+
+AGENT_RUNTIME_KEYS = {
+    "active_skills_json", "agent_observations_json", "agent_step_count",
+    "last_agent_action_json", "suggested_skill_hint",
 }
 
 
@@ -101,6 +111,13 @@ def update_session_state(session_id: str, state_update: dict[str, Any]) -> dict[
         merged["streaming_enabled"] = bool(state_update["streaming_enabled"])
     if "pending_bootstrap_permission" in state_update:
         merged["pending_bootstrap_permission"] = bool(state_update["pending_bootstrap_permission"])
+    runtime = dict((merged.get("collected_slots") or {}).get("_agent_runtime") or {})
+    for key in AGENT_RUNTIME_KEYS:
+        if key in state_update:
+            merged[key] = state_update[key]
+            runtime[key] = state_update[key]
+    if runtime:
+        merged["collected_slots"] = {**(merged.get("collected_slots") or {}), "_agent_runtime": runtime}
     _persist_state(session_id, merged)
     return get_session_state(session_id)
 
@@ -166,13 +183,15 @@ def _persist_state(session_id: str, state: dict[str, Any]) -> None:
 
 
 def _row_to_state(row: dict[str, Any]) -> dict[str, Any]:
+    collected = _loads(row["collected_slots_json"], {})
+    runtime = dict(collected.get("_agent_runtime") or {})
     return {
         "state_id": row["state_id"],
         "session_id": row["session_id"],
         "active_workflow": row["active_workflow"],
         "active_skill": row["active_skill"],
         "workflow_stage": row["workflow_stage"],
-        "collected_slots": _loads(row["collected_slots_json"], {}),
+        "collected_slots": collected,
         "pending_questions": _loads(row["pending_questions_json"], []),
         "allowed_next_skills": _loads(row["allowed_next_skills_json"], []),
         "debug_router": bool(row["debug_router"]),
@@ -182,6 +201,7 @@ def _row_to_state(row: dict[str, Any]) -> dict[str, Any]:
         "pending_review_task_ids": _loads(row.get("pending_review_task_ids_json"), []),
         "pending_bootstrap_permission": bool(row.get("pending_bootstrap_permission")),
         "updated_at": row["updated_at"],
+        **{key: runtime.get(key, STATE_DEFAULTS[key]) for key in AGENT_RUNTIME_KEYS},
     }
 
 

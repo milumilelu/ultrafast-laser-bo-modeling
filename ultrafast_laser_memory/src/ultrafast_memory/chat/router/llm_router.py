@@ -40,8 +40,9 @@ def _build_router_prompt(message: str, session_state: dict, candidate_route: Rou
     return (
         "你是超快激光智能体的路由器。根据用户消息、session_state 和候选规则路由输出 route_plan JSON。"
         "不要回答用户问题。不要生成加工参数。只能选择已有 skill。信息不足时 requires_clarification=true。\n"
-        "Skills: task_intake, crl_task_planning, rag_literature_retrieval, bo_recommendation, "
-        "process_file_ingestion, experience_memory_update, bo_dataset_governance, report_generation.\n"
+        "Skills: task_understanding, evidence_research, process_planning, "
+        "parameter_recommendation, experiment_optimization, result_learning. "
+        "输出只是建议，不能激活 Skill 或限制工具。\n"
         f"message={message}\n"
         f"session_state={json.dumps(session_state, ensure_ascii=False)}\n"
         f"candidate_route={json.dumps(candidate, ensure_ascii=False)}"

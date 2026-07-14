@@ -26,7 +26,9 @@ class BODatasetVersion:
     created_at: str
 
     def to_dict(self) -> dict[str, Any]:
-        value = asdict(self); value["sample_ids"] = list(self.sample_ids); return value
+        value = asdict(self)
+        value["sample_ids"] = list(self.sample_ids)
+        return value
 
 
 @dataclass(frozen=True, slots=True)

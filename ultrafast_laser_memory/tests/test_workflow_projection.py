@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from ultrafast_memory.chat.workflow_projection import WorkflowProjectionService
 from ultrafast_memory.process_workflow.business_state import BusinessStateController
 
@@ -58,10 +56,13 @@ def test_business_state_is_not_silently_overwritten_by_legacy_substatus():
     assert projection.substatus == "BO_RUNNING"
 
 
-def test_business_state_controller_blocks_illegal_jump():
+def test_business_state_controller_records_non_linear_projection_without_gating():
     workflow = BusinessStateController.ensure({"state": "INTAKE"})
-    with pytest.raises(ValueError, match="illegal business transition"):
-        BusinessStateController.transition(workflow, "FORMAL_PROCESS_RUNNING")
+    BusinessStateController.transition(workflow, "FORMAL_PROCESS_RUNNING")
+    assert workflow["business_state"] == "WAITING_EXTERNAL_RESULT"
+    assert workflow["state_projection_warning"] == (
+        "non_linear_projection:INTAKE->WAITING_EXTERNAL_RESULT"
+    )
 
 
 def test_workflow_status_source_is_read_only_projection(project_root: Path):

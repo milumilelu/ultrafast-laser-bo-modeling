@@ -5,16 +5,15 @@ from ultrafast_domain.domain_packs import list_domain_packs, load_domain_pack
 from ultrafast_domain.domain_packs.tgv import assess_aspect_ratio
 
 
-def test_all_skill_contracts_validate_and_forbid_direct_database(project_root):
+def test_skill_registry_contains_only_six_composable_descriptors(project_root):
     registry = load_skill_contracts(project_root / "skills/contracts.yaml")
 
-    assert len(registry.list()) >= 40
-    assert registry.get("bo_recommendation").preconditions == (
-        "equipment_gate_allowed",
-        "knowledge_gate_allowed",
-    )
-    for contract in registry.list():
-        assert not ({"sqlite", "database_connection", "raw_sql"} & set(contract.allowed_tools))
+    assert {item.name for item in registry.list()} == {
+        "task_understanding", "evidence_research", "process_planning",
+        "parameter_recommendation", "experiment_optimization", "result_learning",
+    }
+    assert all(item.recommended_tools for item in registry.list())
+    assert all(not hasattr(item, "allowed_tools") for item in registry.list())
 
 
 def test_legacy_router_skills_have_contracts(project_root):
@@ -36,19 +35,11 @@ def test_legacy_router_skills_have_contracts(project_root):
         assert registry.get(route.primary_skill)
 
 
-def test_crl_compatibility_contract_emits_deprecation_event(project_root):
+def test_legacy_skill_names_resolve_at_boundary_without_new_registry_entries(project_root):
     registry = load_skill_contracts(project_root / "skills/contracts.yaml")
-    contract = registry.get("crl_task_planning")
-
-    assert "deprecated_skill_used" in contract.emitted_events
-    assert "optical_component_task_workflow" in contract.allowed_tools
-
-    from ultrafast_memory.chat.router.rule_router import rule_route
-
-    route = rule_route("规划金刚石 CRL", {})
-    assert route.deprecated_skill_used is True
-    assert route.replacement_skill == "optical_component_task_workflow"
-    assert route.emitted_events == ["deprecated_skill_used"]
+    assert registry.get("task_intake").name == "task_understanding"
+    assert registry.get("rag_literature_retrieval").name == "evidence_research"
+    assert "task_intake" not in {item.name for item in registry.list()}
 
 
 def test_domain_pack_registry_and_crl_specific_capabilities():

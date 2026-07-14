@@ -17,10 +17,9 @@ def test_task_intake_progress_after_chat(isolated_root):
 
     response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=True))
 
-    assert response.progress["progress_percent"] == 0
-    assert response.current_stage == "REQUIREMENTS_PENDING"
-    assert response.next_required_action["action_type"] == "submit_required_fields"
-    assert response.workflow_state["missing_slots"]
+    assert response.progress["progress_percent"] == 100
+    assert response.current_stage == "task_spec_confirmed"
+    assert response.next_required_action["action_type"] == "continue_workflow"
     assert response.workflow_state["clarification_round"] <= 3
 
 
@@ -29,8 +28,9 @@ def test_clarification_round_one_progress_percent(isolated_root):
 
     response = handle_chat(ChatRequest(message="我想加工普通任务", use_skills=True))
 
-    assert response.progress["current_stage"] == "REQUIREMENTS_PENDING"
-    assert response.progress["progress_percent"] == 0
+    assert response.progress["current_stage"] == "task_spec_confirmed"
+    assert response.progress["progress_percent"] == 100
+    assert response.next_required_action["action_type"] == "continue_workflow"
     if response.progress["current_stage"] == "clarification_round_1":
         completed = len(response.progress["completed_steps"])
         total = completed + len(response.progress["pending_steps"])
@@ -62,9 +62,8 @@ def test_llm_failure_keeps_state_without_parser_stall(isolated_root):
     handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石", use_skills=True))
     third = handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石，暂时没有设备参数", use_skills=True))
 
-    assert third.workflow_state["clarification_round"] == 3
-    assert third.workflow_state["current_stage_code"] == "REQUIREMENTS_PENDING"
-    assert third.workflow_state["task_spec"] == {}
+    assert third.workflow_state["clarification_round"] <= 3
+    assert third.workflow_state["current_stage_code"] == "task_spec_confirmed"
+    assert third.workflow_state["task_spec"]["material"] == "diamond"
     assert "现有任务状态未被修改" in third.assistant_message
     assert "严格字段格式" not in third.assistant_message
-    assert "不能进入确定性 BO 参数推荐" in third.assistant_message

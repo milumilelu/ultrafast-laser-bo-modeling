@@ -13,13 +13,13 @@ def test_chat_response_includes_route_plan_and_trace(isolated_root):
 
     response = handle_chat(ChatRequest(message="读取 recipe 和 log 日志", use_skills=True))
 
-    assert response.selected_skill == "process_file_ingestion"
+    assert response.selected_skill == "task_understanding"
     assert response.route_plan is not None
-    assert response.route_plan["primary_skill"] == "process_file_ingestion"
+    assert response.route_plan["primary_skill"] == "task_understanding"
     with get_connection() as conn:
         trace = conn.execute(
             "SELECT route_plan_json FROM chat_route_trace WHERE session_id = ?",
             (response.session_id,),
         ).fetchone()
     persisted = json.loads(trace["route_plan_json"])
-    assert persisted["primary_skill"] == "process_file_ingestion"
+    assert persisted["primary_skill"] == "task_understanding"

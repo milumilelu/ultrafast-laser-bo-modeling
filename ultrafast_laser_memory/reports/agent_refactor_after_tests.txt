@@ -1,0 +1,15 @@
+Capability-discovery refactor verification
+Date: 2026-07-14
+
+python -m pytest -q
+265 passed, 8 warnings in 27.77s
+Warnings: sklearn Gaussian-process convergence warnings only
+
+python -m ruff check src tests
+All checks passed
+
+python -m compileall -q src
+Passed
+
+git diff --check
+Passed after trailing-whitespace cleanup

@@ -20,14 +20,11 @@ from ultrafast_memory.chat.session_store import (
 from ultrafast_memory.chat.legacy_projection_adapter import LegacyWorkflowProjectionAdapter
 from ultrafast_memory.core.config import load_config
 from ultrafast_memory.core.llm_config import get_llm_config
-from ultrafast_memory.equipment.bounds import build_machine_bounds, require_machine_bounds_for_bo
-from ultrafast_memory.knowledge_bootstrap.schemas import EvidenceGapRequest
-from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge, check_evidence_gap
+from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge
 from ultrafast_memory.knowledge_review.review_queue import get_review_task
 from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.llm.openai_compatible import LLMProviderError
-from ultrafast_memory.chat.rag_literature_retrieval import run_rag_literature_retrieval
-from ultrafast_memory.process_workflow.chat_orchestrator import process_progress, run_process_chat_turn
+from ultrafast_memory.chat.main_agent_loop import run_main_agent_turn
 
 
 def handle_chat(request: ChatRequest) -> ChatResponse:
@@ -111,7 +108,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     if request.use_skills:
         route_plan = route_message(request.message, session_id, user_message["message_id"])
         selected_skill = route_plan.primary_skill
-        route_trace = _record_route_decision_trace(
+        _record_route_decision_trace(
             session_id, user_message["message_id"], request.message, route_plan
         )
         if route_plan.deprecated_skill_used:
@@ -143,110 +140,46 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
                 "route_source": route_plan.route_source,
             }
         )
-        if selected_skill == "complex_process_task":
-            process_result = run_process_chat_turn(session_id, request.message, user_message["message_id"])
-            process_trace = _record_process_public_reasoning(
-                session_id, user_message["message_id"], process_result
-            )
-            save_message(
-                session_id,
-                "assistant",
-                process_result["content"],
-                {
-                    "selected_skill": selected_skill,
-                    "process_workflow": process_result["state"],
-                    "next_required_action": process_result["next_action"],
-                },
-            )
-            return _build_process_chat_response(
-                session_id,
-                process_result,
-                selected_skill,
-                route_plan.model_dump(mode="json"),
-                audit_trace,
-                [route_trace, *process_trace, *(process_result.get("events") or [])],
-            )
-        bo_guard = _handle_bo_machine_bounds_guard(route_plan, audit_trace, session_id, user_message["message_id"])
-        if bo_guard:
-            assistant_content = bo_guard["assistant_message"]
-            save_message(
-                session_id,
-                "assistant",
-                assistant_content,
-                {
-                    "selected_skill": selected_skill,
-                    "route_plan": route_plan.model_dump(mode="json"),
-                    "equipment": bo_guard.get("equipment"),
-                },
-            )
-            return _build_chat_response(
-                session_id=session_id,
-                assistant_message=assistant_content,
-                message=request.message,
-                message_id=user_message["message_id"],
-                selected_skill=selected_skill,
-                route_plan=route_plan.model_dump(mode="json"),
-                route_plan_obj=route_plan,
-                tool_calls=[],
-                audit_trace=audit_trace,
-                stage=bo_guard.get("workflow_stage"),
-                status=bo_guard.get("workflow_status"),
-            )
-        rag_result = _maybe_handle_internal_rag(request.message, session_id, route_plan, audit_trace)
-        if rag_result:
-            assistant_content = rag_result["assistant_message"]
-            save_message(
-                session_id,
-                "assistant",
-                assistant_content,
-                {
-                    "selected_skill": selected_skill,
-                    "route_plan": route_plan.model_dump(mode="json"),
-                    "rag_evidence": rag_result["rag_evidence"],
-                    "citations": rag_result["citations"],
-                },
-            )
-            return _build_chat_response(
-                session_id=session_id,
-                assistant_message=assistant_content,
-                message=request.message,
-                message_id=user_message["message_id"],
-                selected_skill=selected_skill,
-                route_plan=route_plan.model_dump(mode="json"),
-                route_plan_obj=route_plan,
-                rag_evidence=rag_result["rag_evidence"],
-                citations=rag_result["citations"],
-                audit_trace=audit_trace,
-            )
-        evidence_result = _maybe_handle_evidence_gap(request.message, session_id, user_message["message_id"], route_plan, audit_trace)
-        if evidence_result:
-            assistant_content = evidence_result["assistant_message"]
-            save_message(
-                session_id,
-                "assistant",
-                assistant_content,
-                {
-                    "selected_skill": selected_skill,
-                    "route_plan": route_plan.model_dump(mode="json"),
-                    "evidence_gap": evidence_result.get("evidence_gap"),
-                    "knowledge_bootstrap": evidence_result.get("knowledge_bootstrap"),
-                },
-            )
-            return _build_chat_response(
-                session_id=session_id,
-                assistant_message=assistant_content,
-                message=request.message,
-                message_id=user_message["message_id"],
-                selected_skill=selected_skill,
-                route_plan=route_plan.model_dump(mode="json"),
-                route_plan_obj=route_plan,
-                evidence_gap=evidence_result.get("evidence_gap"),
-                knowledge_bootstrap=evidence_result.get("knowledge_bootstrap"),
-                tool_calls=[],
-                audit_trace=audit_trace,
-                stage=evidence_result.get("workflow_stage"),
-                status=evidence_result.get("workflow_status"),
-            )
+        suggested_skills = list(dict.fromkeys([
+            route_plan.primary_skill,
+            *route_plan.secondary_skills,
+        ]))
+        agent_result = run_main_agent_turn(
+            session_id=session_id,
+            message=request.message,
+            message_id=user_message["message_id"],
+            client=create_llm_client(get_llm_config()),
+            suggested_skills=suggested_skills,
+        )
+        audit_trace.append({
+            "step": "main_agent_loop",
+            "status": "success",
+            "tool_call_count": len(agent_result["tool_calls"]),
+        })
+        assistant_content = agent_result["content"]
+        save_message(
+            session_id,
+            "assistant",
+            assistant_content,
+            {
+                "selected_skill": selected_skill,
+                "active_skills": agent_result["active_skills"],
+                "suggested_skills": suggested_skills,
+                "route_plan": route_plan.model_dump(mode="json"),
+                "tool_calls": agent_result["tool_calls"],
+            },
+        )
+        return _build_chat_response(
+            session_id=session_id,
+            assistant_message=assistant_content,
+            message=request.message,
+            message_id=user_message["message_id"],
+            selected_skill=selected_skill,
+            route_plan=route_plan.model_dump(mode="json"),
+            route_plan_obj=route_plan,
+            tool_calls=agent_result["tool_calls"],
+            audit_trace=audit_trace,
+        )
 
     history = get_recent_messages(session_id, limit=20)
     messages = [{"role": "system", "content": build_system_prompt(selected_skill)}] + history
@@ -334,11 +267,10 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     # same ChatResponse produced by the non-streaming workflow.
     response = handle_chat(request.model_copy(update={"stream": False}))
     route = response.route_plan or {}
-    process_workflow = route.get("primary_skill") == "complex_process_task"
     yield {
         "type": "meta", "session_id": response.session_id,
-        "provider": "system" if process_workflow else "workflow",
-        "model": "agent-native-tools-v1" if process_workflow else "shared-chat-workflow-v1",
+        "provider": "workflow",
+        "model": "main-agent-loop-v1" if route else "shared-chat-workflow-v1",
     }
     if response.progress:
         yield _progress_event(response.progress)
@@ -367,7 +299,7 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
         workflow_state = dict(response.workflow_state)
         # Stream v3 retained the localized display field; the stable machine
         # code remains available separately for new clients.
-        if process_workflow and workflow_state.get("current_stage_label"):
+        if workflow_state.get("current_stage_label"):
             workflow_state["current_stage"] = workflow_state["current_stage_label"]
         yield {"type": "workflow_state", **workflow_state}
     yield {"type": "delta", "content": response.assistant_message}
@@ -441,74 +373,6 @@ def _handle_display_mode_command(message: str, session_id: str) -> dict | None:
     return {"assistant_message": f"显示模式已切换为：{mode}。", "display_mode": mode}
 
 
-def _record_process_public_reasoning(
-    session_id: str,
-    message_id: str | None,
-    process_result: dict,
-) -> list[dict]:
-    """Persist an auditable decision summary, never private model chain-of-thought."""
-    state = process_result.get("state") or {}
-    next_action = process_result.get("next_action") or {}
-    view = process_progress(state, next_action)
-    required_labels = view["next_required_action"].get("required_field_labels") or []
-    if required_labels:
-        basis = f"当前输入仍缺少：{'、'.join(required_labels)}。"
-    else:
-        basis = "当前输入已通过本阶段的结构化字段校验。"
-    summary = (
-        f"规则引擎判定当前处于“{view['current_stage']}”。{basis}"
-        f"下一步为“{view['next_required_action'].get('action_label') or '等待流程推进'}”。"
-    )
-    agent_event = record_agent_trace_event(
-        session_id=session_id,
-        message_id=message_id,
-        event_type="thinking_summary",
-        stage=view["current_stage_code"],
-        title="公开推理摘要",
-        summary=summary,
-        progress=view["percent"],
-        skill="complex_process_task",
-        status="completed",
-    )
-    events = [agent_event]
-    if state.get("business_state_changed"):
-        transition = dict(state.get("business_state_transition") or {})
-        events.append(record_agent_trace_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="business_state_changed",
-            stage=str(state.get("substatus") or view["current_stage_code"]),
-            title="业务状态变更",
-            summary=(
-                f"Business State 从 {transition.get('from') or 'NONE'} "
-                f"变更为 {transition.get('to')}；substatus={transition.get('substatus')}。"
-            ),
-            skill="complex_process_task",
-            payload={"transition": transition},
-            status="completed",
-        ))
-    equipment = build_machine_bounds()
-    if equipment.get("active"):
-        equipment_summary = (
-            f"已读取设备配置 {equipment.get('profile_name') or equipment.get('equipment_profile_id')}，"
-            f"版本 {equipment.get('revision_id')}。"
-        )
-        equipment_event = record_agent_trace_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="equipment_profile_loaded",
-            stage=view["current_stage_code"],
-            title="读取设备配置",
-            summary=equipment_summary,
-            progress=view["percent"],
-            skill="complex_process_task",
-            tool="equipment_memory_tool",
-            status="completed",
-        )
-        events.append(equipment_event)
-    return events
-
-
 def _build_command_chat_response(
     session_id: str,
     assistant_message: str,
@@ -518,68 +382,6 @@ def _build_command_chat_response(
         session_id=session_id,
         assistant_message=assistant_message,
         audit_trace=audit_trace,
-    )
-
-
-def _build_process_chat_response(
-    session_id: str,
-    process_result: dict,
-    selected_skill: str,
-    route_plan: dict,
-    audit_trace: list[dict],
-    events: list[dict],
-) -> ChatResponse:
-    view = process_progress(process_result["state"], process_result["next_action"])
-    visible_trace = _filter_public_trace(session_id, events)
-    reasoning_events = [
-        item
-        for item in visible_trace
-        if item.get("event_type") in {"thinking_summary", "decision", "equipment_profile_loaded"}
-    ]
-    equipment = build_machine_bounds()
-    equipment_profile = None
-    if equipment.get("active"):
-        equipment_profile = {
-            "equipment_profile_id": equipment.get("equipment_profile_id"),
-            "profile_name": equipment.get("profile_name"),
-            "revision_id": equipment.get("revision_id"),
-        }
-    workflow_state = {
-        **process_result["state"],
-        **view,
-        "missing_slots": list(process_result["state"].get("missing_fields") or []),
-        "equipment_profile_used": equipment_profile,
-        "machine_bounds": equipment.get("machine_bounds") or {},
-    }
-    return ChatResponse(
-        session_id=session_id,
-        assistant_message=process_result["content"],
-        selected_skill=selected_skill,
-        route_plan=route_plan,
-        progress={
-            "workflow_type": "complex_process_task",
-            "current_stage": view["current_stage"],
-            "current_stage_code": view["current_stage_code"],
-            "progress_percent": view["percent"],
-            "completed_steps_count": view["completed_steps"],
-            "total_steps": view["total_steps"],
-            "status": "waiting_user" if process_result["next_action"].get("blocking") else "running",
-            "message": process_result["content"].splitlines()[0],
-        },
-        thinking_status=reasoning_events,
-        workflow_state=workflow_state,
-        execution_trace=visible_trace,
-        audit_trace=audit_trace,
-        workflow_overview=view["workflow_overview"],
-        current_stage=view["current_stage"],
-        current_stage_code=view["current_stage_code"],
-        completed_stages=view["completed_stages"],
-        pending_stages=view["pending_stages"],
-        blocked_stages=view["blocked_stages"],
-        next_required_action=view["next_required_action"],
-        skill_trace=[item for item in visible_trace if item.get("skill")],
-        tool_trace=[item for item in visible_trace if item.get("tool")],
-        reasoning_trace=reasoning_events,
     )
 
 
@@ -605,7 +407,9 @@ def _build_chat_response(
     collected = dict(session.get("collected_slots") or {})
     current_task_spec = dict(collected.get("task_spec") or {})
     candidate = LegacyTaskSpecAdapter.adapt(message, workflow_type)
-    task_spec = {**current_task_spec, **candidate}
+    # Legacy projection may enrich missing display fields, but it must never
+    # overwrite canonical facts without an explicit correction tool call.
+    task_spec = {**candidate, **current_task_spec}
     collected["task_spec"] = task_spec
     update_session_state(session_id, {"collected_slots": collected})
     artifacts = LegacyWorkflowProjectionAdapter.build_and_persist(
@@ -617,6 +421,16 @@ def _build_chat_response(
         status=status,
     )
     assistant_message = _clarification_limit_message(artifacts) or assistant_message
+    process_workflow = dict(collected.get("process_workflow") or {})
+    artifacts["workflow_state"].update({
+        "current_stage_code": artifacts["workflow_state"].get("substatus"),
+        "field_provenance": collected.get("process_task_field_provenance") or {},
+        "revision_history": collected.get("process_task_revision_history") or [],
+        "active_skills": session.get("active_skills_json") or [],
+        "discoverable_tools": process_workflow.get("discoverable_tools") or [],
+        "agent_action": process_workflow.get("last_agent_action"),
+        "last_tool_result": process_workflow.get("last_tool_result"),
+    })
     completed = artifacts["progress"].get("completed_steps") or []
     pending = artifacts["progress"].get("pending_steps") or []
     overview = ([{"step": step, "status": "completed"} for step in completed] +
@@ -627,6 +441,7 @@ def _build_chat_response(
         "required_fields": missing,
         "blocking": bool(missing),
     }
+    artifacts["workflow_state"]["next_required_action"] = next_action
     visible_trace = _filter_public_trace(session_id, artifacts["execution_trace"])
     visible_thinking = [] if _public_trace_mode(session_id) == "off" else artifacts["thinking_status"]
     skill_events = [item for item in visible_trace if item.get("skill")]
@@ -712,66 +527,6 @@ def _agent_trace_event(item: dict) -> dict:
     return DebugTraceRenderer().render(item)
 
 
-def _maybe_handle_evidence_gap(message: str, session_id: str, message_id: str | None, route_plan, audit_trace: list[dict]) -> dict | None:
-    if not getattr(route_plan, "requires_evidence_gap_check", False):
-        return None
-    task_spec = _task_spec_from_message(message, route_plan)
-    gap = check_evidence_gap(EvidenceGapRequest(task_spec=task_spec, question=message, internal_hits=[])).model_dump(mode="json")
-    update_session_state(
-        session_id,
-        {
-            "evidence_gap": gap,
-            "active_knowledge_bootstrap": {
-                "task_spec": task_spec,
-                "question": message,
-                "status": "awaiting_user_permission",
-            },
-            "pending_bootstrap_permission": True,
-        },
-    )
-    audit_trace.append(
-        {
-            "step": "evidence_gap_check",
-            "status": "sufficient" if gap["has_sufficient_internal_evidence"] else "insufficient",
-            "missing_evidence": gap["missing_evidence"],
-        }
-    )
-    record_agent_trace_event(
-        session_id=session_id,
-        message_id=message_id,
-        event_type="knowledge_lookup",
-        stage="evidence_gap_check",
-        title="内部证据检查",
-        summary="内部证据足够。" if gap["has_sufficient_internal_evidence"] else "内部证据不足，需要知识冷启动授权。",
-        skill=getattr(route_plan, "primary_skill", None),
-        tool="evidence_gap_detector",
-        input_summary=message[:240],
-        output_summary=f"recommended_action={gap.get('recommended_action')}; evidence_score={gap.get('evidence_score')}",
-        status="completed",
-    )
-    if gap["has_sufficient_internal_evidence"]:
-        return None
-    cfg = load_config().get("knowledge_bootstrap", {})
-    if cfg.get("auto_web_bootstrap") and not cfg.get("require_user_permission", True):
-        return _execute_bootstrap(session_id, task_spec, message, route_plan.model_dump(mode="json"), gap, audit_trace)
-    return {
-        "assistant_message": (
-            "当前内部知识库缺少足够证据，无法可靠支持该问题的结论。\n\n"
-            "我可以启动外部知识冷启动检索：\n"
-            "1. 生成专业检索 query；\n"
-            "2. 调用外部检索；\n"
-            "3. 抽取候选知识；\n"
-            "4. 写入专家审核队列；\n"
-            "5. 审核通过后再进入正式 RAG。\n\n"
-            "是否允许我现在执行外部知识冷启动？"
-        ),
-        "evidence_gap": gap,
-        "knowledge_bootstrap": {"executed": False, "next_action": "user_permission_required"},
-        "workflow_stage": "knowledge_bootstrap_pending",
-        "workflow_status": "waiting_user",
-    }
-
-
 def _handle_bootstrap_permission_reply(message: str, session_id: str, state: dict) -> dict | None:
     if not state.get("pending_bootstrap_permission"):
         return None
@@ -797,42 +552,6 @@ def _handle_bootstrap_permission_reply(message: str, session_id: str, state: dic
             [{"step": "knowledge_bootstrap_permission", "status": "granted"}],
         )
     return None
-
-
-def _handle_bo_machine_bounds_guard(route_plan, audit_trace: list[dict], session_id: str | None = None, message_id: str | None = None) -> dict | None:
-    if getattr(route_plan, "primary_skill", None) != "bo_recommendation":
-        return None
-    equipment = require_machine_bounds_for_bo()
-    if not equipment.get("blocked"):
-        audit_trace.append(
-            {
-                "step": "bo_machine_bounds",
-                "status": "loaded" if equipment.get("active") else "not_required",
-                "equipment_profile_id": equipment.get("equipment_profile_id"),
-                "revision_id": equipment.get("revision_id"),
-            }
-        )
-        if equipment.get("active"):
-            record_agent_trace_event(
-                session_id=session_id or "runtime",
-                message_id=message_id,
-                event_type="device_lookup",
-                stage="bo_machine_bounds",
-                title="读取设备边界",
-                summary=f"已读取 active 设备边界：{equipment.get('profile_name')}",
-                skill=getattr(route_plan, "primary_skill", None),
-                tool="equipment_memory",
-                output_summary=f"revision={equipment.get('revision_id')}",
-                status="completed",
-            )
-        return None
-    audit_trace.append({"step": "bo_machine_bounds_guard", "status": "blocked_need_user_input"})
-    return {
-        "assistant_message": equipment["message"],
-        "equipment": equipment,
-        "workflow_stage": "blocked_need_user_input",
-        "workflow_status": "waiting_user",
-    }
 
 
 def _handle_bootstrap_chat_command(message: str, session_id: str, state: dict) -> dict | None:
@@ -916,7 +635,7 @@ def _execute_bootstrap(
             f"{result['created_review_tasks']} 个专家审核任务。审核通过后才会进入正式 RAG；"
             "未审核候选不会用于 BO 参数推荐。"
         ),
-        "selected_skill": "rag_literature_retrieval",
+        "selected_skill": "evidence_research",
         "route_plan": route_plan,
         "evidence_gap": evidence_gap,
         "knowledge_bootstrap": {
@@ -999,26 +718,3 @@ def _task_spec_from_message(message: str, route_plan) -> dict:
     if route_plan and getattr(route_plan, "primary_skill", None):
         task_spec["route_skill"] = route_plan.primary_skill
     return task_spec
-
-
-def _maybe_handle_internal_rag(message: str, session_id: str, route_plan, audit_trace: list[dict]) -> dict | None:
-    if not getattr(route_plan, "requires_internal_rag", False):
-        return None
-    task_spec = _task_spec_from_message(message, route_plan)
-    filters = {
-        key: value
-        for key, value in task_spec.items()
-        if key in {"scenario_id", "material", "material_grade", "process_type", "component_type", "laser_type"}
-    }
-    skill_result = run_rag_literature_retrieval(message, filters, session_id)
-    evidence = skill_result["rag_evidence"]
-    if not skill_result["handled"]:
-        return None
-    audit_trace.append(
-        {
-            "step": "internal_rag",
-            "status": evidence.get("evidence_status"),
-            "hit_count": len(evidence.get("hits") or []),
-        }
-    )
-    return skill_result

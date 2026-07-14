@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ultrafast_shared.config.loader import get_database_path
-from ultrafast_shared.db.session import get_connection
+from ultrafast_shared.db.session import get_connection as get_connection
 
 
 def get_engine(db_path: str | Path | None = None):

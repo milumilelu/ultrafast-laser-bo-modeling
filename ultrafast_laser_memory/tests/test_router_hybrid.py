@@ -13,7 +13,7 @@ def test_hybrid_router_marks_ambiguous_rule_candidate(isolated_root, monkeypatch
 
     plan = route_message("这次失败了，粗糙度没到，想让 BO 做下一轮优化", "session-hybrid", "message-hybrid")
 
-    assert plan.primary_skill == "experience_memory_update"
-    assert "bo_recommendation" in plan.secondary_skills
+    assert plan.primary_skill == "experiment_optimization"
+    assert "result_learning" in plan.secondary_skills
     assert plan.route_source == "hybrid_router"
-    assert plan.requires_clarification is True
+    assert plan.intent == "skill_hint"

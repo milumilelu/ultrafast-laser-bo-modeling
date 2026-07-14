@@ -5,7 +5,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ultrafast_agent.task_intake.missing_field_service import MissingFieldEvaluator
-from ultrafast_agent.task_intake.schemas import PROCESS_REQUIRED_FIELDS
 from ultrafast_memory.process_workflow.business_state import (
     BUSINESS_STATE_LABELS,
     BUSINESS_STATE_ORDER,
@@ -54,7 +53,9 @@ class WorkflowProjectionService:
             progress_percent=cls._business_percent(
                 business_state,
                 completed_count,
-                task_fields_complete=len(PROCESS_REQUIRED_FIELDS) - len(missing),
+                task_fields_complete=sum(
+                    task_spec.get(field) is not None for field in ("material", "process_type")
+                ),
             ),
             missing_fields=missing,
             current_step=cls._current_step(recent_events),
@@ -130,7 +131,8 @@ class WorkflowProjectionService:
         if state == BusinessState.COMPLETED:
             return 100
         if state == BusinessState.INTAKE:
-            intake_fraction = task_fields_complete / len(PROCESS_REQUIRED_FIELDS)
+            # Identity coverage is display-only.  It never gates tools or dialogue.
+            intake_fraction = task_fields_complete / 2
             return round(intake_fraction / len(BUSINESS_STATE_ORDER) * 100)
         return round(completed_count / len(BUSINESS_STATE_ORDER) * 100)
 

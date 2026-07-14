@@ -101,6 +101,7 @@ class RuntimeEventRepository:
                 event.attempt,
                 json.dumps(
                     {
+                        **(value.get("payload") or {}),
                         **(value.get("data") or {}),
                         "trace_id": value.get("trace_id"),
                         "input_summary": value.get("input_summary") or {},
@@ -218,4 +219,5 @@ class RuntimeEventRepository:
         row["tool_name"] = row.get("tool")
         row["timestamp"] = row["created_at"]
         row["data"] = data
+        row["payload"] = dict(data)
         return row

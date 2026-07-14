@@ -28,6 +28,8 @@ class ToolContract:
     permission_level: int = 1
     requires_human_approval: bool = False
     prohibited: bool = False
+    requires_context: tuple[str, ...] = ()
+    exposed_by_default: bool = False
 
 
 class ToolRegistry:
@@ -48,6 +50,22 @@ class ToolRegistry:
     def list_contracts(self) -> list[ToolContract]:
         return [self._tools[name] for name in sorted(self._tools)]
 
+    def schemas_for_agent(self, names: set[str] | None = None) -> list[dict[str, Any]]:
+        """Public capability descriptions supplied to the planner."""
+        return [
+            {
+                "name": contract.name,
+                "purpose": contract.purpose,
+                "input_schema": contract.input_schema,
+                "requires_context": list(contract.requires_context),
+                "side_effect_level": contract.side_effect_level,
+                "requires_human_approval": contract.requires_human_approval,
+            }
+            for contract in self.list_contracts()
+            if contract.enabled and not contract.prohibited
+            and (names is None or contract.name in names)
+        ]
+
     def call(self, name: str, payload: dict[str, Any], context: dict[str, Any]) -> Any:
         return self.get(name).handler(payload, context)
 
@@ -60,6 +78,28 @@ class ToolExecutionResult:
     error_message: str | None = None
     attempt: int = 1
     duration_ms: float = 0.0
+
+    def to_tool_result(self, tool_name: str) -> dict[str, Any]:
+        """Stable Agent-facing observation envelope for every tool."""
+        return ToolResult(
+            tool_name=tool_name, status=self.status, data=self.output,
+            error=({"code": self.error_code, "message": self.error_message}
+                   if self.error_code or self.error_message else None),
+            meta={"attempt": self.attempt, "duration_ms": round(self.duration_ms, 3)},
+        ).to_dict()
+
+
+@dataclass(frozen=True, slots=True)
+class ToolResult:
+    tool_name: str
+    status: str
+    data: Any = None
+    error: dict[str, Any] | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"tool_name": self.tool_name, "status": self.status, "data": self.data,
+                "error": self.error, "meta": dict(self.meta)}
 
 
 class ToolExecutor:
@@ -91,6 +131,17 @@ class ToolExecutor:
             )
         if not contract.enabled:
             return ToolExecutionResult("failed", error_code="tool_disabled", error_message=f"tool disabled: {name}")
+        missing_context = [
+            path for path in contract.requires_context
+            if _context_value_missing(_lookup(context or {}, path))
+        ]
+        if missing_context:
+            return ToolExecutionResult(
+                "insufficient_data",
+                output={"status": "insufficient_data", "missing": missing_context},
+                error_code="insufficient_data",
+                error_message="missing required context: " + ", ".join(missing_context),
+            )
         validation_error = _validate_required(payload, contract.input_schema)
         if validation_error:
             return ToolExecutionResult("failed", error_code="validation_failed", error_message=validation_error)
@@ -117,8 +168,10 @@ class ToolExecutor:
                 output_error = _validate_required(output, contract.output_schema) if isinstance(output, dict) else None
                 if output_error:
                     return ToolExecutionResult("failed", error_code="validation_failed", error_message=output_error, attempt=attempt)
+                output_status = str(output.get("status")) if isinstance(output, dict) else ""
+                status = output_status if output_status in {"insufficient_data", "cancelled", "failed"} else "succeeded"
                 return ToolExecutionResult(
-                    "succeeded",
+                    status,
                     output=output,
                     attempt=attempt,
                     duration_ms=(time.perf_counter() - started) * 1000,
@@ -139,3 +192,16 @@ def _validate_required(value: dict[str, Any], schema: dict[str, Any]) -> str | N
     required = schema.get("required", []) if schema else []
     missing = [name for name in required if name not in value or value[name] is None]
     return f"missing required fields: {', '.join(missing)}" if missing else None
+
+
+def _lookup(value: dict[str, Any], path: str) -> Any:
+    current: Any = value
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _context_value_missing(value: Any) -> bool:
+    return value is None or value == "" or value == {} or value == []

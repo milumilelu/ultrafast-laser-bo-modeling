@@ -6,7 +6,7 @@ import pytest
 
 from ultrafast_agent.documents import DocumentIngestionService, OcrQualityGate
 from ultrafast_agent.jobs import BackgroundJobService
-from ultrafast_domain.documents import DocumentElement, OcrDocument, VisionAnalysisCandidate
+from ultrafast_domain.documents import DocumentElement, OcrDocument
 from ultrafast_integrations.cam import ConfigDrivenCamAdapter, GenericJsonCamAdapter
 from ultrafast_integrations.storage.job_repository import SQLiteJobRepository
 from ultrafast_integrations.vision import MultimodalLLMVisionProvider

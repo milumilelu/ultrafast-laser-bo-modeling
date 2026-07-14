@@ -23,7 +23,7 @@ def route_message(
     debug_result = handle_debug_command(message, session_id)
     if debug_result and message.strip() != "/no_skill":
         plan = RoutePlan(
-            primary_skill="task_intake",
+            primary_skill="task_understanding",
             intent="debug_command",
             workflow_stage="debug",
             confidence=1.0,
@@ -40,7 +40,7 @@ def route_message(
 
     if message.strip() == "/no_skill":
         plan = RoutePlan(
-            primary_skill="task_intake",
+            primary_skill="task_understanding",
             intent="no_skill",
             workflow_stage="chat",
             confidence=1.0,
@@ -92,4 +92,4 @@ def save_route_trace(session_id: str, message_id: str | None, route_plan: RouteP
 
 def _save_and_apply(session_id: str, message_id: str | None, route_plan: RoutePlan) -> None:
     save_route_trace(session_id, message_id, route_plan)
-    update_session_state(session_id, route_plan.state_update.model_dump())
+    update_session_state(session_id, {"suggested_skill_hint": route_plan.model_dump(mode="json")})

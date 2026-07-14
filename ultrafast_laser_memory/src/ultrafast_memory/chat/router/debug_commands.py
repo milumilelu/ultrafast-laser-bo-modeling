@@ -10,6 +10,7 @@ from ultrafast_memory.chat.debug_views import (
     waterfall_view,
 )
 from ultrafast_agent.skills import get_default_skill_registry
+from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
 from ultrafast_memory.chat.session_state import (
     get_session_state,
     reset_session_state,
@@ -49,17 +50,23 @@ def handle_debug_command(message: str, session_id: str) -> dict[str, Any] | None
         return {"handled": True, "message": f"public trace mode: {level}", "trace_mode": level,
                 "note": "hidden chain-of-thought is never exposed"}
     if text == "/skills":
-        skills = {item.name: {"version": item.version, "purpose": item.purpose,
-                             "allowed_tools": list(item.allowed_tools)}
+        state = get_session_state(session_id)
+        active = set(state.get("active_skills_json") or [])
+        skills = {item.name: {"version": item.version, "description": item.description,
+                             "recommended_tools": list(item.recommended_tools),
+                             "loaded": item.name in active}
                   for item in get_default_skill_registry().list()}
         return {"handled": True, "message": "registered skill inventory", "skills": skills}
     if text == "/tools":
-        return {"handled": True, "message": "V3 tool inventory", "tools": [
-            "equipment_memory_tool", "rag_query_tool", "historical_case_tool", "process_rule_tool",
-            "trial_template_tool", "knowledge_approval_tool", "bo_parameter_recommendation_tool",
-            "rag_parameter_recommendation_tool", "llm_fallback_parameter_tool",
-            "parameter_constraint_validation_tool", "parameter_provenance_registry_tool",
-            "experiment_store_tool", "measurement_parser_tool", "quality_metric_tool", "model_snapshot_tool"]}
+        state = get_session_state(session_id)
+        active = set(state.get("active_skills_json") or [])
+        skill_registry = get_default_skill_registry()
+        discoverable = {"update_task_context", "get_equipment_context"}
+        for name in active:
+            discoverable.update(skill_registry.get(name).recommended_tools)
+        tools = [{**item, "discoverable": item["name"] in discoverable}
+                 for item in build_main_agent_tool_registry().schemas_for_agent()]
+        return {"handled": True, "message": "Agent tool inventory", "tools": tools}
     if text == "/reasoning":
         return {"handled": True, "message": "公开推理摘要", **reasoning_view(session_id)}
     if text == "/waterfall":

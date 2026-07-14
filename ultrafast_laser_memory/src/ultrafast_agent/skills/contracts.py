@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
-from functools import lru_cache
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -12,90 +12,112 @@ import yaml
 REQUIRED_FIELDS = {
     "name",
     "version",
-    "purpose",
-    "inputs",
-    "outputs",
-    "preconditions",
-    "side_effects",
-    "allowed_tools",
-    "forbidden_tools",
-    "failure_modes",
-    "timeout_ms",
-    "cache_policy",
-    "emitted_events",
+    "description",
+    "when_to_use",
+    "guidance",
+    "recommended_tools",
 }
-DIRECT_STORAGE_TOOLS = {"sqlite", "database_connection", "raw_sql"}
 
 
 @dataclass(frozen=True, slots=True)
-class SkillContract:
+class SkillDescriptor:
+    """Planner guidance loaded on demand; a Skill is not an execution gate."""
+
     name: str
     version: str
-    purpose: str
-    inputs: tuple[str, ...]
-    outputs: tuple[str, ...]
-    preconditions: tuple[str, ...]
-    side_effects: tuple[str, ...]
-    allowed_tools: tuple[str, ...]
-    forbidden_tools: tuple[str, ...]
-    failure_modes: tuple[str, ...]
-    timeout_ms: int
-    cache_policy: str
-    emitted_events: tuple[str, ...]
+    description: str
+    when_to_use: tuple[str, ...]
+    guidance: tuple[str, ...]
+    recommended_tools: tuple[str, ...]
+
+    @property
+    def purpose(self) -> str:
+        """Read-compatible alias for older diagnostics clients."""
+        return self.description
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "SkillContract":
+    def from_dict(cls, value: dict[str, Any]) -> "SkillDescriptor":
         missing = REQUIRED_FIELDS - set(value)
         if missing:
-            raise ValueError(f"skill contract missing fields: {sorted(missing)}")
+            raise ValueError(f"skill descriptor missing fields: {sorted(missing)}")
         name = str(value["name"])
         version = str(value["version"])
         if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
             raise ValueError(f"invalid skill name: {name}")
         if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[a-z0-9.]+)?", version):
             raise ValueError(f"invalid skill version: {name}={version}")
-        timeout_ms = int(value["timeout_ms"])
-        if timeout_ms <= 0:
-            raise ValueError(f"timeout_ms must be positive: {name}")
-        allowed = tuple(map(str, value["allowed_tools"]))
-        forbidden = tuple(map(str, value["forbidden_tools"]))
-        if set(allowed) & set(forbidden):
-            raise ValueError(f"tool cannot be both allowed and forbidden: {name}")
-        if set(allowed) & DIRECT_STORAGE_TOOLS:
-            raise ValueError(f"business skill cannot directly access storage: {name}")
+        recommended = tuple(dict.fromkeys(map(str, value["recommended_tools"])))
         return cls(
             name=name,
             version=version,
-            purpose=str(value["purpose"]),
-            inputs=tuple(map(str, value["inputs"])),
-            outputs=tuple(map(str, value["outputs"])),
-            preconditions=tuple(map(str, value["preconditions"])),
-            side_effects=tuple(map(str, value["side_effects"])),
-            allowed_tools=allowed,
-            forbidden_tools=forbidden,
-            failure_modes=tuple(map(str, value["failure_modes"])),
-            timeout_ms=timeout_ms,
-            cache_policy=str(value["cache_policy"]),
-            emitted_events=tuple(map(str, value["emitted_events"])),
+            description=str(value["description"]),
+            when_to_use=tuple(map(str, value["when_to_use"])),
+            guidance=tuple(map(str, value["guidance"])),
+            recommended_tools=recommended,
         )
 
 
+# Temporary read aliases are resolved at the boundary and never appear as Skills.
+LEGACY_SKILL_ALIASES = {
+    "task_intake": "task_understanding",
+    "task_normalization": "task_understanding",
+    "geometry_interpretation": "task_understanding",
+    "rag_evidence_retrieval": "evidence_research",
+    "rag_literature_retrieval": "evidence_research",
+    "historical_case_retrieval": "evidence_research",
+    "process_route_planning": "process_planning",
+    "hole_drilling_planning": "process_planning",
+    "bo_recommendation": "parameter_recommendation",
+    "knowledge_candidate_generation": "result_learning",
+    "report_generation": "result_learning",
+}
+
+
 class SkillRegistry:
-    def __init__(self, contracts: list[SkillContract]):
-        names = [contract.name for contract in contracts]
+    def __init__(self, descriptors: list[SkillDescriptor]):
+        names = [descriptor.name for descriptor in descriptors]
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
-            raise ValueError(f"duplicate skill contracts: {duplicates}")
-        self._contracts = {contract.name: contract for contract in contracts}
+            raise ValueError(f"duplicate skill descriptors: {duplicates}")
+        self._descriptors = {descriptor.name: descriptor for descriptor in descriptors}
 
-    def get(self, name: str) -> SkillContract:
+    def resolve_name(self, name: str) -> str:
+        return LEGACY_SKILL_ALIASES.get(name, name)
+
+    def get(self, name: str) -> SkillDescriptor:
+        resolved = self.resolve_name(name)
         try:
-            return self._contracts[name]
+            return self._descriptors[resolved]
         except KeyError as exc:
             raise KeyError(f"skill not registered: {name}") from exc
 
-    def list(self) -> list[SkillContract]:
-        return [self._contracts[name] for name in sorted(self._contracts)]
+    def list(self) -> list[SkillDescriptor]:
+        return [self._descriptors[name] for name in sorted(self._descriptors)]
+
+    def catalog_for_agent(self) -> list[dict[str, Any]]:
+        """Small discovery catalog; full guidance is returned only by load_skill."""
+        return [
+            {
+                "name": item.name,
+                "description": item.description,
+                "when_to_use": list(item.when_to_use),
+            }
+            for item in self.list()
+        ]
+
+    def load(self, name: str) -> dict[str, Any]:
+        item = self.get(name)
+        return {
+            "name": item.name,
+            "version": item.version,
+            "description": item.description,
+            "guidance": list(item.guidance),
+            "recommended_tools": list(item.recommended_tools),
+        }
+
+
+# Read compatibility for imports; the model is intentionally a descriptor now.
+SkillContract = SkillDescriptor
 
 
 def load_skill_contracts(path: str | Path) -> SkillRegistry:
@@ -104,8 +126,8 @@ def load_skill_contracts(path: str | Path) -> SkillRegistry:
         payload = yaml.safe_load(handle) or {}
     values = payload.get("skills")
     if not isinstance(values, list):
-        raise ValueError("skill contracts file must contain a skills list")
-    return SkillRegistry([SkillContract.from_dict(value) for value in values])
+        raise ValueError("skill descriptor file must contain a skills list")
+    return SkillRegistry([SkillDescriptor.from_dict(value) for value in values])
 
 
 def default_contract_path() -> Path:

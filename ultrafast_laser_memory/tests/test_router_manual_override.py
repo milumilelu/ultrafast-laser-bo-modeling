@@ -8,9 +8,9 @@ from ultrafast_memory.db.session import get_connection
 def test_manual_skill_override_persists_route_trace(isolated_root):
     init_database()
 
-    plan = route_message("/skill crl_task_planning", "session-manual", "message-manual")
+    plan = route_message("/skill process_planning", "session-manual", "message-manual")
 
-    assert plan.primary_skill == "crl_task_planning"
+    assert plan.primary_skill == "process_planning"
     assert plan.route_source == "manual_override"
     assert plan.confidence == 1.0
     with get_connection() as conn:
@@ -26,6 +26,6 @@ def test_invalid_manual_skill_falls_back_to_task_intake(isolated_root):
 
     plan = route_message("/skill not_real", "session-invalid", "message-invalid")
 
-    assert plan.primary_skill == "task_intake"
+    assert plan.primary_skill == "task_understanding"
     assert plan.requires_clarification is True
     assert plan.route_source == "manual_override"
