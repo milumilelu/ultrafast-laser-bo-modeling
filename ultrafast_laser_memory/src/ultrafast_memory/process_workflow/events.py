@@ -15,7 +15,7 @@ def record_process_event(
     message_id: str | None = None,
     stage: str | None = None,
     progress: int | float | None = None,
-    skill: str | None = "complex_process_task",
+    skill: str | None = "process_planning",
     tool: str | None = None,
     input_summary: str | None = None,
     output_summary: str | None = None,

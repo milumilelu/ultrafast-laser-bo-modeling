@@ -10,7 +10,7 @@ def test_chat_service_persists_messages_and_skill_trace(isolated_root, monkeypat
     monkeypatch.delenv("ULTRAFAST_LLM_PROVIDER", raising=False)
     init_database()
 
-    response = handle_chat(ChatRequest(message="我想加工金刚石 CRL，Ra小于460nm", use_skills=True))
+    response = handle_chat(ChatRequest(message="我想加工金刚石 CRL，Ra小于460nm"))
 
     assert response.session_id
     assert "现有任务状态未被修改" in response.assistant_message

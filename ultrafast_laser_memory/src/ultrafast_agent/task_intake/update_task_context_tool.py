@@ -129,8 +129,3 @@ def _with_geometry_projection(task_spec: dict[str, Any]) -> dict[str, Any]:
     if geometry:
         result["geometry"] = geometry
     return result
-
-
-# Python API compatibility only; it is not registered as a second Agent tool.
-update_task_spec = update_task_context
-update_task_spec_contract = update_task_context_contract

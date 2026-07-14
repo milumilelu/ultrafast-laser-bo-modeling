@@ -81,76 +81,23 @@ def chat_session_messages(session_id: str) -> dict:
 @router.get("/sessions/{session_id}/progress")
 def chat_session_progress(session_id: str) -> dict:
     from ultrafast_memory.db.init_db import init_database
-    from ultrafast_memory.chat.legacy_projection_adapter import get_latest_progress, list_public_thinking_status
-    from ultrafast_memory.chat.session_state import get_session_state
-    from ultrafast_memory.chat.workflow_projection import WorkflowProjectionService
-    from ultrafast_memory.core.ids import stable_id
+    from ultrafast_memory.agent_runtime.event_state_projector import EventStateProjector
 
     init_database()
-    progress = get_latest_progress(session_id)
-    state = get_session_state(session_id)
-    collected = state.get("collected_slots") or {}
-    workflow = collected.get("process_workflow") or {}
-    if workflow.get("runtime_mode") == "capability_discovery":
-        action = (workflow.get("last_agent_action") or {}).get("action") or "unknown"
-        waiting = action == "ask_user"
-        return {
-            "session_id": session_id,
-            "progress": {
-                "session_id": session_id,
-                "workflow_type": "main_agent",
-                "current_stage": action,
-                "business_state": workflow.get("business_state") or "INTAKE",
-                "progress_percent": None,
-                "completed_steps": [],
-                "pending_steps": [],
-                "missing_slots": workflow.get("missing_slots") or [],
-                "status": "waiting_user" if waiting else "completed",
-                "message": (workflow.get("last_agent_action") or {}).get("decision_summary") or "",
-            },
-            "thinking_status": list_public_thinking_status(session_id),
-        }
-    if progress is not None and workflow:
-        projection = WorkflowProjectionService.build_process(
-            task_spec=collected.get("process_task_spec") or workflow.get("task_spec") or {},
-            workflow_state=workflow,
-            next_action=workflow.get("next_action") or {},
-        )
-        progress["business_state"] = projection.business_state
-    if progress is None:
-        if workflow:
-            projection = WorkflowProjectionService.build_process(
-                task_spec=collected.get("process_task_spec") or workflow.get("task_spec") or {},
-                workflow_state=workflow,
-                next_action=workflow.get("next_action") or {},
-            )
-            progress = {
-                "session_id": session_id,
-                "workflow_id": stable_id("workflow", session_id, "complex_process_task"),
-                "workflow_type": "complex_process_task",
-                "current_stage": projection.substatus,
-                "business_state": projection.business_state,
-                "progress_percent": projection.progress_percent,
-                "completed_steps": projection.completed_steps,
-                "pending_steps": projection.pending_steps,
-                "missing_slots": projection.missing_fields,
-                "status": "waiting_user" if projection.next_action.get("blocking") else "running",
-                "message": projection.public_summary,
-            }
     return {
         "session_id": session_id,
-        "progress": progress,
-        "thinking_status": list_public_thinking_status(session_id),
+        "progress": EventStateProjector.session_progress(session_id),
+        "thinking_status": EventStateProjector.public_status_events(session_id),
     }
 
 
 @router.get("/sessions/{session_id}/thinking-status")
 def chat_session_thinking_status(session_id: str) -> dict:
     from ultrafast_memory.db.init_db import init_database
-    from ultrafast_memory.chat.legacy_projection_adapter import list_public_thinking_status
+    from ultrafast_memory.agent_runtime.event_state_projector import EventStateProjector
 
     init_database()
-    return {"session_id": session_id, "events": list_public_thinking_status(session_id)}
+    return {"session_id": session_id, "events": EventStateProjector.public_status_events(session_id)}
 
 
 @router.get("/sessions/{session_id}/agent-trace")

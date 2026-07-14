@@ -14,7 +14,7 @@ def test_stream_includes_progress_and_thinking_before_delta(isolated_root):
 
     response = client.post(
         "/chat/stream_ndjson",
-        json={"message": "我想加工金刚石 CRL，Ra小于460nm", "use_skills": True, "stream": True},
+        json={"message": "我想加工金刚石 CRL，Ra小于460nm", "stream": True},
     )
 
     assert response.status_code == 200

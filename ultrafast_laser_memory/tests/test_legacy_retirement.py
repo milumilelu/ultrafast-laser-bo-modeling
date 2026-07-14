@@ -58,18 +58,15 @@ def test_legacy_trace_backfill_is_dry_runnable_resumable_and_idempotent(isolated
         assert connection.execute("SELECT COUNT(*) FROM legacy_trace_migration").fetchone()[0] == 3
 
 
-def test_legacy_api_falls_back_only_when_canonical_history_is_absent(isolated_root):
+def test_runtime_never_falls_back_to_legacy_trace_tables(isolated_root):
     init_database()
     _seed_legacy_rows()
 
-    fallback = list_agent_trace_events("old-session")
-    assert len(fallback) == 2
-    assert all(item["legacy_fallback"] is True for item in fallback)
+    assert list_agent_trace_events("old-session") == []
 
     migrate_legacy_traces()
     canonical = list_agent_trace_events("old-session")
     assert len(canonical) == 2
-    assert not any(item.get("legacy_fallback") for item in canonical)
 
 
 def test_formal_modules_cannot_import_legacy_runtime_or_projection(project_root):

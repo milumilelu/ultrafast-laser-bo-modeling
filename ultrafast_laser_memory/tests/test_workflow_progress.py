@@ -1,21 +1,21 @@
 from __future__ import annotations
 
+from ultrafast_memory.agent_runtime.event_state_projector import EventStateProjector
 from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
-from ultrafast_memory.chat.workflow_status import get_latest_progress, mark_workflow_completed
 from ultrafast_memory.db.init_db import init_database
 
 
 def test_new_session_progress_is_empty_or_started(isolated_root):
     init_database()
 
-    assert get_latest_progress("new-session") is None
+    assert EventStateProjector.session_progress("new-session") is None
 
 
 def test_task_intake_progress_after_chat(isolated_root):
     init_database()
 
-    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=True))
+    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm"))
 
     assert response.progress["progress_percent"] is None
     assert response.current_stage == "ask_user"
@@ -26,26 +26,18 @@ def test_task_intake_progress_after_chat(isolated_root):
 def test_clarification_round_one_progress_percent(isolated_root):
     init_database()
 
-    response = handle_chat(ChatRequest(message="我想加工普通任务", use_skills=True))
+    response = handle_chat(ChatRequest(message="我想加工普通任务"))
 
     assert response.progress["current_stage"] == "ask_user"
     assert response.progress["progress_percent"] is None
     assert response.next_required_action["action_type"] == "provide_clarification"
 
 
-def test_workflow_completed_progress_is_100(isolated_root):
+def test_single_agent_chain_reuses_canonical_session_task_spec(isolated_root):
     init_database()
-
-    progress = mark_workflow_completed("session-progress")
-
-    assert progress["progress_percent"] == 100
-
-
-def test_legacy_projection_reuses_canonical_session_task_spec(isolated_root):
-    init_database()
-    first = handle_chat(ChatRequest(message="我想加工金刚石 CRL", use_skills=False))
+    first = handle_chat(ChatRequest(message="材料=金刚石"))
     second = handle_chat(
-        ChatRequest(session_id=first.session_id, message="允许", use_skills=False)
+        ChatRequest(session_id=first.session_id, message="暂时没有更多信息")
     )
 
     assert first.workflow_state["task_spec"]["material"] == "diamond"
@@ -54,9 +46,9 @@ def test_legacy_projection_reuses_canonical_session_task_spec(isolated_root):
 
 def test_llm_failure_keeps_state_without_parser_stall(isolated_root):
     init_database()
-    first = handle_chat(ChatRequest(message="材料=金刚石", use_skills=True))
-    handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石", use_skills=True))
-    third = handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石，暂时没有设备参数", use_skills=True))
+    first = handle_chat(ChatRequest(message="材料=金刚石"))
+    handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石"))
+    third = handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石，暂时没有设备参数"))
 
     assert third.workflow_state["clarification_round"] <= 3
     assert third.workflow_state["current_stage_code"] == "ask_user"

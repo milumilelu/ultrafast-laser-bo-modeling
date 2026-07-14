@@ -21,7 +21,7 @@ def _equipment():
 
 def _stream(client: TestClient, session_id: str, message: str) -> tuple[list[dict], str]:
     response = client.post("/chat/stream_ndjson", json={"session_id": session_id, "message": message,
-                                                        "use_skills": True, "stream": True})
+                                                        "stream": True})
     events = [json.loads(line) for line in response.text.splitlines() if line]
     return events, "".join(item.get("content", "") for item in events if item.get("type") == "delta")
 

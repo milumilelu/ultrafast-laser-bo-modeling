@@ -63,35 +63,6 @@ def migrate_legacy_traces(
     return report
 
 
-def legacy_session_fallback(
-    session_id: str,
-    message_id: str | None = None,
-    db_path: str | Path | None = None,
-) -> list[dict[str, Any]]:
-    """Historical-only reader used when a legacy API finds no canonical events."""
-    path = init_database(db_path)
-    result: list[dict[str, Any]] = []
-    with get_connection(path, read_only=True) as connection:
-        agent_rows = connection.execute(
-            "SELECT * FROM agent_trace_event WHERE session_id=? ORDER BY created_at",
-            (session_id,),
-        ).fetchall()
-        reasoning_rows = connection.execute(
-            "SELECT * FROM reasoning_status_trace WHERE session_id=? ORDER BY created_at",
-            (session_id,),
-        ).fetchall()
-    for row in [*agent_rows, *reasoning_rows]:
-        value = dict(row)
-        if message_id is not None and value.get("message_id") != message_id:
-            continue
-        source_id = str(value.get("event_id") or value.get("trace_id"))
-        table = "agent_trace_event" if value.get("event_id") else "reasoning_status_trace"
-        event = _to_event(table, source_id, value).to_dict()
-        event["legacy_fallback"] = True
-        result.append(event)
-    return sorted(result, key=lambda item: (item.get("timestamp") or "", item["event_id"]))
-
-
 def _legacy_rows(path: Path) -> Iterator[tuple[str, str, dict[str, Any]]]:
     with get_connection(path, read_only=True) as connection:
         for table, key in LEGACY_TRACE_TABLES:

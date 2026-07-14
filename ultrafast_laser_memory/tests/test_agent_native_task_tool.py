@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from ultrafast_agent.task_intake.schemas import ClarificationContext
-from ultrafast_agent.task_intake.update_task_spec_tool import update_task_spec
+from ultrafast_agent.task_intake.update_task_context_tool import update_task_context
 from ultrafast_agent.runtime import ToolContract, ToolExecutor, ToolRegistry
 from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.session_state import get_session_state
@@ -13,19 +13,19 @@ from ultrafast_memory.agent_runtime.tool_registry import BASE_TOOL_NAMES, build_
 
 def _context(*pending: str) -> ClarificationContext:
     return ClarificationContext(
-        workflow_type="complex_process_task",
+        workflow_type="task_understanding",
         stage="REQUIREMENTS_PENDING",
         pending_fields=list(pending),
         ordered_fields=list(pending),
     )
 
 
-def test_update_task_spec_tool_rejects_invalid_unit_without_state_pollution(isolated_root) -> None:
+def test_update_task_context_tool_rejects_invalid_unit_without_state_pollution(isolated_root) -> None:
     client = TestClient(app)
     session_id = client.post("/chat/sessions", json={}).json()["session_id"]
     context = _context("cut_length_mm")
 
-    result = update_task_spec(
+    result = update_task_context(
         {"updates": [{
             "field_name": "cut_length_mm",
             "value": 100,
@@ -91,7 +91,7 @@ def test_main_agent_native_action_selects_update_tool() -> None:
                 "model": self.model,
                 "content": (
                     '{"action":"call_tool","decision_summary":"提交用户明确字段",'
-                    '"tool_name":"update_task_spec","arguments":{"updates":[{'
+                    '"tool_name":"update_task_context","arguments":{"updates":[{'
                     '"field_name":"cut_length_mm","value":100,"unit":"mm",'
                     '"evidence":"100mm"}]},"message":null}'
                 ),

@@ -67,10 +67,10 @@ def test_renderers_share_one_canonical_event_without_extra_write(isolated_root):
 def test_chat_response_contains_execution_trace_and_agent_trace_api(isolated_root):
     init_database()
 
-    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=False))
+    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm"))
 
     assert response.execution_trace
-    assert any(event["event_type"] == "workflow_progress" for event in response.execution_trace)
+    assert any(event["event_type"] == "agent_decision" for event in response.execution_trace)
     assert not any(FORBIDDEN & set(event) for event in response.execution_trace)
 
     client = TestClient(app)
@@ -83,23 +83,22 @@ def test_stream_ndjson_emits_agent_trace_event(isolated_root):
     init_database()
     client = TestClient(app)
 
-    response = client.post("/chat/stream_ndjson", json={"message": "我想加工金刚石CRL", "use_skills": False})
+    response = client.post("/chat/stream_ndjson", json={"message": "我想加工金刚石CRL"})
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
 
-    assert "agent_trace" in [event["type"] for event in events]
+    assert "thinking_status" in [event["type"] for event in events]
     assert not any("hidden_reasoning" in event for event in events)
 
 
-def test_stream_ndjson_emits_tool_call_and_tool_result_trace(isolated_root):
+def test_stream_ndjson_emits_route_and_agent_decision(isolated_root):
     init_database()
     client = TestClient(app)
 
-    response = client.post("/chat/stream_ndjson", json={"message": "hello", "use_skills": False})
+    response = client.post("/chat/stream_ndjson", json={"message": "hello"})
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
-    trace_events = [event for event in events if event["type"] == "agent_trace"]
 
-    assert any(event["event_type"] == "tool_call" and event["tool"] == "llm_adapter" for event in trace_events)
-    assert any(event["event_type"] == "tool_result" and event["tool"] == "llm_adapter" for event in trace_events)
+    assert any(event["type"] == "route" for event in events)
+    assert any(event["type"] == "thinking_status" for event in events)
 
 
 def test_mode_command_updates_session_display_mode(isolated_root):

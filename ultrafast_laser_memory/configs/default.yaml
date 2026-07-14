@@ -6,7 +6,7 @@ app:
   api_port: 8000
 
 agent:
-  default_workflow: "complex_process_task"
+  runtime_mode: "capability_discovery"
   tool_timeout_ms: 30000
   max_retries: 1
 

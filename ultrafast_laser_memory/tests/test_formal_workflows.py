@@ -120,7 +120,7 @@ def test_chat_ndjson_adds_monotonic_sequence(isolated_root, monkeypatch):
     client = TestClient(app)
     response = client.post(
         "/chat/stream_ndjson",
-        json={"message": "hello", "use_skills": False, "mode": "normal"},
+        json={"message": "hello", "mode": "normal"},
     )
 
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]

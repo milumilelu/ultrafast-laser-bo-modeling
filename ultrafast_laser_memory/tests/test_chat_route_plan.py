@@ -11,7 +11,7 @@ from ultrafast_memory.db.session import get_connection
 def test_chat_response_includes_route_plan_and_trace(isolated_root):
     init_database()
 
-    response = handle_chat(ChatRequest(message="读取 recipe 和 log 日志", use_skills=True))
+    response = handle_chat(ChatRequest(message="读取 recipe 和 log 日志"))
 
     assert response.selected_skill == "task_understanding"
     assert response.route_plan is not None

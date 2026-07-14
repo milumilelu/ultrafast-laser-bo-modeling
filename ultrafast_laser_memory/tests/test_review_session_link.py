@@ -10,8 +10,8 @@ from ultrafast_memory.knowledge_review.schemas import ReviewActionRequest
 
 def test_review_action_updates_linked_chat_session_state(isolated_root):
     init_database()
-    first = handle_chat(ChatRequest(message="查文献和论文解释超快激光损伤机制", use_skills=True))
-    second = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap run", use_skills=True))
+    first = handle_chat(ChatRequest(message="查文献和论文解释超快激光损伤机制"))
+    second = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap run"))
     candidate_id = second.knowledge_bootstrap["candidate_ids"][0]
     review_ids = second.knowledge_bootstrap["review_task_ids"]
 
@@ -25,5 +25,5 @@ def test_review_action_updates_linked_chat_session_state(isolated_root):
     assert candidate_id in updated["active_knowledge_bootstrap"]["accepted_candidate_ids"]
     assert updated["active_knowledge_bootstrap"]["status"] == "reviewed"
 
-    status = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap status", use_skills=True))
+    status = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap status"))
     assert "已接收入 RAG" in status.assistant_message

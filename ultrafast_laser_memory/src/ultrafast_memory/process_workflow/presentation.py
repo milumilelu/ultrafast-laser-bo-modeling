@@ -83,7 +83,6 @@ FIELD_QUESTIONS = {
 }
 
 ACTION_LABELS = {
-    "submit_required_fields": "补充加工要求",
     "submit_structured_fields": "按字段模板补充加工要求",
     "select_trial_mode": "选择试切方式",
     "approve_llm_fallback": "授权探索性参数候选",

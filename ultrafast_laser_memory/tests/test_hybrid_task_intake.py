@@ -62,7 +62,7 @@ def _session(client: TestClient, title: str | None = None) -> str:
 def _chat(client: TestClient, session_id: str, message: str) -> dict:
     response = client.post(
         "/chat",
-        json={"session_id": session_id, "message": message, "use_skills": True},
+        json={"session_id": session_id, "message": message},
     )
     assert response.status_code == 200
     return response.json()
@@ -71,7 +71,7 @@ def _chat(client: TestClient, session_id: str, message: str) -> dict:
 def _stream(client: TestClient, session_id: str, message: str) -> list[dict]:
     response = client.post(
         "/chat/stream_ndjson",
-        json={"session_id": session_id, "message": message, "use_skills": True, "stream": True},
+        json={"session_id": session_id, "message": message, "stream": True},
     )
     assert response.status_code == 200
     return [json.loads(line) for line in response.text.splitlines() if line]
@@ -138,11 +138,18 @@ class ScriptedTaskIntakeLLM:
             ]
         else:
             updates = []
-        return {"content": json.dumps({
-            "updates": updates,
-            "unresolved_fields": [],
-            "ambiguities": [],
-        }, ensure_ascii=False)}
+        action = ({
+            "action": "call_tool",
+            "decision_summary": "提交当前消息中的明确任务事实。",
+            "tool_name": "update_task_context",
+            "arguments": {"updates": updates},
+            "message": None,
+        } if updates else {
+            "action": "ask_user",
+            "decision_summary": "当前消息没有可验证的新任务事实。",
+            "message": "请补充具体材料、加工动作或尺寸。",
+        })
+        return {"content": json.dumps(action, ensure_ascii=False)}
 
 
 class StaticTaskIntakeLLM:
@@ -634,10 +641,13 @@ def test_stream_and_non_stream_workflow_state_are_consistent(isolated_root, monk
     assert streamed["next_required_action"] == normal["next_required_action"]
 
 
-def test_workflow_status_has_no_general_semantic_parser(project_root: Path):
-    source = (project_root / "src/ultrafast_memory/chat/workflow_status.py").read_text(encoding="utf-8")
-    assert "def parse_process_task_fields" not in source
-    assert "def _parse_task" not in source
+def test_legacy_chat_projection_files_are_deleted(project_root: Path):
+    root = project_root / "src/ultrafast_memory/chat"
+    source = (root / "service.py").read_text(encoding="utf-8")
+    assert not (root / "workflow_status.py").exists()
+    assert not (root / "workflow_projection.py").exists()
+    assert not (root / "legacy_projection_adapter.py").exists()
+    assert not (root / "legacy_status_parser.py").exists()
     assert "task.update(parse_process_task_fields" not in source
     assert "deterministic_extractor" not in source
     assert "legacy_status_parser" not in source

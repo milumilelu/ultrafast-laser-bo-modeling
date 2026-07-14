@@ -30,7 +30,6 @@ def test_chat_api_end_to_end(isolated_root, monkeypatch):
         json={
             "session_id": session_id,
             "message": "我想加工金刚石CRL，Ra小于460nm",
-            "use_skills": True,
         },
     )
     assert chat_resp.status_code == 200

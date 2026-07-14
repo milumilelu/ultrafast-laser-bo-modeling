@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
-from ultrafast_memory.chat.workflow_status import list_public_thinking_status, record_public_trace
+from ultrafast_memory.agent_runtime.event_state_projector import EventStateProjector
+from ultrafast_memory.agent_runtime.trace_collector import record_public_trace
 from ultrafast_memory.db.init_db import init_database
 
 
@@ -15,7 +16,7 @@ FORBIDDEN = {"chain_of_thought", "raw_thoughts", "hidden_reasoning", "model_reas
 def test_chat_returns_public_thinking_status_without_forbidden_fields(isolated_root):
     init_database()
 
-    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=True))
+    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm"))
 
     assert response.thinking_status
     for item in response.thinking_status:
@@ -24,7 +25,7 @@ def test_chat_returns_public_thinking_status_without_forbidden_fields(isolated_r
 
 def test_thinking_status_api_returns_only_public_events(isolated_root):
     init_database()
-    response = handle_chat(ChatRequest(message="我想加工金刚石CRL", use_skills=True))
+    response = handle_chat(ChatRequest(message="我想加工金刚石CRL"))
     record_public_trace(
         response.session_id,
         "tool_call_started",
@@ -50,11 +51,11 @@ def test_thinking_status_api_returns_only_public_events(isolated_root):
     assert progress["progress_percent"] is None
 
 
-def test_tool_and_evidence_events_can_be_saved_and_queried(isolated_root):
+def test_only_runtime_event_types_are_exposed_as_status(isolated_root):
     init_database()
 
     record_public_trace("session-status", "tool_call_started", "工具调用", "开始检查内部证据。")
     record_public_trace("session-status", "evidence_gap_check", "证据检查", "内部证据不足。")
 
-    events = list_public_thinking_status("session-status")
-    assert [event["event_type"] for event in events] == ["tool_call_started", "evidence_gap_check"]
+    events = EventStateProjector.public_status_events("session-status")
+    assert [event["event_type"] for event in events] == ["tool_call_started"]

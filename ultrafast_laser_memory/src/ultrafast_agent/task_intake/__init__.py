@@ -9,11 +9,9 @@ from ultrafast_agent.task_intake.missing_field_service import MissingFieldEvalua
 from ultrafast_agent.task_intake.normalizer import TaskFieldNormalizer
 from ultrafast_agent.task_intake.strict_key_value_parser import StrictKeyValueParser
 from ultrafast_agent.task_intake.validator import TaskFieldValidator, TaskSpecPatchValidator
-from ultrafast_agent.task_intake.update_task_spec_tool import (
+from ultrafast_agent.task_intake.update_task_context_tool import (
     update_task_context,
     update_task_context_contract,
-    update_task_spec,
-    update_task_spec_contract,
 )
 
 __all__ = [
@@ -30,6 +28,4 @@ __all__ = [
     "TaskSpecMergeService",
     "update_task_context",
     "update_task_context_contract",
-    "update_task_spec",
-    "update_task_spec_contract",
 ]

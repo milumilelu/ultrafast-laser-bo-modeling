@@ -26,12 +26,12 @@ class DrillingAgentLLM:
         index = len(self.calls)
         if index == 1:
             # Real compatible providers occasionally omit schema-required keys.
-            return {"content": '{"action":"call_tool","tool_name":"update_task_spec"}'}
+            return {"content": '{"action":"call_tool","tool_name":"update_task_context"}'}
         if index == 2:
             return {"content": json.dumps({
                 "action": "call_tool",
                 "decision_summary": "提取用户明确提供的通孔任务事实。",
-                "tool_name": "update_task_spec",
+                "tool_name": "update_task_context",
                 "arguments": {"updates": [
                     {"field_name": "material", "value": "金刚石", "evidence": "金刚石"},
                     {"field_name": "thickness_mm", "value": 4, "unit": "mm", "evidence": "4mm"},
@@ -42,7 +42,7 @@ class DrillingAgentLLM:
                 "message": None,
             }, ensure_ascii=False)}
         return {"content": json.dumps({
-            "action": "direct_answer",
+            "action": "final_answer",
             "decision_summary": "任务事实已保存，可按需继续检索证据。",
             "tool_name": None,
             "arguments": {},
@@ -60,7 +60,7 @@ def test_diamond_through_hole_survives_provider_compatible_partial_action(isolat
         message="在4mm厚的金刚石上加工一个直径2mm的通孔",
         message_id="msg-drilling-regression",
         client=llm,
-        active_skills=["task_intake", "hole_drilling_planning"],
+        active_skills=["task_understanding", "process_planning"],
     )
 
     spec = result["task_spec"]
@@ -114,7 +114,7 @@ def test_controller_can_select_any_registered_tool() -> None:
         message="查一下证据",
         task_spec={"material": "diamond", "process_type": "hole_drilling"},
         business_state="INTAKE",
-        context=ClarificationContext(workflow_type="task_intake", stage="INTAKE"),
+        context=ClarificationContext(workflow_type="task_understanding", stage="INTAKE"),
         available_tools=registry.schemas_for_agent(),
     )
     assert action.tool_name == "search_knowledge"

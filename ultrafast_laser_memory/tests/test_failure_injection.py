@@ -174,7 +174,7 @@ class FailingLLM:
         yield {"type": "done"}
 
 
-def test_llm_failure_uses_safe_template_for_sync_and_stream(
+def test_llm_failure_becomes_safe_agent_action_for_sync_and_stream(
     isolated_root, monkeypatch
 ):
     init_database()
@@ -182,20 +182,18 @@ def test_llm_failure_uses_safe_template_for_sync_and_stream(
         "ultrafast_memory.chat.service.create_llm_client", lambda config: FailingLLM()
     )
 
-    response = handle_chat(ChatRequest(message="普通任务", use_skills=False))
+    response = handle_chat(ChatRequest(message="普通任务"))
     events = list(
         handle_chat_stream_ndjson(
-            ChatRequest(message="普通流式任务", use_skills=False, stream=True)
+            ChatRequest(message="普通流式任务", stream=True)
         )
     )
 
-    assert "不会生成未经验证的工艺参数" in response.assistant_message
-    assert response.audit_trace[-1]["status"] == "fallback"
-    assert any(event.get("event_type") == "fallback" for event in events)
-    warning = next(event for event in events if event.get("event_type") == "fallback")
-    assert "injected provider detail" not in warning["summary"]
+    assert response.workflow_state["agent_action"]["action"] == "ask_user"
+    assert response.workflow_state["agent_action"]["error_details"][0]["type"] == "TimeoutError"
+    assert "injected provider detail" not in response.assistant_message
     assert any(
-        event.get("type") == "delta" and "不会生成未经验证的工艺参数" in event.get("content", "")
+        event.get("type") == "delta" and "现有状态未被修改" in event.get("content", "")
         for event in events
     )
     assert not any(event.get("type") == "error" for event in events)

@@ -6,6 +6,7 @@ from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
 from ultrafast_memory.db.init_db import init_database
 from ultrafast_memory.db.session import get_connection
+from ultrafast_memory.equipment.bounds import build_machine_bounds
 from ultrafast_memory.equipment.schemas import EquipmentProfileCreate
 from ultrafast_memory.equipment.service import create_equipment_profile
 
@@ -46,14 +47,14 @@ def test_chat_projects_active_equipment_only_after_real_tool_call(isolated_root,
             return {"content": json.dumps(action, ensure_ascii=False)}
 
     monkeypatch.setattr("ultrafast_memory.chat.service.create_llm_client", lambda config: EquipmentAgent())
-    response = handle_chat(ChatRequest(message="读取当前设备配置", use_skills=True))
+    response = handle_chat(ChatRequest(message="读取当前设备配置"))
 
     assert response.workflow_state["equipment_profile_used"]["equipment_profile_id"] == created["equipment_profile_id"]
     assert response.workflow_state["machine_bounds"]["laser_power_W"] == [0.1, 20]
     assert any(item["event_type"] == "tool_completed" for item in response.execution_trace)
 
 
-def test_chat_only_asks_missing_equipment_field_when_profile_incomplete(isolated_root):
+def test_equipment_tool_context_reports_incomplete_profile(isolated_root):
     init_database()
     created = create_equipment_profile(
         EquipmentProfileCreate(
@@ -77,8 +78,7 @@ def test_chat_only_asks_missing_equipment_field_when_profile_incomplete(isolated
         )
         conn.commit()
 
-    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=False))
+    equipment = build_machine_bounds()
 
-    assert "laser_system" not in response.workflow_state["missing_slots"]
-    assert "spot_diameter_um" in response.workflow_state["missing_slots"]
-    assert response.workflow_state["missing_equipment_fields"] == ["spot_diameter_um"]
+    assert equipment["active"] is True
+    assert equipment["missing_equipment_fields"] == ["spot_diameter_um"]

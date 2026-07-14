@@ -12,7 +12,7 @@ from ultrafast_memory.process_workflow.business_state import (
     LEGACY_STATE_MIGRATION, BusinessState,
 )
 from ultrafast_memory.db.session import get_connection
-from ultrafast_memory.chat.workflow_status import record_public_trace
+from ultrafast_memory.agent_runtime.trace_collector import record_public_trace
 from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
 from ultrafast_agent.skills import get_default_skill_registry

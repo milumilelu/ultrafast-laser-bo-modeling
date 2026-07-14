@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ultrafast_agent.skills import load_skill_contracts
 from ultrafast_domain.domain_packs import list_domain_packs, load_domain_pack
 from ultrafast_domain.domain_packs.tgv import assess_aspect_ratio
@@ -35,11 +37,12 @@ def test_legacy_router_skills_have_contracts(project_root):
         assert registry.get(route.primary_skill)
 
 
-def test_legacy_skill_names_resolve_at_boundary_without_new_registry_entries(project_root):
+def test_legacy_skill_names_are_not_resolved(project_root):
     registry = load_skill_contracts(project_root / "skills/contracts.yaml")
-    assert registry.get("task_intake").name == "task_understanding"
-    assert registry.get("rag_literature_retrieval").name == "evidence_research"
-    assert "task_intake" not in {item.name for item in registry.list()}
+    with pytest.raises(KeyError, match="skill not registered"):
+        registry.get("task_intake")
+    with pytest.raises(KeyError, match="skill not registered"):
+        registry.get("rag_literature_retrieval")
 
 
 def test_domain_pack_registry_and_crl_specific_capabilities():

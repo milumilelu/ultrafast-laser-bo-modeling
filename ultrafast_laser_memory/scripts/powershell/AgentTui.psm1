@@ -408,8 +408,7 @@ function Show-AgentRuntimeIdentity {
     Write-Host ("main_agent_planner={0}" -f $identity.main_agent_planner)
     Write-Host ("skill_registry={0}" -f $identity.skill_registry)
     Write-Host ("tool_registry={0}" -f $identity.tool_registry)
-    Write-Host ("legacy_workflow_fallback={0}" -f $identity.legacy_workflow_fallback)
-    Write-Host ("update_task_spec_tool={0}" -f $identity.update_task_spec_tool)
+    Write-Host ("update_task_context_tool={0}" -f $identity.update_task_context_tool)
     Write-Host ("backend_pid={0}" -f $identity.backend_pid)
     Write-Host ("backend_started_at={0}" -f $identity.backend_started_at)
 }
@@ -419,7 +418,6 @@ function Test-AgentRuntimeIdentity {
     if ($null -eq $Health -or $Health.agent_capability_contract -ne "skill-discovery-v2") { return $false }
     if ($null -eq $Health.runtime_identity) { return $false }
     if ($Health.runtime_identity.runtime_mode -ne "capability_discovery") { return $false }
-    if ($Health.runtime_identity.legacy_workflow_fallback -ne $false) { return $false }
     $localCommit = (& git -C $script:RepoRoot rev-parse HEAD 2>$null).Trim()
     $expectedRoot = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot "src")).TrimEnd('\').ToLowerInvariant()
     $actualRoot = [IO.Path]::GetFullPath([string]$Health.runtime_identity.package_root).TrimEnd('\').ToLowerInvariant()
@@ -621,7 +619,6 @@ function Send-AgentChatMessage {
         session_id = $SessionId
         message = $Message
         mode = "agent"
-        use_skills = $true
         stream = $false
     } | ConvertTo-Json
     return Invoke-RestMethod -Method Post -Uri "$BaseUrl/chat" -ContentType "application/json; charset=utf-8" -Body $body
@@ -1037,7 +1034,6 @@ function Send-AgentChatStream {
         session_id = $SessionId
         message = $Message
         mode = (Get-AgentDisplayMode)
-        use_skills = $true
         stream = $true
     } | ConvertTo-Json -Depth 8
 

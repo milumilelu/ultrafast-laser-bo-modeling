@@ -30,11 +30,6 @@ class SkillDescriptor:
     guidance: tuple[str, ...]
     recommended_tools: tuple[str, ...]
 
-    @property
-    def purpose(self) -> str:
-        """Read-compatible alias for older diagnostics clients."""
-        return self.description
-
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "SkillDescriptor":
         missing = REQUIRED_FIELDS - set(value)
@@ -57,22 +52,6 @@ class SkillDescriptor:
         )
 
 
-# Temporary read aliases are resolved at the boundary and never appear as Skills.
-LEGACY_SKILL_ALIASES = {
-    "task_intake": "task_understanding",
-    "task_normalization": "task_understanding",
-    "geometry_interpretation": "task_understanding",
-    "rag_evidence_retrieval": "evidence_research",
-    "rag_literature_retrieval": "evidence_research",
-    "historical_case_retrieval": "evidence_research",
-    "process_route_planning": "process_planning",
-    "hole_drilling_planning": "process_planning",
-    "bo_recommendation": "parameter_recommendation",
-    "knowledge_candidate_generation": "result_learning",
-    "report_generation": "result_learning",
-}
-
-
 class SkillRegistry:
     def __init__(self, descriptors: list[SkillDescriptor]):
         names = [descriptor.name for descriptor in descriptors]
@@ -81,13 +60,9 @@ class SkillRegistry:
             raise ValueError(f"duplicate skill descriptors: {duplicates}")
         self._descriptors = {descriptor.name: descriptor for descriptor in descriptors}
 
-    def resolve_name(self, name: str) -> str:
-        return LEGACY_SKILL_ALIASES.get(name, name)
-
     def get(self, name: str) -> SkillDescriptor:
-        resolved = self.resolve_name(name)
         try:
-            return self._descriptors[resolved]
+            return self._descriptors[name]
         except KeyError as exc:
             raise KeyError(f"skill not registered: {name}") from exc
 
@@ -114,12 +89,6 @@ class SkillRegistry:
             "guidance": list(item.guidance),
             "recommended_tools": list(item.recommended_tools),
         }
-
-
-# Read compatibility for imports; the model is intentionally a descriptor now.
-SkillContract = SkillDescriptor
-
-
 def load_skill_contracts(path: str | Path) -> SkillRegistry:
     source = Path(path)
     with source.open("r", encoding="utf-8") as handle:

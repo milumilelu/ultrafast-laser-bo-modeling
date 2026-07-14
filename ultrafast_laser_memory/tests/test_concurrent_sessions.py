@@ -19,7 +19,6 @@ def test_five_concurrent_mock_sessions_complete_without_cross_talk(
             handle_chat_stream_ndjson(
                 ChatRequest(
                     message=f"concurrency sentinel {index}",
-                    use_skills=False,
                     stream=True,
                 )
             )

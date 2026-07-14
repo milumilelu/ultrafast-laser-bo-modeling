@@ -103,28 +103,6 @@ class MainAgentPlanner:
 
     @staticmethod
     def _validate_action(raw: dict[str, Any], available_tool_names: list[str], skill_names: list[str]) -> AgentAction:
-        if "updates" in raw and not raw.get("action"):
-            updates = raw.get("updates") or []
-            raw = ({
-                "action": "call_tool",
-                "decision_summary": "用户提供了任务信息，调用 update_task_context 校验并提交。",
-                "tool_name": "update_task_context",
-                "arguments": {"updates": updates},
-            } if updates else {
-                "action": "ask_user",
-                "decision_summary": "当前输出未识别出可验证的任务事实。",
-                "message": "我还不能从这条信息中确认可写入的任务事实，请补充具体材料、加工动作或尺寸。",
-            })
-        if raw.get("action") == "direct_answer":
-            raw["action"] = "final_answer"
-        legacy_tools = {
-            "update_task_spec": "update_task_context",
-            "get_equipment_profile": "get_equipment_context",
-            "search_rag": "search_knowledge",
-            "run_bo_recommendation": "recommend_parameters_bo",
-        }
-        if raw.get("action") == "call_tool" and raw.get("tool_name") in legacy_tools:
-            raw["tool_name"] = legacy_tools[raw["tool_name"]]
         action = AgentAction.model_validate(raw)
         if action.action == "call_tool":
             if not action.tool_name:
@@ -158,7 +136,6 @@ class MainAgentPlanner:
             "clarify": "ask_user",
             "request_clarification": "ask_user",
             "answer": "final_answer",
-            "direct_answer": "final_answer",
         }
         raw["action"] = action_aliases.get(str(raw.get("action") or raw.get("type") or ""), raw.get("action"))
         if "tool_name" not in raw and raw.get("tool") is not None:
@@ -171,7 +148,7 @@ class MainAgentPlanner:
             raw["message"] = raw.get("answer") or raw.get("content")
         raw.setdefault("decision_summary", str(raw.get("reason") or "执行主 Agent 选择的下一动作。"))
 
-        if raw.get("action") == "call_tool" and raw.get("tool_name") in {"update_task_context", "update_task_spec"}:
+        if raw.get("action") == "call_tool" and raw.get("tool_name") == "update_task_context":
             arguments = dict(raw.get("arguments") or {})
             updates = arguments.get("updates")
             if isinstance(updates, dict):
@@ -330,7 +307,3 @@ class MainAgentPlanner:
             code = exc.error_code or (f"http_{exc.status_code}" if exc.status_code else "provider_error")
             return [{"loc": "provider", "type": code, "msg": str(exc)[:240]}]
         return [{"loc": "planner", "type": type(exc).__name__, "msg": str(exc)[:240]}]
-
-
-# Transitional Python name only. Runtime identity and normal imports use MainAgentPlanner.
-ProcessAgentController = MainAgentPlanner

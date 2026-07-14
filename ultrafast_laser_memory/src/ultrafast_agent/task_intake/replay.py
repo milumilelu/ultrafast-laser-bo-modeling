@@ -86,7 +86,7 @@ def run_replay_case(case: ReplayCase, client: Any | None = None) -> dict[str, An
             task, required_fields=case.expected_missing_fields
         )
         context = ClarificationContext(
-            workflow_type="complex_process_task",
+            workflow_type="task_understanding",
             stage="REQUIREMENTS_PENDING",
             clarification_round=turn_number,
             pending_fields=pending,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateChatSessionRequest(BaseModel):
@@ -18,10 +18,11 @@ class CreateChatSessionResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     session_id: str | None = None
     message: str
     mode: str = "agent"
-    use_skills: bool = True
     stream: bool = False
 
 

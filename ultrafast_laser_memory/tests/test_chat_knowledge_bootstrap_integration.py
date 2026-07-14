@@ -14,7 +14,6 @@ def test_chat_knowledge_bootstrap_permission_and_review_flow(isolated_root):
     first = handle_chat(
         ChatRequest(
             message="请查文献和论文解释超快激光损伤机制",
-            use_skills=True,
         )
     )
 
@@ -24,7 +23,7 @@ def test_chat_knowledge_bootstrap_permission_and_review_flow(isolated_root):
     state = get_session_state(first.session_id)
     assert state.get("pending_bootstrap_permission") is not True
 
-    second = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap run", use_skills=True))
+    second = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap run"))
 
     assert second.knowledge_bootstrap["executed"] is True
     assert second.knowledge_bootstrap["created_candidates"] > 0
@@ -33,7 +32,7 @@ def test_chat_knowledge_bootstrap_permission_and_review_flow(isolated_root):
     assert state["active_knowledge_bootstrap"]["candidate_ids"]
     assert state["pending_review_task_ids"]
 
-    status = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap status", use_skills=True))
+    status = handle_chat(ChatRequest(session_id=first.session_id, message="/bootstrap status"))
     assert "仍待专家审核" in status.assistant_message
 
     review_id = second.knowledge_bootstrap["review_task_ids"][0]
@@ -41,5 +40,5 @@ def test_chat_knowledge_bootstrap_permission_and_review_flow(isolated_root):
     updated = get_session_state(first.session_id)
     assert updated["active_knowledge_bootstrap"]["accepted_rag_doc_ids"]
 
-    guarded = handle_chat(ChatRequest(session_id=first.session_id, message="继续生成方案", use_skills=True))
+    guarded = handle_chat(ChatRequest(session_id=first.session_id, message="继续生成方案"))
     assert "未审核候选" in guarded.assistant_message

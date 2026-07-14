@@ -9,7 +9,7 @@ from ultrafast_memory.trial.service import TrialApplicationService
 
 
 def _post(client: TestClient, session_id: str, message: str) -> dict:
-    response = client.post("/chat", json={"session_id": session_id, "message": message, "use_skills": True})
+    response = client.post("/chat", json={"session_id": session_id, "message": message})
     assert response.status_code == 200, response.text
     return response.json()
 
