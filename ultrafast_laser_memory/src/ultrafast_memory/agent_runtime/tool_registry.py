@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# This is the authoritative registry used by the capability-discovery runtime.
+
 from pathlib import Path
 from typing import Any
 

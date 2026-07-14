@@ -91,6 +91,25 @@ def chat_session_progress(session_id: str) -> dict:
     state = get_session_state(session_id)
     collected = state.get("collected_slots") or {}
     workflow = collected.get("process_workflow") or {}
+    if workflow.get("runtime_mode") == "capability_discovery":
+        action = (workflow.get("last_agent_action") or {}).get("action") or "unknown"
+        waiting = action == "ask_user"
+        return {
+            "session_id": session_id,
+            "progress": {
+                "session_id": session_id,
+                "workflow_type": "main_agent",
+                "current_stage": action,
+                "business_state": workflow.get("business_state") or "INTAKE",
+                "progress_percent": None,
+                "completed_steps": [],
+                "pending_steps": [],
+                "missing_slots": workflow.get("missing_slots") or [],
+                "status": "waiting_user" if waiting else "completed",
+                "message": (workflow.get("last_agent_action") or {}).get("decision_summary") or "",
+            },
+            "thinking_status": list_public_thinking_status(session_id),
+        }
     if progress is not None and workflow:
         projection = WorkflowProjectionService.build_process(
             task_spec=collected.get("process_task_spec") or workflow.get("task_spec") or {},

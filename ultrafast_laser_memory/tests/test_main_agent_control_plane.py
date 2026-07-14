@@ -5,11 +5,11 @@ import json
 from fastapi.testclient import TestClient
 
 from ultrafast_memory.apps.api.main import app
-from ultrafast_memory.chat.main_agent_loop import run_main_agent_turn
-from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
+from ultrafast_memory.agent_runtime.main_agent_loop import run_main_agent_turn
+from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 from ultrafast_memory.chat.router.hybrid_router import route_message
 from ultrafast_memory.chat.session_state import get_session_state
-from ultrafast_memory.process_workflow.agent_controller import ProcessAgentController
+from ultrafast_memory.agent_runtime.planner import MainAgentPlanner
 from ultrafast_agent.task_intake.schemas import ClarificationContext
 from ultrafast_agent.runtime import ToolExecutor
 
@@ -50,7 +50,7 @@ class DrillingAgentLLM:
         }, ensure_ascii=False)}
 
 
-def test_diamond_through_hole_survives_first_validation_error(isolated_root) -> None:
+def test_diamond_through_hole_survives_provider_compatible_partial_action(isolated_root) -> None:
     client = TestClient(app)
     session_id = client.post("/chat/sessions", json={}).json()["session_id"]
     llm = DrillingAgentLLM()
@@ -73,8 +73,7 @@ def test_diamond_through_hole_survives_first_validation_error(isolated_root) -> 
     assert spec["geometry"]["hole_diameter_mm"] == 2
     assert spec["geometry"]["through_hole"] is True
     assert result["tool_calls"][0]["tool_name"] == "update_task_context"
-    assert "response_format" in llm.calls[0]
-    assert "response_format" not in llm.calls[1]
+    assert llm.calls[0]["response_format"] == {"type": "json_object"}
     assert "材料" not in result["content"]
     assert "厚度" not in result["content"]
     assert "切割长度" not in result["content"]
@@ -93,7 +92,7 @@ def test_machining_rule_is_only_a_soft_candidate(isolated_root, monkeypatch) -> 
     assert plan.primary_skill == "task_understanding"
     assert plan.confidence < 0.9
     assert plan.route_source != "mandatory_process_rule"
-    assert plan.state_update.active_workflow is None
+    assert "state_update" not in plan.model_dump()
 
 
 def test_controller_can_select_any_registered_tool() -> None:
@@ -111,7 +110,7 @@ def test_controller_can_select_any_registered_tool() -> None:
             })}
 
     registry = build_main_agent_tool_registry()
-    action = ProcessAgentController(SearchLLM()).decide(
+    action = MainAgentPlanner(SearchLLM()).decide(
         message="查一下证据",
         task_spec={"material": "diamond", "process_type": "hole_drilling"},
         business_state="INTAKE",

@@ -24,7 +24,7 @@ from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_know
 from ultrafast_memory.knowledge_review.review_queue import get_review_task
 from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.llm.openai_compatible import LLMProviderError
-from ultrafast_memory.chat.main_agent_loop import run_main_agent_turn
+from ultrafast_memory.agent_runtime.main_agent_loop import run_main_agent_turn
 
 
 def handle_chat(request: ChatRequest) -> ChatResponse:
@@ -45,7 +45,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     bootstrap_command = _handle_bootstrap_chat_command(request.message, session_id, state)
     if bootstrap_command:
         save_message(session_id, "assistant", bootstrap_command["assistant_message"], {"knowledge_bootstrap": bootstrap_command.get("knowledge_bootstrap")})
-        return _build_chat_response(
+        return _build_legacy_chat_response(
             session_id=session_id,
             assistant_message=bootstrap_command["assistant_message"],
             message=request.message,
@@ -62,7 +62,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     permission_result = _handle_bootstrap_permission_reply(request.message, session_id, state)
     if permission_result:
         save_message(session_id, "assistant", permission_result["assistant_message"], {"knowledge_bootstrap": permission_result.get("knowledge_bootstrap")})
-        return _build_chat_response(
+        return _build_legacy_chat_response(
             session_id=session_id,
             assistant_message=permission_result["assistant_message"],
             message=request.message,
@@ -79,7 +79,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     continuation_guard = _handle_review_guard(request.message, session_id, state)
     if continuation_guard:
         save_message(session_id, "assistant", continuation_guard["assistant_message"], {"knowledge_bootstrap": continuation_guard.get("knowledge_bootstrap")})
-        return _build_chat_response(
+        return _build_legacy_chat_response(
             session_id=session_id,
             assistant_message=continuation_guard["assistant_message"],
             message=request.message,
@@ -108,21 +108,9 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     if request.use_skills:
         route_plan = route_message(request.message, session_id, user_message["message_id"])
         selected_skill = route_plan.primary_skill
-        _record_route_decision_trace(
+        route_event = _record_route_decision_trace(
             session_id, user_message["message_id"], request.message, route_plan
         )
-        if route_plan.deprecated_skill_used:
-            record_agent_trace_event(
-                session_id=session_id,
-                message_id=user_message["message_id"],
-                event_type="warning",
-                stage="route_plan",
-                title="使用兼容 Skill",
-                summary=f"{route_plan.primary_skill} 已弃用，内部迁移目标为 {route_plan.replacement_skill}。",
-                skill=route_plan.primary_skill,
-                tool="route_planner",
-                status="completed",
-            )
         save_skill_trace(
             session_id,
             user_message["message_id"],
@@ -169,15 +157,13 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
                 "tool_calls": agent_result["tool_calls"],
             },
         )
-        return _build_chat_response(
+        return _build_agent_chat_response(
             session_id=session_id,
             assistant_message=assistant_content,
-            message=request.message,
-            message_id=user_message["message_id"],
             selected_skill=selected_skill,
             route_plan=route_plan.model_dump(mode="json"),
-            route_plan_obj=route_plan,
-            tool_calls=agent_result["tool_calls"],
+            route_event=route_event,
+            agent_result=agent_result,
             audit_trace=audit_trace,
         )
 
@@ -249,7 +235,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
         output_summary=f"provider={result.get('provider')}; model={result.get('model')}; chars={len(assistant_content)}",
         status="completed",
     )
-    return _build_chat_response(
+    return _build_legacy_chat_response(
         session_id=session_id,
         assistant_message=assistant_content,
         message=request.message,
@@ -385,7 +371,101 @@ def _build_command_chat_response(
     )
 
 
-def _build_chat_response(
+def _build_agent_chat_response(
+    *,
+    session_id: str,
+    assistant_message: str,
+    selected_skill: str | None,
+    route_plan: dict,
+    route_event: dict,
+    agent_result: dict,
+    audit_trace: list[dict],
+) -> ChatResponse:
+    """Project normal chat exclusively from actions and tool observations that occurred."""
+    final_action = dict(agent_result.get("final_action") or {})
+    action = str(final_action.get("action") or "unknown")
+    waiting_user = action == "ask_user"
+    bounded = action in {"call_tool", "load_skill", "unload_skill"}
+    status = "waiting_user" if waiting_user else "step_limit" if bounded else "completed"
+    progress = {
+        "workflow_type": "main_agent",
+        "current_stage": action,
+        "progress_percent": None,
+        "status": status,
+        "message": final_action.get("decision_summary") or "主 Agent 已完成本轮动作。",
+        "completed_steps": [],
+        "pending_steps": [],
+    }
+    events = [route_event, *(agent_result.get("events") or [])]
+    visible_trace = _filter_public_trace(session_id, events)
+    reasoning = [
+        item for item in visible_trace
+        if item.get("event_type") in {"decision", "agent_decision"}
+    ]
+    if _public_trace_mode(session_id) == "off":
+        reasoning = []
+    workflow_state = dict(agent_result.get("workflow_state") or {})
+    session = get_session_state(session_id)
+    collected = dict(session.get("collected_slots") or {})
+    workflow_state.update({
+        "runtime_mode": "capability_discovery",
+        "current_stage_code": action,
+        "task_spec": dict(agent_result.get("task_spec") or {}),
+        "active_skills": list(agent_result.get("active_skills") or []),
+        "discoverable_tools": list(agent_result.get("discoverable_tools") or []),
+        "agent_action": final_action,
+        "missing_slots": list(workflow_state.get("missing_fields") or []),
+        "clarification_round": int(workflow_state.get("clarification_round") or 0),
+        "field_provenance": dict(collected.get("process_task_field_provenance") or {}),
+        "revision_history": list(collected.get("process_task_revision_history") or []),
+    })
+    equipment_call = next((
+        call for call in reversed(agent_result.get("tool_calls") or [])
+        if call.get("tool_name") == "get_equipment_context"
+        and (call.get("result") or {}).get("status") == "succeeded"
+    ), None)
+    if equipment_call:
+        equipment = dict((equipment_call.get("result") or {}).get("data") or {})
+        workflow_state["equipment_profile_used"] = equipment
+        workflow_state["machine_bounds"] = dict(equipment.get("machine_bounds") or {})
+    next_action = {
+        "action_type": "provide_clarification" if waiting_user else "continue_agent" if bounded else "answer_complete",
+        "required_fields": list(workflow_state.get("missing_slots") or []),
+        "blocking": waiting_user,
+    }
+    workflow_state["next_required_action"] = next_action
+    overview = [
+        {
+            "step": item.get("title") or item.get("event_type") or "agent_event",
+            "status": item.get("status") or "completed",
+        }
+        for item in visible_trace
+    ]
+    return ChatResponse(
+        session_id=session_id,
+        assistant_message=assistant_message,
+        selected_skill=selected_skill,
+        route_plan=route_plan,
+        progress=progress,
+        thinking_status=reasoning,
+        workflow_state=workflow_state,
+        execution_trace=visible_trace,
+        tool_calls=agent_result.get("tool_calls") or [],
+        audit_trace=audit_trace,
+        workflow_overview=overview,
+        current_stage=action,
+        current_stage_code=action,
+        completed_stages=[],
+        pending_stages=[],
+        blocked_stages=[],
+        next_required_action=next_action,
+        skill_trace=[item for item in visible_trace if item.get("skill")],
+        tool_trace=[item for item in visible_trace if item.get("tool")],
+        reasoning_trace=reasoning,
+    )
+
+
+def _build_legacy_chat_response(
     session_id: str,
     assistant_message: str,
     message: str,

@@ -398,11 +398,17 @@ function Show-AgentRuntimeIdentity {
     if ($null -eq $Health -or $null -eq $Health.runtime_identity) { return }
     $identity = $Health.runtime_identity
     Write-Host "[Runtime Identity]" -ForegroundColor Cyan
+    Write-Host ("runtime_mode={0}" -f $identity.runtime_mode)
     Write-Host ("git_commit={0}" -f $identity.git_commit)
+    Write-Host ("git_branch={0}" -f $identity.git_branch)
+    Write-Host ("git_dirty={0}" -f $identity.git_dirty)
     Write-Host ("python={0}" -f $identity.python)
     Write-Host ("package_root={0}" -f $identity.package_root)
-    Write-Host ("chat_orchestrator={0}" -f $identity.chat_orchestrator)
-    Write-Host ("main_agent_controller={0}" -f $identity.main_agent_controller)
+    Write-Host ("main_agent_loop={0}" -f $identity.main_agent_loop)
+    Write-Host ("main_agent_planner={0}" -f $identity.main_agent_planner)
+    Write-Host ("skill_registry={0}" -f $identity.skill_registry)
+    Write-Host ("tool_registry={0}" -f $identity.tool_registry)
+    Write-Host ("legacy_workflow_fallback={0}" -f $identity.legacy_workflow_fallback)
     Write-Host ("update_task_spec_tool={0}" -f $identity.update_task_spec_tool)
     Write-Host ("backend_pid={0}" -f $identity.backend_pid)
     Write-Host ("backend_started_at={0}" -f $identity.backend_started_at)
@@ -410,12 +416,21 @@ function Show-AgentRuntimeIdentity {
 
 function Test-AgentRuntimeIdentity {
     param($Health)
-    if ($null -eq $Health -or $Health.task_intake_contract -ne "agent-native-tools-v1") { return $false }
+    if ($null -eq $Health -or $Health.agent_capability_contract -ne "skill-discovery-v2") { return $false }
     if ($null -eq $Health.runtime_identity) { return $false }
+    if ($Health.runtime_identity.runtime_mode -ne "capability_discovery") { return $false }
+    if ($Health.runtime_identity.legacy_workflow_fallback -ne $false) { return $false }
     $localCommit = (& git -C $script:RepoRoot rev-parse HEAD 2>$null).Trim()
     $expectedRoot = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot "src")).TrimEnd('\').ToLowerInvariant()
     $actualRoot = [IO.Path]::GetFullPath([string]$Health.runtime_identity.package_root).TrimEnd('\').ToLowerInvariant()
-    return ($localCommit -and $Health.runtime_identity.git_commit -eq $localCommit -and $actualRoot -eq $expectedRoot)
+    $runtimeFiles = @(
+        $Health.runtime_identity.main_agent_loop,
+        $Health.runtime_identity.main_agent_planner,
+        $Health.runtime_identity.skill_registry,
+        $Health.runtime_identity.tool_registry
+    )
+    $filesValid = -not ($runtimeFiles | Where-Object { -not $_ -or -not (Test-Path ([string]$_)) })
+    return ($localCommit -and $Health.runtime_identity.git_commit -eq $localCommit -and $actualRoot -eq $expectedRoot -and $filesValid)
 }
 
 function Test-AgentEquipmentApiServer {
@@ -637,10 +652,17 @@ function Set-AgentDisplayMode {
 
 function Show-AgentProgressBar {
     param(
-        [double]$Percent,
+        $Percent,
         [string]$Stage,
         [string]$Message
     )
+    if ($null -eq $Percent) {
+        Write-Host ("[任务状态] {0}" -f $Stage) -ForegroundColor DarkCyan
+        if (-not [string]::IsNullOrWhiteSpace($Message)) {
+            Write-Host $Message -ForegroundColor DarkGray
+        }
+        return
+    }
     if ((Get-AgentDisplayMode) -eq "normal") {
         Write-Host ("[进度 {0}%] {1} {2}" -f [Math]::Round($Percent), $Stage, $Message) -ForegroundColor DarkCyan
         return

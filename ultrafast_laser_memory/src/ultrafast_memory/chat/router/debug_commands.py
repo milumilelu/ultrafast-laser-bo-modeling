@@ -10,7 +10,7 @@ from ultrafast_memory.chat.debug_views import (
     waterfall_view,
 )
 from ultrafast_agent.skills import get_default_skill_registry
-from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
+from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 from ultrafast_memory.chat.session_state import (
     get_session_state,
     reset_session_state,

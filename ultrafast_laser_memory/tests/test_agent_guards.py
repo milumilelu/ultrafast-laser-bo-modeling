@@ -1,5 +1,5 @@
 from ultrafast_agent.runtime import ToolExecutor
-from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
+from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 
 
 def test_human_review_tool_cannot_run_without_human_approval():

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from ultrafast_memory.chat.schemas import ChatRequest
 from ultrafast_memory.chat.service import handle_chat
 from ultrafast_memory.db.init_db import init_database
@@ -8,7 +10,7 @@ from ultrafast_memory.equipment.schemas import EquipmentProfileCreate
 from ultrafast_memory.equipment.service import create_equipment_profile
 
 
-def test_chat_uses_active_equipment_profile_in_workflow_state(isolated_root):
+def test_chat_projects_active_equipment_only_after_real_tool_call(isolated_root, monkeypatch):
     init_database()
     created = create_equipment_profile(
         EquipmentProfileCreate(
@@ -27,12 +29,28 @@ def test_chat_uses_active_equipment_profile_in_workflow_state(isolated_root):
         )
     )
 
-    response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm", use_skills=True))
+    class EquipmentAgent:
+        provider = "test"
+        model = "equipment-agent"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            action = (
+                {"action": "call_tool", "decision_summary": "读取当前设备", "tool_name": "get_equipment_context", "arguments": {}}
+                if self.calls == 1 else
+                {"action": "final_answer", "decision_summary": "设备已读取", "message": "已读取当前设备。"}
+            )
+            return {"content": json.dumps(action, ensure_ascii=False)}
+
+    monkeypatch.setattr("ultrafast_memory.chat.service.create_llm_client", lambda config: EquipmentAgent())
+    response = handle_chat(ChatRequest(message="读取当前设备配置", use_skills=True))
 
     assert response.workflow_state["equipment_profile_used"]["equipment_profile_id"] == created["equipment_profile_id"]
-    assert "laser_system" not in response.workflow_state["missing_slots"]
     assert response.workflow_state["machine_bounds"]["laser_power_W"] == [0.1, 20]
-    assert any(item["event_type"] == "equipment_profile_loaded" for item in response.thinking_status)
+    assert any(item["event_type"] == "tool_completed" for item in response.execution_trace)
 
 
 def test_chat_only_asks_missing_equipment_field_when_profile_incomplete(isolated_root):

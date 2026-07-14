@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ultrafast_memory.chat.router.schemas import RoutePlan, StateUpdate
+from ultrafast_memory.chat.router.schemas import RoutePlan
 
 
 def rule_route(message: str, session_state: dict | None = None) -> RoutePlan:
@@ -12,7 +12,6 @@ def rule_route(message: str, session_state: dict | None = None) -> RoutePlan:
             workflow_stage="agent_planning", confidence=0.9,
             reason="Knowledge bootstrap command suggests evidence research.",
             route_source="rule_router",
-            state_update=StateUpdate(workflow_stage="agent_planning"),
         )
     scores = {
         "task_understanding": _count(text, ["任务", "材料", "尺寸", "孔", "切割", "加工", "约束", "目标"]),
@@ -31,7 +30,6 @@ def rule_route(message: str, session_state: dict | None = None) -> RoutePlan:
         workflow_stage="agent_planning", confidence=confidence,
         reason="Keyword evidence produced non-binding capability hints.",
         route_source="rule_router",
-        state_update=StateUpdate(workflow_stage="agent_planning"),
     )
 
 

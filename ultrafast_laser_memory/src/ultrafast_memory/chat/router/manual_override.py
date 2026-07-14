@@ -20,8 +20,7 @@ def parse_manual_override(message: str) -> RoutePlan | None:
         return RoutePlan(
             primary_skill="task_understanding", intent="manual_override_invalid",
             workflow_stage="agent_planning", confidence=0.2,
-            reason=f"Unknown skill hint: {requested}", requires_clarification=True,
-            clarification_questions=[f"可用 skill: {', '.join(AVAILABLE_SKILLS)}"],
+            reason=f"Unknown skill hint: {requested}. Available: {', '.join(AVAILABLE_SKILLS)}",
             route_source="manual_override",
         )
     return RoutePlan(

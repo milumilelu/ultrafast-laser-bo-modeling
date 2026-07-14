@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
+from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 from ultrafast_agent.runtime import ToolExecutor
 from ultrafast_memory.db.init_db import init_database
 from ultrafast_memory.equipment.bounds import apply_task_level_override, require_machine_bounds_for_bo, validate_candidate_within_bounds

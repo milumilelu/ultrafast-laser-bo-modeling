@@ -599,13 +599,13 @@ def test_unrecognized_answer_never_creates_parser_business_state(isolated_root, 
     client = TestClient(app)
     session_id = _session(client)
     first = _chat(client, session_id, "切割5mm厚型号为T300的碳纤维复合板")
-    assert first["workflow_state"]["current_stage_code"] == "task_spec_confirmed"
+    assert first["workflow_state"]["current_stage_code"] == "final_answer"
     _chat(client, session_id, "无法识别的回答")
     result = _chat(client, session_id, "无法识别的回答")
-    assert result["workflow_state"]["current_stage_code"] == "task_spec_confirmed"
+    assert result["workflow_state"]["current_stage_code"] == "ask_user"
     assert "字段化格式" not in result["assistant_message"]
     assert result["workflow_state"]["task_spec"]["thickness_mm"] == 5
-    assert result["next_required_action"]["action_type"] == "continue_workflow"
+    assert result["next_required_action"]["action_type"] == "provide_clarification"
     assert "update_task_context" in result["workflow_state"]["discoverable_tools"]
 
 

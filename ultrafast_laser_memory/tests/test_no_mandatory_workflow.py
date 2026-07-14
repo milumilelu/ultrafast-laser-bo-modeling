@@ -7,5 +7,5 @@ def test_router_is_hint_and_business_state_has_no_action_gate():
     workflow = {}
     BusinessStateController.ensure(workflow)
     assert route.intent == "skill_hint"
-    assert route.state_update.active_skill is None
+    assert "state_update" not in route.model_dump()
     assert "allowed_actions" not in workflow

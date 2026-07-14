@@ -1,5 +1,5 @@
 from ultrafast_agent.runtime import ToolExecutor
-from ultrafast_memory.chat.main_agent_tools import build_main_agent_tool_registry
+from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 from ultrafast_memory.db.init_db import init_database
 from ultrafast_memory.literature.service import ingest_literature
 from ultrafast_memory.rag.index_service import create_index, index_pending_chunks

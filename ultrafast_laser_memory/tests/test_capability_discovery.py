@@ -1,5 +1,5 @@
 from ultrafast_agent.skills import get_default_skill_registry
-from ultrafast_memory.chat.main_agent_loop import _exposed_tool_names
+from ultrafast_memory.agent_runtime.main_agent_loop import _exposed_tool_names
 
 
 def test_initial_capabilities_are_small_and_loading_reveals_tools():

@@ -43,7 +43,7 @@ def test_streaming_main_agent_accumulates_progressive_task_fields(isolated_root)
     assert state["task_spec"]["process_type"] == "cutting"
     assert state["task_spec"]["material"] == "CFRP_T300"
     assert state["task_spec"]["thickness_mm"] == 5.0
-    assert state["next_required_action"]["action_type"] == "continue_workflow"
+    assert state["next_required_action"]["action_type"] == "answer_complete"
     _stream(
         client, session_id, "质量要求=切缝碳纤维无分层；允许分层切割=true"
     )

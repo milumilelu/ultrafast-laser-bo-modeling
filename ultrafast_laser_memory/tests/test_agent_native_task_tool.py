@@ -7,8 +7,8 @@ from ultrafast_agent.task_intake.update_task_spec_tool import update_task_spec
 from ultrafast_agent.runtime import ToolContract, ToolExecutor, ToolRegistry
 from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.chat.session_state import get_session_state
-from ultrafast_memory.chat.main_agent_tools import BASE_TOOL_NAMES, build_main_agent_tool_registry
-from ultrafast_memory.process_workflow.agent_controller import ProcessAgentController
+from ultrafast_memory.agent_runtime.planner import MainAgentPlanner
+from ultrafast_memory.agent_runtime.tool_registry import BASE_TOOL_NAMES, build_main_agent_tool_registry
 
 
 def _context(*pending: str) -> ClarificationContext:
@@ -97,7 +97,7 @@ def test_main_agent_native_action_selects_update_tool() -> None:
                 ),
             }
 
-    action = ProcessAgentController(NativeActionLLM()).decide(
+    action = MainAgentPlanner(NativeActionLLM()).decide(
         message="长度100mm",
         task_spec={"process_type": "cutting"},
         business_state="INTAKE",

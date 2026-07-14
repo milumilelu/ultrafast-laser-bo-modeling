@@ -1,4 +1,4 @@
-from ultrafast_memory.chat.main_agent_tools import (
+from ultrafast_memory.agent_runtime.tool_registry import (
     CORE_TOOL_NAMES, ON_DEMAND_TOOL_NAMES, build_main_agent_tool_registry,
 )
 

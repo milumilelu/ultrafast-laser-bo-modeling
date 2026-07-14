@@ -27,5 +27,5 @@ def test_invalid_manual_skill_falls_back_to_task_intake(isolated_root):
     plan = route_message("/skill not_real", "session-invalid", "message-invalid")
 
     assert plan.primary_skill == "task_understanding"
-    assert plan.requires_clarification is True
+    assert "requires_clarification" not in plan.model_dump()
     assert plan.route_source == "manual_override"
