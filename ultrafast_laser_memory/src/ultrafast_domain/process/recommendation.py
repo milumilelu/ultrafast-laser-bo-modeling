@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -31,6 +31,7 @@ class ProcessRecommendation:
     predictions: dict[str, Any]
     constraints: dict[str, Any]
     recommendation_source: str
+    source_run_id: str | None
     confidence: dict[str, Any]
     model_version: str | None
     dataset_version: str | None
@@ -50,6 +51,8 @@ class ProcessRecommendation:
             raise ValueError(f"unsupported recommendation status: {self.status}")
         if self.iteration_number < 1:
             raise ValueError("iteration number must be positive")
+        if self.stage == "production_approved" and self.recommendation_source == "llm_trial_fallback":
+            raise ValueError("LLM trial fallback cannot become production approved")
         overlap = set(self.optimized_parameters) & set(self.fixed_parameters)
         if overlap:
             raise ValueError(f"parameters cannot be both optimized and fixed: {sorted(overlap)}")
@@ -62,4 +65,3 @@ class ProcessRecommendation:
         value["evidence_ids"] = list(self.evidence_ids)
         value["prior_ids"] = list(self.prior_ids)
         return value
-

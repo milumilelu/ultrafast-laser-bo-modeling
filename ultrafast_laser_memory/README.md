@@ -379,6 +379,8 @@ BO 默认要求 active equipment profile。没有 active profile 时，系统阻
 
 关键事实源已收敛为：正式 `TaskSpec`、宏观 `BusinessState`、`ProcessRecommendation` 和 canonical `AgentEvent`。细粒度旧流程状态仅作为 `substatus` 兼容；NDJSON、TUI 和 Debug 只是同一事件的 Renderer。完整映射见仓库根目录 `docs/architecture/single_source_of_truth.md`。
 
+多轮试切—反馈—BO—正式加工候选闭环通过 `/api/v1/trial-campaigns` 提供；反馈必须先通过 Eligibility 和明确审批，系统不连接或控制设备。
+
 - 版本化迁移：`schema_migration`。
 - 重构前备份：`../scripts/backup_before_refactor.ps1`。
 - 显式回滚：`../scripts/rollback_refactor.ps1 -ConfirmRollback`。

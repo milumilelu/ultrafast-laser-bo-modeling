@@ -104,3 +104,27 @@ stateDiagram-v2
 ## Evolution scope
 
 Only `bo_model` and `bo_acquisition_strategy` are formally enabled for promotion. Router, skill, prompt, RAG strategy, workflow policy, process-prior candidate, and validated-rule candidate schemas are reserved/experimental until they have a complete candidate generator, evaluation dataset, promotion metric, and rollback signal.
+
+## Trial-to-BO closed loop
+
+```mermaid
+flowchart LR
+    S["User selects trial strategy"] --> R1["Immutable complete Recipe N"]
+    R1 --> C["CAM mapping only"]
+    C --> O["User-reported actual parameters and measurements"]
+    O --> E["BOEligibilityReport"]
+    E --> A["Explicit approval"]
+    A --> D["Immutable BODatasetVersion"]
+    D --> Q["Deterministic TrialDecisionService"]
+    Q -->|CONTINUE_TRIAL| R2["Immutable complete Recipe N+1"]
+    Q -->|TRIAL_SUCCEEDED| P["Production candidate"]
+    P --> U["User approval"]
+    U --> X["External processing, user reported"]
+    X --> F["Final inspection and report"]
+```
+
+`TrialCampaign` groups immutable `TrialIteration`, `ProcessRecommendation`, and
+`TrialObservation` records. Observations preserve recommended, CAM-applied, and machine-actual
+parameters separately. Only machine-actual parameters from an eligible and explicitly approved
+observation enter a new dataset version. LLM fallback is trial-only and cannot become
+`production_approved`. External-processing status never implies device connectivity or control.

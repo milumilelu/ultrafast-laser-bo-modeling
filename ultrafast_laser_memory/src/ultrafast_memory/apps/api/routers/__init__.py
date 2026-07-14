@@ -12,6 +12,7 @@ from ultrafast_memory.apps.api.routers.workflows import router as workflows_rout
 from ultrafast_memory.apps.api.routers.process_workflow import router as process_workflow_router
 from ultrafast_memory.apps.api.routers.jobs import router as jobs_router
 from ultrafast_memory.apps.api.routers.process_recommendations import router as process_recommendations_router
+from ultrafast_memory.apps.api.routers.trial_campaigns import router as trial_campaigns_router
 
 
 ROUTERS = (
@@ -29,6 +30,7 @@ ROUTERS = (
     process_workflow_router,
     jobs_router,
     process_recommendations_router,
+    trial_campaigns_router,
 )
 
 __all__ = ["ROUTERS"]

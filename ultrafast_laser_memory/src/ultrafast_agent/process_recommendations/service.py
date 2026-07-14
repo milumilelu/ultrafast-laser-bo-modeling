@@ -23,11 +23,15 @@ class ProcessRecommendationService:
         parent_recommendation_id: str | None = None,
         parameter_units: dict[str, str] | None = None,
         parameter_sources: dict[str, str] | None = None,
+        recommendation_source: str | None = None,
+        source_run_id: str | None = None,
     ) -> ProcessRecommendation:
         space = search_space.to_dict() if isinstance(search_space, CompiledSearchSpace) else dict(search_space)
         optimized = dict(bo_result.get("recommended_parameters") or {})
-        fixed = dict(space.get("fixed_parameters") or {})
-        recipe = {**dict(current_recipe or {}), **fixed, **optimized}
+        fixed = {**dict(current_recipe or {}), **dict(space.get("fixed_parameters") or {})}
+        for name in optimized:
+            fixed.pop(name, None)
+        recipe = {**fixed, **optimized}
         sources, units = dict(parameter_sources or {}), dict(parameter_units or {})
         metadata = {}
         for name, value in recipe.items():
@@ -42,8 +46,15 @@ class ProcessRecommendationService:
             status = "blocked"
         elif not recipe or any(item["unit"] is None for item in metadata.values()):
             status = "pending_review"
+        elif stage == "production_candidate":
+            status = "pending_review"
         else:
             status = "ready_for_cam" if stage in {"production_approved", "trial_cut"} else "ready_for_trial"
+        source = recommendation_source or (
+            "bo_parameter_recommendation" if optimized else "approved_prior_or_rule"
+        )
+        if stage == "production_approved" and source == "llm_trial_fallback":
+            raise ValueError("LLM trial fallback cannot become production approved")
         value = ProcessRecommendation(
             recommendation_id=f"recommendation_{uuid.uuid4().hex}", task_id=task_id,
             workflow_id=workflow_id, iteration_number=self.repository.next_iteration(task_id),
@@ -53,7 +64,7 @@ class ProcessRecommendationService:
             fixed_parameters=fixed, forbidden_parameters=dict(space.get("forbidden_parameters") or {}),
             predictions=dict(bo_result.get("predictions") or {}),
             constraints={"derived": space.get("derived_constraints") or [], "outcome": space.get("outcome_constraints") or []},
-            recommendation_source="bo_parameter_recommendation" if optimized else "approved_prior_or_rule",
+            recommendation_source=source, source_run_id=source_run_id,
             confidence={"support_status": bo_result.get("model_status"), "uncertainty": bo_result.get("uncertainty")},
             model_version=bo_result.get("model_version"), dataset_version=bo_result.get("dataset_version"),
             search_space_version=space["search_space_version"], objective_version=bo_result.get("objective_version", "1.0"),
@@ -105,7 +116,12 @@ class BOTrainingApprovalService:
         self.repository = repository or ProcessRecommendationRepository()
         self.registry = registry or BOModelRegistry()
 
-    def approve(self, candidate_id: str, approved_by: str) -> dict[str, Any]:
+    def approve(
+        self,
+        candidate_id: str,
+        approved_by: str,
+        prior_sample_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         candidate = self.repository.get_training_candidate(candidate_id)
         eligibility = candidate["eligibility_report"]
         if not eligibility.get("eligible"):
@@ -113,7 +129,7 @@ class BOTrainingApprovalService:
         approval = self.repository.approve_training_candidate(candidate_id, approved_by)
         payload = candidate["candidate"]
         dataset = self.registry.register_dataset(
-            [approval["sample_id"]],
+            [*(prior_sample_ids or []), approval["sample_id"]],
             {
                 "task_id": payload.get("task_id"),
                 "recommendation_id": payload.get("recommendation_id"),

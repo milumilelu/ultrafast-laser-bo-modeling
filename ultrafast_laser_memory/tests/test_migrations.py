@@ -27,6 +27,7 @@ def test_baseline_migration_is_registered_and_idempotent(isolated_root):
             "0009_process_recommendation_cam_documents",
             "0010_atomic_runtime_event_sequence",
             "0011_legacy_trace_migration_ledger",
+            "0012_trial_bo_closed_loop",
         ]
     assert count == 1
 

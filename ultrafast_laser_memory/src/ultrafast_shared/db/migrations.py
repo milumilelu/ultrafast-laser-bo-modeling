@@ -337,6 +337,31 @@ BASELINE_MIGRATIONS = (
             )""",
         ),
     ),
+    Migration(
+        migration_id="0012_trial_bo_closed_loop",
+        description="Persist multi-iteration trial campaigns and governed observations",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS trial_campaign_v2 (
+                campaign_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, workflow_id TEXT NOT NULL,
+                campaign_json TEXT NOT NULL, business_state TEXT NOT NULL, substatus TEXT NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS trial_iteration_v2 (
+                iteration_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,
+                iteration_number INTEGER NOT NULL, recommendation_id TEXT NOT NULL UNIQUE,
+                parent_recommendation_id TEXT, observation_id TEXT, decision TEXT,
+                created_at TEXT NOT NULL, UNIQUE(campaign_id, iteration_number)
+            )""",
+            """CREATE TABLE IF NOT EXISTS trial_observation_v2 (
+                observation_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,
+                iteration_id TEXT NOT NULL UNIQUE, recommendation_id TEXT NOT NULL,
+                observation_json TEXT NOT NULL, eligibility_json TEXT NOT NULL,
+                candidate_id TEXT, dataset_version TEXT, created_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_trial_campaign_task_v2 ON trial_campaign_v2(task_id)",
+            "CREATE INDEX IF NOT EXISTS idx_trial_iteration_campaign_v2 ON trial_iteration_v2(campaign_id, iteration_number)",
+        ),
+    ),
 )
 
 

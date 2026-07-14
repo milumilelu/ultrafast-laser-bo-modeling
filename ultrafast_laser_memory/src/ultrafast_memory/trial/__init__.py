@@ -1,4 +1,4 @@
-__all__ = ["TrialApplicationService"]
+__all__ = ["TrialApplicationService", "TrialClosedLoopService"]
 
 
 def __getattr__(name: str):
@@ -6,4 +6,8 @@ def __getattr__(name: str):
         from ultrafast_memory.trial.service import TrialApplicationService
 
         return TrialApplicationService
+    if name == "TrialClosedLoopService":
+        from ultrafast_memory.trial.closed_loop import TrialClosedLoopService
+
+        return TrialClosedLoopService
     raise AttributeError(name)
