@@ -227,9 +227,9 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 
 系统最多进行 3 轮澄清。第 3 轮后仍缺少关键字段时，应给出当前已知信息、仍缺失信息和可继续的保守方案，不能无限追问，也不能进入确定性 BO 参数推荐。
 
-加工任务字段使用 `hybrid-slot-v1` 混合抽取管线：当前 `TaskSpec`、待补字段、上一轮问题和工作流阶段先进入上下文确定性抽取；存在歧义时才调用严格 JSON Schema 的 LLM 语义抽取。两类抽取器只生成 `TaskSpecPatch` 候选，随后统一经过候选融合、单位/枚举归一、Schema 与业务校验、冲突检测和受控合并。`fill` 不得覆盖已确认值，只有用户明确修正并产生 `correct` 操作时才可更新，同时写入修订历史。
+加工任务自由自然语言字段使用 `llm-task-intake-v1` 主导的结构化抽取管线：当前 `TaskSpec`、待补字段、上一轮问题和当前用户消息进入 LLM JSON Schema 抽取，LLM 只能返回带原文 evidence 的 `TaskSpecPatch`。Python 仅负责字段白名单、类型、枚举、单位、适用性与 evidence 校验，以及冲突检测、受控合并和缺失字段计算。`fill` 不得覆盖已确认值；只有用户明确修正且补丁操作为 `correct` 时才可更新，并写入修订历史。
 
-扁平 `process_task_spec` 继续供 BO、CAM 和设备约束消费；独立的 `process_task_field_provenance` 保存每个字段的 evidence、source、confidence、message_id 和 extractor version。连续两次对相同待补字段提交相同或等价文本且没有有效 Patch 时，工作流进入 `PARSER_STALL`，保留已有状态并改用字段化输入模板，不再重复原问题。
+显式 `字段名=值` 输入可由极小的 `StrictKeyValueParser` 离线处理；它只识别 alias 表，不根据值或自由文本猜字段。LLM 连续两次失败时不更新 `TaskSpec`，直接给出严格字段模板；相同待补字段连续两次没有有效 Patch 时进入 `PARSER_STALL`。扁平 `process_task_spec` 继续供 BO、RAG、CAM 和设备约束消费；独立 provenance 保存 evidence、source、confidence、message_id 和 extractor version。
 
 系统不展示模型原始隐藏推理链。返回和 TUI 展示的是可公开的 Agent 执行轨迹、任务状态、工具调用状态、证据检查结果和简要推理摘要，字段使用 `progress`、`thinking_status`、`workflow_state`、`execution_trace`、`audit_trace`。
 

@@ -53,7 +53,23 @@ class TaskFieldNormalizer:
             value = cls._enum(raw, {"直线": "straight", "曲线": "curve", "圆弧": "arc", "圆形": "circle"})
         elif field == "efficiency_requirement":
             text = str(raw).strip().lower()
-            value = "none" if text in {"无", "无要求", "无效率要求", "none"} else raw
+            value = "none" if text in {"无", "无要求", "无效率要求", "时间无所谓", "none"} else raw
+        elif field == "process_type":
+            value = cls._enum(raw, {"切割": "cutting", "打孔": "drilling", "刻蚀": "engraving"})
+        elif field == "material":
+            value = cls._enum(raw, {
+                "碳纤维复合板": "CFRP",
+                "碳纤维复合材料": "CFRP",
+                "碳纤维": "CFRP",
+                "金刚石": "diamond",
+            })
+        elif field == "quality_requirement":
+            value = cls._enum(raw, {
+                "切缝区域无分层": "no_delamination",
+                "切缝不要分层": "no_delamination",
+                "无分层": "no_delamination",
+                "无明显热损伤": "no_thermal_damage",
+            })
         return candidate.model_copy(update={"normalized_value": value, "unit": unit})
 
     @staticmethod
@@ -94,4 +110,3 @@ class TaskFieldNormalizer:
             if marker in value:
                 return normalized
         return raw
-

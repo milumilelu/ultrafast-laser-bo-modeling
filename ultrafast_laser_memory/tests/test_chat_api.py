@@ -35,7 +35,8 @@ def test_chat_api_end_to_end(isolated_root, monkeypatch):
     )
     assert chat_resp.status_code == 200
     data = chat_resp.json()
-    assert "需求确认阶段" in data["assistant_message"]
+    assert "字段解析服务暂时无法可靠理解" in data["assistant_message"]
+    assert "严格字段格式" in data["assistant_message"]
     assert data["selected_skill"] == "complex_process_task"
     assert data["route_plan"]["requires_evidence_gap_check"] is True
     assert data["evidence_gap"] is None

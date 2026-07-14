@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import ValidationError
-
 from ultrafast_agent.task_intake.schemas import (
     ALLOWED_TASK_FIELDS,
     ClarificationContext,
@@ -13,7 +11,7 @@ from ultrafast_agent.task_intake.schemas import (
 )
 
 
-class LLMTaskFieldExtractor:
+class LLMStructuredExtractor:
     def __init__(self, client: Any | None):
         self.client = client
 
@@ -29,11 +27,19 @@ class LLMTaskFieldExtractor:
                 ambiguities=[{"reason": "llm_unavailable"}],
                 llm_attempted=True,
                 degraded=True,
+                provider=getattr(self.client, "provider", None),
+                model=getattr(self.client, "model", None),
+                extraction_mode="llm_structured",
             )
         prompt = self._prompt(message, current_spec, context)
         last_reason = "llm_extraction_failed"
-        for _ in range(2):
+        provider = getattr(self.client, "provider", None)
+        model = getattr(self.client, "model", None)
+        for attempt in range(1, 3):
             try:
+                options: dict[str, Any] = {"temperature": 0, "timeout": 20}
+                if attempt == 1:
+                    options["response_format"] = self._response_format()
                 result = self.client.chat(
                     [
                         {
@@ -45,19 +51,27 @@ class LLMTaskFieldExtractor:
                         },
                         {"role": "user", "content": prompt},
                     ],
-                    temperature=0,
-                    timeout=20,
-                    response_format=self._response_format(),
+                    **options,
                 )
                 data = self._json(result.get("content") or "")
-                return self._validated_patch(data, message, context)
-            except (json.JSONDecodeError, ValidationError, TypeError, ValueError, Exception) as exc:
+                return self._validated_patch(
+                    data,
+                    context,
+                    provider=result.get("provider") or provider,
+                    model=result.get("model") or model,
+                    attempt_count=attempt,
+                )
+            except Exception as exc:
                 last_reason = f"llm_extraction_failed:{type(exc).__name__}"
         return TaskSpecPatch(
             unresolved_fields=list(context.pending_fields),
             ambiguities=[{"reason": last_reason}],
             llm_attempted=True,
             degraded=True,
+            provider=provider,
+            model=model,
+            extraction_mode="llm_structured",
+            attempt_count=2,
         )
 
     @staticmethod
@@ -75,8 +89,11 @@ class LLMTaskFieldExtractor:
     @staticmethod
     def _validated_patch(
         data: dict[str, Any],
-        message: str,
         context: ClarificationContext,
+        *,
+        provider: str | None,
+        model: str | None,
+        attempt_count: int,
     ) -> TaskSpecPatch:
         accepted = []
         rejected = []
@@ -87,22 +104,8 @@ class LLMTaskFieldExtractor:
             if not isinstance(raw, dict):
                 rejected.append({"reason": "candidate_not_object"})
                 continue
-            field = str(raw.get("field_name") or "")
-            if field not in ALLOWED_TASK_FIELDS:
-                rejected.append(
-                    {
-                        "field_name": field,
-                        "evidence": str(raw.get("evidence") or ""),
-                        "reason": "field_not_allowed",
-                    }
-                )
-                continue
-            evidence = str(raw.get("evidence") or "").strip()
-            if not evidence or evidence not in message:
-                rejected.append(
-                    {"field_name": field, "evidence": evidence, "reason": "evidence_not_in_user_message"}
-                )
-                continue
+            if "raw_value" not in raw and "value" in raw:
+                raw = {**raw, "raw_value": raw["value"]}
             candidate_data = {
                 **raw,
                 "extraction_source": "llm_semantic_extraction",
@@ -119,19 +122,30 @@ class LLMTaskFieldExtractor:
             ambiguities=[item for item in ambiguities if isinstance(item, dict)],
             rejected_candidates=rejected,
             llm_attempted=True,
+            extraction_version="llm-task-intake-v1",
+            provider=provider,
+            model=model,
+            extraction_mode="llm_structured",
+            attempt_count=attempt_count,
         )
 
     @staticmethod
     def _prompt(message: str, current_spec: dict[str, Any], context: ClarificationContext) -> str:
-        schema = LLMTaskFieldExtractor._response_format()["json_schema"]["schema"]
+        schema = LLMStructuredExtractor._response_format()["json_schema"]["schema"]
         return (
             "任务：从用户原文抽取用户明确表达的任务字段。\n"
-            "规则：不得生成未表达字段；不得生成激光功率、频率、速度或设备边界；"
-            "已有值默认不可覆盖，只有明确修正语义才可 operation=correct；无法确定返回 ambiguity。\n"
-            f"用户消息={json.dumps(message, ensure_ascii=False)}\n"
-            f"当前TaskSpec={json.dumps(current_spec, ensure_ascii=False)}\n"
-            f"pending_fields={json.dumps(context.pending_fields, ensure_ascii=False)}\n"
+            "约束：1.只提取用户明确表达的内容；2.结合上一轮问题理解“允许”“无”等简答；"
+            "3.不得推测缺失信息；4.不得生成激光功率、频率、扫描速度、passes等工艺推荐参数；"
+            "5.不得修改设备边界；6.不得修改工作流阶段或会话状态；7.不得输出白名单外字段；"
+            "8.每个更新必须提供当前用户原文 evidence；9.无法确定时返回 unresolved_fields 或 ambiguities；"
+            "10.只有用户明确说出改为、更正、说错了或不是…是…时 operation 才能为 correct，"
+            "且 evidence 必须包含修正语义。只输出 JSON，不输出解释。\n"
+            f"user_message={json.dumps(message, ensure_ascii=False)}\n"
+            f"current_task_spec={json.dumps(current_spec, ensure_ascii=False)}\n"
+            f"missing_fields={json.dumps(context.pending_fields, ensure_ascii=False)}\n"
             f"previous_questions={json.dumps(context.previous_questions, ensure_ascii=False)}\n"
+            f"current_process_type={json.dumps(current_spec.get('process_type'), ensure_ascii=False)}\n"
+            f"expected_answer_types={json.dumps(context.expected_answer_types, ensure_ascii=False)}\n"
             f"JSON Schema={json.dumps(schema, ensure_ascii=False)}"
         )
 
@@ -145,7 +159,7 @@ class LLMTaskFieldExtractor:
                 "schema": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["updates", "unresolved_fields", "ambiguities"],
+                    "required": ["updates", "unresolved_fields", "ambiguities", "extractor_version"],
                     "properties": {
                         "updates": {
                             "type": "array",
@@ -166,15 +180,19 @@ class LLMTaskFieldExtractor:
                                     "unit": {"type": ["string", "null"]},
                                     "evidence": {"type": "string"},
                                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                                    "operation": {"type": "string", "enum": ["fill", "correct", "clear"]},
+                                    "operation": {"type": "string", "enum": ["fill", "correct"]},
                                     "ambiguity": {"type": ["string", "null"]},
                                 },
                             },
                         },
                         "unresolved_fields": {"type": "array", "items": {"type": "string"}},
                         "ambiguities": {"type": "array", "items": {"type": "object"}},
+                        "extractor_version": {"type": "string", "const": "llm-task-intake-v1"},
                     },
                 },
             },
         }
 
+
+# Import compatibility for callers created before the LLM-primary migration.
+LLMTaskFieldExtractor = LLMStructuredExtractor

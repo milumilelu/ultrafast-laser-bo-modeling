@@ -31,7 +31,9 @@ def test_streaming_process_chat_accumulates_fields_and_requires_trial_choice(iso
     client = TestClient(app)
     session_id = client.post("/chat/sessions", json={}).json()["session_id"]
 
-    first_events, first = _stream(client, session_id, "我想切割5mm厚的碳纤维板，板号T300")
+    first_events, first = _stream(
+        client, session_id, "加工类型=切割；材料=CFRP_T300；厚度=5mm"
+    )
     assert "等待补充加工要求" in first
     assert "请回答" in first
     assert "推荐参数" not in first
@@ -44,9 +46,14 @@ def test_streaming_process_chat_accumulates_fields_and_requires_trial_choice(iso
     assert state["next_required_action"]["action_label"] == "补充加工要求"
     assert any(item.get("title") == "公开推理摘要" for item in first_events)
     assert not any(item.get("event_type") == "device_lookup" for item in first_events)
-    _, second = _stream(client, session_id, "1、切缝碳纤维无分层；2、无；3、可多次分层加工")
+    _, second = _stream(
+        client, session_id, "质量要求=切缝碳纤维无分层；允许分层切割=true"
+    )
     assert "等待补充加工要求" in second
-    events, third = _stream(client, session_id, "10cm直线；无效率要求；压缩空气")
+    events, third = _stream(
+        client, session_id,
+        "切割长度=10cm；轮廓=直线；效率要求=无；辅助介质=压缩空气",
+    )
     assert "等待选择试切方式" in third
     assert "[简化试切] [完整试切] [跳过试切]" in third
     assert any(item.get("event_type") == "tool_started" for item in events)

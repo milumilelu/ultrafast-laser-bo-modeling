@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-EXTRACTION_VERSION = "hybrid-slot-v1"
+EXTRACTION_VERSION = "llm-task-intake-v1"
 
 PROCESS_REQUIRED_FIELDS = (
     "material",
@@ -58,7 +58,7 @@ class TaskFieldCandidate(BaseModel):
     evidence: str
     extraction_source: str
     confidence: float = Field(ge=0, le=1)
-    operation: Literal["fill", "correct", "clear"] = "fill"
+    operation: Literal["fill", "correct"] = "fill"
     ambiguity: str | None = None
 
 
@@ -70,6 +70,14 @@ class TaskSpecPatch(BaseModel):
     extraction_version: str = EXTRACTION_VERSION
     llm_attempted: bool = False
     degraded: bool = False
+    provider: str | None = None
+    model: str | None = None
+    extraction_mode: Literal["llm_structured", "strict_key_value", "not_run"] = "llm_structured"
+    attempt_count: int = 0
+
+    @property
+    def extractor_version(self) -> str:
+        return self.extraction_version
 
 
 class MergeResult(BaseModel):
@@ -79,4 +87,3 @@ class MergeResult(BaseModel):
     applied: list[TaskFieldCandidate] = Field(default_factory=list)
     unchanged: list[TaskFieldCandidate] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
-

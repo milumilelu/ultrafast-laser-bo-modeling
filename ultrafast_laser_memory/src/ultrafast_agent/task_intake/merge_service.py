@@ -11,6 +11,9 @@ from ultrafast_agent.task_intake.schemas import (
 )
 
 
+_CORRECTION_MARKERS = ("改为", "改成", "更正", "说错了", "不是", "应为")
+
+
 class TaskSpecMergeService:
     @classmethod
     def merge(
@@ -34,13 +37,6 @@ class TaskSpecMergeService:
             field = candidate.field_name
             old = task.get(field)
             new = candidate.normalized_value
-            if candidate.operation == "clear":
-                if old is not None:
-                    task.pop(field, None)
-                    revisions.append(cls._revision(field, old, None, candidate, message_id))
-                    applied.append(candidate)
-                    provenance[field] = cls._metadata(candidate, message_id, context, patch.extraction_version)
-                continue
             if old is None:
                 task[field] = new
                 applied.append(candidate)
@@ -59,6 +55,18 @@ class TaskSpecMergeService:
                         "evidence": candidate.evidence,
                         "operation": candidate.operation,
                         "reason": "confirmed_value_requires_explicit_correction",
+                    }
+                )
+                continue
+            if not any(marker in candidate.evidence for marker in _CORRECTION_MARKERS):
+                conflicts.append(
+                    {
+                        "field_name": field,
+                        "existing_value": old,
+                        "candidate_value": new,
+                        "evidence": candidate.evidence,
+                        "operation": candidate.operation,
+                        "reason": "correction_evidence_required",
                     }
                 )
                 continue

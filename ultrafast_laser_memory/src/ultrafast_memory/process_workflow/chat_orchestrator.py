@@ -6,12 +6,13 @@ from typing import Any
 
 from ultrafast_agent.task_intake import (
     ClarificationContextService,
-    HybridTaskFieldExtractionService,
-    MissingFieldService,
+    MissingFieldEvaluator,
+    TaskFieldExtractionService,
     TaskFieldNormalizer,
-    TaskFieldValidator,
+    TaskSpecPatchValidator,
     TaskSpecMergeService,
 )
+from ultrafast_agent.task_intake.schemas import MergeResult, TaskSpecPatch
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
 from ultrafast_memory.chat.workflow_status import record_public_trace, upsert_workflow_progress
@@ -51,7 +52,7 @@ def process_progress(state: dict[str, Any], next_action: dict[str, Any]) -> dict
     current = state.get("state") or "INTAKE"
     if current == "COMPLETED":
         completed_count = len(PROCESS_STAGES)
-    elif current == "REQUIREMENTS_PENDING":
+    elif current in {"REQUIREMENTS_PENDING", "PARSER_STALL"}:
         completed_count = 0
     elif current in PROCESS_STAGES:
         completed_count = PROCESS_STAGES.index(current)
@@ -68,8 +69,8 @@ def process_progress(state: dict[str, Any], next_action: dict[str, Any]) -> dict
             "completed_stages": [item["step"] for item in overview if item["status_code"] == "completed"],
             "pending_stage_codes": [item["step_code"] for item in overview if item["status_code"] == "pending"],
             "pending_stages": [item["step"] for item in overview if item["status_code"] == "pending"],
-            "blocked_stage_codes": [current] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
-            "blocked_stages": [stage_label(current)] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
+            "blocked_stage_codes": [current] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARSER_STALL", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
+            "blocked_stages": [stage_label(current)] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARSER_STALL", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
             "next_required_action": localize_action(next_action), "completed_steps": completed_count,
             "total_steps": len(PROCESS_STAGES), "percent": round(completed_count / len(PROCESS_STAGES) * 100)}
 
@@ -80,50 +81,73 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
     task = dict(collected.get("process_task_spec") or {})
     workflow = dict(collected.get("process_workflow") or {})
     context = ClarificationContextService.build(state, "complex_process_task", task)
-    extraction = HybridTaskFieldExtractionService(
-        create_llm_client(get_llm_config())
-    ).extract(message, task, context)
-    normalized = TaskFieldNormalizer.normalize(extraction)
-    validated = TaskFieldValidator.validate(normalized, task, context)
-    merge_result = TaskSpecMergeService.merge(
-        task,
-        validated,
-        current_provenance=collected.get("process_task_field_provenance") or {},
-        revision_history=collected.get("process_task_revision_history") or [],
-        message_id=message_id,
-        context=context,
-    )
-    task = merge_result.task_spec
-    missing = MissingFieldService.evaluate(task, context)
-    extraction_events = _record_field_extraction_events(
-        session_id, message_id, message, validated, merge_result, workflow.get("state") or "INTAKE"
-    )
-    collected["process_task_spec"] = task
-    collected["process_task_field_provenance"] = merge_result.field_provenance
-    collected["process_task_revision_history"] = merge_result.revision_history
-    collected["process_task_extraction_history"] = [
-        *(collected.get("process_task_extraction_history") or [])[-19:],
-        {
-            "message_id": message_id,
-            "evidence": message,
-            "pending_fields": context.pending_fields,
-            "applied_fields": [item.field_name for item in merge_result.applied],
-            "conflicts": merge_result.conflicts,
-            "ambiguities": validated.ambiguities,
-            "degraded": validated.degraded,
-            "extractor_version": validated.extraction_version,
-        },
-    ]
+    if _task_intake_required(workflow, task, context):
+        extraction = TaskFieldExtractionService(
+            create_llm_client(get_llm_config())
+        ).extract(message, task, context)
+        normalized = TaskFieldNormalizer.normalize(extraction)
+        validated = TaskSpecPatchValidator.validate(
+            normalized, task, context, user_message=message
+        )
+        merge_result = TaskSpecMergeService.merge(
+            task,
+            validated,
+            current_provenance=collected.get("process_task_field_provenance") or {},
+            revision_history=collected.get("process_task_revision_history") or [],
+            message_id=message_id,
+            context=context,
+        )
+        task = merge_result.task_spec
+        missing = MissingFieldEvaluator.evaluate(task, context)
+        extraction_events = _record_field_extraction_events(
+            session_id, message_id, message, validated, merge_result,
+            workflow.get("state") or "INTAKE", missing,
+        )
+        collected["process_task_spec"] = task
+        collected["process_task_field_provenance"] = merge_result.field_provenance
+        collected["process_task_revision_history"] = merge_result.revision_history
+        collected["process_task_extraction_history"] = [
+            *(collected.get("process_task_extraction_history") or [])[-19:],
+            {
+                "message_id": message_id,
+                "evidence": message,
+                "pending_fields": context.pending_fields,
+                "applied_fields": [item.field_name for item in merge_result.applied],
+                "rejected_candidates": validated.rejected_candidates,
+                "conflicts": merge_result.conflicts,
+                "ambiguities": validated.ambiguities,
+                "degraded": validated.degraded,
+                "provider": validated.provider,
+                "model": validated.model,
+                "extraction_mode": validated.extraction_mode,
+                "extractor_version": validated.extraction_version,
+                "missing_fields": missing,
+            },
+        ]
+    else:
+        missing = []
+        validated = TaskSpecPatch(extraction_mode="not_run")
+        merge_result = MergeResult(
+            task_spec=task,
+            field_provenance=collected.get("process_task_field_provenance") or {},
+            revision_history=collected.get("process_task_revision_history") or [],
+        )
+        extraction_events = []
     if missing:
         clarification_round = min(int(workflow.get("clarification_round") or 0) + 1, 3)
-        parser_guard, parser_stall = _parser_guard(workflow, context.pending_fields, message, merge_result)
+        parser_guard, repeated_stall = _parser_guard(workflow, context.pending_fields, message, merge_result)
+        extraction_failed = validated.degraded and validated.extraction_mode == "llm_structured"
+        parser_stall = extraction_failed or repeated_stall
         previous_questions = [
-            *(workflow.get("previous_questions") or [])[-9:],
-            {
-                "clarification_round": clarification_round,
-                "fields": missing,
-                "questions": [FIELD_QUESTIONS.get(field, field) for field in missing],
-            },
+            *(workflow.get("previous_questions") or [])[-20:],
+            *[
+                {
+                    "clarification_round": clarification_round,
+                    "field": field,
+                    "question": FIELD_QUESTIONS.get(field, field),
+                }
+                for field in missing
+            ],
         ]
         workflow.update({"state": "PARSER_STALL" if parser_stall else "REQUIREMENTS_PENDING", "missing_fields": missing,
                          "clarification_round": clarification_round,
@@ -132,6 +156,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                          "previous_questions": previous_questions,
                          "parser_guard": parser_guard,
                          "field_conflicts": merge_result.conflicts,
+                         "field_extraction": _field_extraction_debug(validated, merge_result, missing),
                          "task_spec": task,
                          "field_provenance": merge_result.field_provenance,
                          "revision_history": merge_result.revision_history})
@@ -148,7 +173,11 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         if parser_stall:
             extraction_events.append(_record_parser_stall(session_id, message_id, message, missing))
         return {
-            "content": _parser_stall_message(message, missing) if parser_stall else _requirements_message(task, missing, clarification_round),
+            "content": (
+                _degraded_extraction_message(missing) if extraction_failed
+                else _parser_stall_message(message, missing) if parser_stall
+                else _requirements_message(task, missing, clarification_round)
+            ),
             "state": workflow,
             "next_action": {
                 "action_type": "submit_structured_fields" if parser_stall else "submit_required_fields",
@@ -158,6 +187,9 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
             "events": extraction_events,
         }
 
+    last_extraction_debug = workflow.get("field_extraction")
+    if validated.extraction_mode != "not_run":
+        last_extraction_debug = _field_extraction_debug(validated, merge_result, missing)
     workflow.update({
         "parser_guard": {},
         "missing_fields": [],
@@ -165,6 +197,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         "field_provenance": merge_result.field_provenance,
         "revision_history": merge_result.revision_history,
         "field_conflicts": merge_result.conflicts,
+        "field_extraction": last_extraction_debug,
     })
 
     selected = _trial_choice(message) or workflow.get("selected_trial_mode")
@@ -469,6 +502,37 @@ def _ingest_and_evaluate(plan: dict[str, Any], payload: dict[str, Any]) -> dict[
         "confirm_conditional": bool(payload.get("confirm_conditional"))})
 
 
+def _task_intake_required(workflow: dict[str, Any], task: dict[str, Any], context) -> bool:
+    state = workflow.get("state")
+    if state in {None, "", "INTAKE", "REQUIREMENTS_PENDING", "PARSER_STALL"}:
+        return True
+    return bool(MissingFieldEvaluator.evaluate(task, context))
+
+
+def _field_extraction_debug(patch, merge_result, missing: list[str]) -> dict[str, Any]:
+    return {
+        "provider": patch.provider,
+        "model": patch.model,
+        "extractor_version": patch.extraction_version,
+        "extraction_mode": patch.extraction_mode,
+        "attempt_count": patch.attempt_count,
+        "recognized_fields": [
+            {
+                "field_name": item.field_name,
+                "value": item.normalized_value,
+                "unit": item.unit,
+                "evidence": item.evidence,
+                "operation": item.operation,
+            }
+            for item in patch.updates
+        ],
+        "rejected_fields": list(patch.rejected_candidates),
+        "conflicts": list(merge_result.conflicts),
+        "missing_fields": list(missing),
+        "degraded": patch.degraded,
+    }
+
+
 def _record_field_extraction_events(
     session_id: str,
     message_id: str | None,
@@ -476,6 +540,7 @@ def _record_field_extraction_events(
     patch,
     merge_result,
     stage: str,
+    missing: list[str],
 ) -> list[dict[str, Any]]:
     events = [record_agent_trace_event(
         session_id=session_id,
@@ -483,10 +548,17 @@ def _record_field_extraction_events(
         event_type="field_extraction_started",
         stage=stage,
         title="字段抽取开始",
-        summary="开始执行上下文候选抽取、归一、校验和受控合并。",
+        summary=(
+            f"字段抽取模式 {patch.extraction_mode}；provider={patch.provider or 'none'}；"
+            f"model={patch.model or 'none'}；extractor={patch.extraction_version}。"
+        ),
         skill="complex_process_task",
-        tool="hybrid_task_field_extractor",
+        tool="task_field_extraction_service",
         input_summary=message[:240],
+        output_summary=(
+            f"provider={patch.provider or 'none'}; model={patch.model or 'none'}; "
+            f"extractor_version={patch.extraction_version}; attempts={patch.attempt_count}"
+        ),
         status="running",
     )]
     for candidate in patch.updates:
@@ -501,7 +573,7 @@ def _record_field_extraction_events(
                 f"证据为“{candidate.evidence}”。"
             ),
             skill="complex_process_task",
-            tool="hybrid_task_field_extractor",
+            tool="task_field_extraction_service",
             output_summary=(
                 f"field={candidate.field_name}; source={candidate.extraction_source}; "
                 f"confidence={candidate.confidence:.2f}; operation={candidate.operation}"
@@ -571,11 +643,30 @@ def _record_field_extraction_events(
             event_type="field_extraction_degraded",
             stage=stage,
             title="字段抽取降级",
-            summary="LLM 结构化抽取不可用或返回无效结果；已保留确定性候选和现有任务状态。",
+            summary="LLM 结构化抽取不可用或返回无效结果；未写入候选，已保留现有任务状态。",
             skill="complex_process_task",
             tool="llm_task_field_extractor",
             status="completed",
         ))
+    events.append(record_agent_trace_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type="state_update",
+        stage=stage,
+        title="字段抽取结果",
+        summary=(
+            "识别字段：" + ("、".join(item.field_name for item in patch.updates) or "无") + "；"
+            f"拒绝字段：{len(patch.rejected_candidates)}；冲突字段：{len(merge_result.conflicts)}；"
+            "最终缺失字段：" + ("、".join(missing) or "无") + "。"
+        ),
+        skill="complex_process_task",
+        tool="task_spec_patch_validator",
+        output_summary=(
+            f"recognized={len(patch.updates)}; rejected={len(patch.rejected_candidates)}; "
+            f"conflicts={len(merge_result.conflicts)}; missing={','.join(missing)}"
+        ),
+        status="completed" if not patch.degraded else "warning",
+    ))
     return events
 
 
@@ -619,7 +710,7 @@ def _record_parser_stall(
         event_type="clarification_parser_failed",
         stage="PARSER_STALL",
         title="澄清解析停滞",
-        summary="连续两次未从等价回答生成有效 Patch，已切换为字段化输入模板。",
+        summary="字段抽取未生成可靠 Patch，已切换为严格字段化输入模板。",
         skill="complex_process_task",
         tool="parser_stall_guard",
         input_summary=message[:240],
@@ -629,23 +720,35 @@ def _record_parser_stall(
 
 
 def _parser_stall_message(message: str, missing: list[str]) -> str:
-    examples = {
-        "material": "material=CFRP_T300",
-        "process_type": "process_type=cutting",
-        "thickness_mm": "thickness_mm=5 mm",
-        "quality_requirement": "quality_requirement=no_delamination",
-        "cut_length_mm": "cut_length_mm=100 mm；contour_type=straight",
-        "efficiency_requirement": "efficiency_requirement=none",
-        "auxiliary": "auxiliary=compressed_air",
-        "layer_cut_allowed": "layer_cut_allowed=true",
-    }
-    template = "；".join(examples[field] for field in missing if field in examples)
+    template = _structured_input_template(missing)
     return (
         "系统未能可靠解析以下回答：\n"
         f"“{message}”\n\n"
         "已保留此前确认的全部字段，不会进入 BO。请按下列字段化格式重试：\n"
         f"{template}"
     )
+
+
+def _degraded_extraction_message(missing: list[str]) -> str:
+    return (
+        "字段解析服务暂时无法可靠理解当前回答。已保留此前确认的全部字段，不会进入 BO。\n\n"
+        "请按以下严格字段格式输入：\n"
+        + _structured_input_template(missing)
+    )
+
+
+def _structured_input_template(missing: list[str]) -> str:
+    examples = {
+        "material": "材料=CFRP_T300",
+        "process_type": "加工类型=切割",
+        "thickness_mm": "厚度=5 mm",
+        "quality_requirement": "质量要求=切缝区域无分层",
+        "cut_length_mm": "切割长度=100 mm；轮廓=直线",
+        "efficiency_requirement": "效率要求=无",
+        "auxiliary": "辅助介质=压缩空气",
+        "layer_cut_allowed": "允许分层切割=true",
+    }
+    return "；\n".join(examples[field] for field in missing if field in examples)
 
 
 def _requirements_message(task: dict[str, Any], missing: list[str], clarification_round: int = 1) -> str:
