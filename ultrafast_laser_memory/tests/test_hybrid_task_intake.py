@@ -554,6 +554,9 @@ def test_stream_and_non_stream_workflow_state_are_consistent(isolated_root, monk
     assert streamed["task_spec"] == normal["task_spec"]
     assert streamed["missing_slots"] == normal["missing_slots"]
     assert streamed["current_stage_code"] == normal["current_stage_code"]
+    assert streamed["business_state"] == normal["business_state"]
+    assert streamed["substatus"] == normal["substatus"]
+    assert streamed["next_required_action"] == normal["next_required_action"]
 
 
 def test_workflow_status_has_no_general_semantic_parser(project_root: Path):

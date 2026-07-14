@@ -9,6 +9,7 @@ import uuid
 
 from ultrafast_domain.evolution.models import (
     EVOLVABLE_TYPES,
+    RESERVED_EVOLUTION_TYPES,
     TRIGGER_TYPES,
     EvaluationRun,
     EvolvableArtifactVersion,
@@ -91,6 +92,8 @@ class EvolutionService:
     ) -> EvolvableArtifactVersion:
         if artifact_type not in EVOLVABLE_TYPES:
             raise ValueError(f"unsupported evolvable artifact type: {artifact_type}")
+        if artifact_type in RESERVED_EVOLUTION_TYPES and status == "active":
+            raise ValueError(f"reserved evolution type cannot be active: {artifact_type}")
         versions = self.repository.list_versions(artifact_id)
         if parent_version_id and self.repository.get_version(parent_version_id) is None:
             raise ValueError("parent artifact version does not exist")
@@ -189,6 +192,10 @@ class EvolutionService:
 
     def activate_version(self, candidate_id: str, *, activation_reason: str, rollback_condition: str) -> EvolvableArtifactVersion:
         candidate = self._candidate(candidate_id)
+        if candidate.candidate_type in RESERVED_EVOLUTION_TYPES:
+            raise ValueError(
+                f"reserved evolution type cannot be promoted: {candidate.candidate_type}"
+            )
         if candidate.status != "approved" or not candidate.approval_by:
             raise ValueError("candidate requires explicit approval before activation")
         evaluation = self.repository.get_evaluation(candidate.evaluation_run_id or "")

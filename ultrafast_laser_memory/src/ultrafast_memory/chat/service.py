@@ -17,7 +17,7 @@ from ultrafast_memory.chat.session_store import (
     save_skill_trace,
     session_exists,
 )
-from ultrafast_memory.chat.workflow_status import build_workflow_artifacts
+from ultrafast_memory.chat.legacy_projection_adapter import LegacyWorkflowProjectionAdapter
 from ultrafast_memory.core.config import load_config
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.equipment.bounds import build_machine_bounds, require_machine_bounds_for_bo
@@ -471,6 +471,22 @@ def _record_process_public_reasoning(
         status="completed",
     )
     events = [agent_event]
+    if state.get("business_state_changed"):
+        transition = dict(state.get("business_state_transition") or {})
+        events.append(record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="business_state_changed",
+            stage=str(state.get("substatus") or view["current_stage_code"]),
+            title="业务状态变更",
+            summary=(
+                f"Business State 从 {transition.get('from') or 'NONE'} "
+                f"变更为 {transition.get('to')}；substatus={transition.get('substatus')}。"
+            ),
+            skill="complex_process_task",
+            payload={"transition": transition},
+            status="completed",
+        ))
     equipment = build_machine_bounds()
     if equipment.get("active"):
         equipment_summary = (
@@ -592,7 +608,7 @@ def _build_chat_response(
     task_spec = {**current_task_spec, **candidate}
     collected["task_spec"] = task_spec
     update_session_state(session_id, {"collected_slots": collected})
-    artifacts = build_workflow_artifacts(
+    artifacts = LegacyWorkflowProjectionAdapter.build_and_persist(
         session_id=session_id,
         message_id=message_id,
         task_spec=task_spec,

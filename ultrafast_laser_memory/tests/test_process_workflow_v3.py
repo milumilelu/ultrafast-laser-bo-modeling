@@ -8,6 +8,9 @@ from ultrafast_memory.process_workflow.schemas import (
     NextAction, ParameterRecommendation, ParameterValue, ProcessState,
 )
 from ultrafast_memory.process_workflow.state_machine import ProcessStateMachine
+from ultrafast_memory.process_workflow.business_state import (
+    LEGACY_STATE_MIGRATION, BusinessState,
+)
 from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.chat.workflow_status import record_public_trace
 from ultrafast_memory.chat.schemas import ChatRequest
@@ -54,6 +57,8 @@ def test_process_state_machine_blocks_shortcuts_and_progress_is_real():
     progress = sm.progress(NextAction(action_type="submit", title="补充字段"))
     assert progress.percent == round(progress.completed_steps / progress.total_steps * 100)
     assert progress.current_stage == "INTAKE"
+    assert sm.business_state == BusinessState.INTAKE
+    assert {state.value for state in ProcessState} <= set(LEGACY_STATE_MIGRATION)
 
 
 def test_campaign_requires_valid_observation_before_snapshot_and_separates_fidelity(isolated_root):

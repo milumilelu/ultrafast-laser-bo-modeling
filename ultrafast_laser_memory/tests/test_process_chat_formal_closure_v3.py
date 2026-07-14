@@ -35,18 +35,24 @@ def test_chat_continues_from_verified_trial_through_formal_archive(isolated_root
                   '"actual_path":{"type":"coupon"},"measurements":{"cut_complete":1},"defects":[],'
                   '"files":["trial_edge.jpg"]}')
     assert trial["current_stage"] == "FORMAL_PROCESS_READY"
+    assert trial["workflow_state"]["business_state"] == "READY_FOR_EXTERNAL_PROCESS"
     assert trial["next_required_action"]["action_type"] == "submit_formal_preflight"
 
     started = _post(client, session_id,
                     '{"equipment_revision":"r1","material_batch":"batch-1","operator_confirmation":true}')
     assert started["current_stage"] == "FORMAL_PROCESS_RUNNING"
+    assert started["workflow_state"]["business_state"] == "WAITING_EXTERNAL_RESULT"
+    assert "系统未连接、控制或监控设备" in started["assistant_message"]
     checkpoint = _post(client, session_id,
                        '{"progress_percent":100,"deviation_level":0,"observation":{"delamination":false}}')
     assert checkpoint["current_stage"] == "FINAL_INSPECTION_PENDING"
+    assert checkpoint["workflow_state"]["business_state"] == "QUALITY_REVIEW"
     closed = _post(client, session_id,
         '{"required_metrics":["delamination_width"],"measurements":{"delamination_width":0},'
         '"constraint_results":{"no_delamination":true},"files":["edge_photo.jpg"]}')
     assert closed["current_stage"] == "COMPLETED"
+    assert closed["workflow_state"]["business_state"] == "COMPLETED"
+    assert closed["workflow_state"]["report"]["report"]["business_state"] == "COMPLETED"
     assert closed["next_required_action"]["blocking"] is False
     with get_connection() as connection:
         assert connection.execute("SELECT COUNT(*) FROM formal_process_plan").fetchone()[0] == 1

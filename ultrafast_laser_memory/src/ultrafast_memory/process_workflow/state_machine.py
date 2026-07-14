@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .schemas import NextAction, ProcessState, WorkflowProgress
+from .business_state import BUSINESS_STATE_ORDER, BusinessState, business_state_for
 
 
 LINEAR_STAGES = [
@@ -28,7 +29,9 @@ ALLOWED[ProcessState.QUALITY_DECISION].update({ProcessState.REWORK_PENDING, Proc
 ALLOWED[ProcessState.REWORK_PENDING] = {ProcessState.TRIAL_ASSESSMENT, ProcessState.BLOCKED}
 
 
-class ProcessStateMachine:
+class LegacyProcessStateAdapter:
+    """Read-compatible fine-state adapter; BusinessState is authoritative."""
+
     def __init__(self, state: ProcessState = ProcessState.CREATED):
         self.state = state
 
@@ -38,17 +41,28 @@ class ProcessStateMachine:
         self.state = target
         return target
 
+    @property
+    def business_state(self) -> BusinessState:
+        return business_state_for(self.state.value)
+
     def progress(self, next_action: NextAction) -> WorkflowProgress:
-        current_index = LINEAR_STAGES.index(self.state) if self.state in LINEAR_STAGES else 0
-        completed = LINEAR_STAGES[:current_index]
-        pending = LINEAR_STAGES[current_index + 1:]
-        total = len(LINEAR_STAGES)
+        business_state = self.business_state
+        current_index = (
+            BUSINESS_STATE_ORDER.index(business_state)
+            if business_state in BUSINESS_STATE_ORDER else 0
+        )
+        completed = BUSINESS_STATE_ORDER[:current_index]
+        pending = BUSINESS_STATE_ORDER[current_index + 1:]
+        total = len(BUSINESS_STATE_ORDER)
         return WorkflowProgress(
-            workflow_overview=[{"stage": s.value, "status": "completed" if s in completed else "current" if s == self.state else "pending"} for s in LINEAR_STAGES],
-            current_stage=self.state.value,
+            workflow_overview=[{"stage": s.value, "status": "completed" if s in completed else "current" if s == business_state else "pending"} for s in BUSINESS_STATE_ORDER],
+            current_stage=business_state.value,
             completed_stages=[s.value for s in completed],
             pending_stages=[s.value for s in pending],
             next_required_action=next_action,
             completed_steps=len(completed), total_steps=total,
             percent=round(len(completed) / total * 100),
         )
+
+
+ProcessStateMachine = LegacyProcessStateAdapter

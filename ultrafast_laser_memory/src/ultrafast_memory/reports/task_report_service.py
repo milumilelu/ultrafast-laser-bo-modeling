@@ -111,6 +111,8 @@ class TaskReportService:
         ]
         return {
             "task_id": task_id,
+            "business_state": payload.get("business_state"),
+            "substatus": payload.get("substatus"),
             "task_objective": task.get("objective") or task.get("targets") or payload.get("task_objective"),
             "material_and_component": {
                 "material": task.get("material"),

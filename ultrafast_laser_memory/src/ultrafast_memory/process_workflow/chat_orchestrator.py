@@ -15,7 +15,8 @@ from ultrafast_agent.task_intake import (
 from ultrafast_agent.task_intake.schemas import MergeResult, TaskSpecPatch
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
-from ultrafast_memory.chat.workflow_status import upsert_workflow_progress
+from ultrafast_memory.chat.legacy_projection_adapter import upsert_workflow_progress
+from ultrafast_memory.chat.workflow_projection import WorkflowProjectionService
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.trial.service import TrialApplicationService
@@ -27,6 +28,7 @@ from ultrafast_memory.core.time_utils import utc_now_iso
 
 from .closure import archive_gate, bo_sample_eligibility, quality_decision
 from .campaign import CampaignService
+from .business_state import BusinessState, BusinessStateController
 from .recommendation_service import recommend_trial_parameters
 from .repository import ProcessWorkflowRepository
 from .tools import parameter_provenance_registry_tool
@@ -39,40 +41,32 @@ TRIAL_CHOICES = {
     "跳过试切": "skip_trial", "skip_trial": "skip_trial",
 }
 
-PROCESS_STAGES = [
-    "REQUIREMENTS_PENDING", "PARSER_STALL", "REQUIREMENTS_CONFIRMED", "EQUIPMENT_LOADING", "EVIDENCE_RETRIEVAL", "EVIDENCE_ASSESSMENT",
-    "TRIAL_ASSESSMENT", "TRIAL_MODE_PENDING", "TRIAL_PLAN_READY", "TRIAL_RESULT_PENDING",
-    "TRIAL_RESULT_EVALUATION", "KNOWLEDGE_APPROVAL_PENDING", "BO_READY", "BO_RUNNING",
-    "FORMAL_PROCESS_READY", "FORMAL_RELEASE_PENDING", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
-    "FINAL_INSPECTION_PENDING", "QUALITY_DECISION", "REPORT_PENDING", "ARCHIVE_PENDING", "COMPLETED",
-]
-
-
 def process_progress(state: dict[str, Any], next_action: dict[str, Any]) -> dict[str, Any]:
-    current = state.get("state") or "INTAKE"
-    if current == "COMPLETED":
-        completed_count = len(PROCESS_STAGES)
-    elif current in {"REQUIREMENTS_PENDING", "PARSER_STALL"}:
-        completed_count = 0
-    elif current in PROCESS_STAGES:
-        completed_count = PROCESS_STAGES.index(current)
-    else:
-        completed_count = 0
-    overview = []
-    for index, name in enumerate(PROCESS_STAGES):
-        status_code = "completed" if index < completed_count else "current" if name == current else "pending"
-        overview.append({"step_code": name, "step": stage_label(name), "status_code": status_code,
-                         "status": STATUS_LABELS[status_code]})
-    return {"workflow_overview": overview, "current_stage_code": current, "current_stage": current,
+    projection = WorkflowProjectionService.build_process(
+        task_spec=state.get("task_spec") or {},
+        workflow_state=state,
+        next_action=next_action,
+    )
+    current = projection.substatus
+    business_state = BusinessState(projection.business_state)
+    overview = [
+        {**item, "status": STATUS_LABELS[item["status_code"]]}
+        for item in projection.workflow_overview
+    ]
+    blocked = bool(next_action.get("blocking")) or business_state == BusinessState.BLOCKED
+    return {"workflow_overview": overview, "business_state": projection.business_state,
+            "substatus": current, "current_stage_code": current, "current_stage": current,
             "current_stage_label": stage_label(current),
             "completed_stage_codes": [item["step_code"] for item in overview if item["status_code"] == "completed"],
             "completed_stages": [item["step"] for item in overview if item["status_code"] == "completed"],
             "pending_stage_codes": [item["step_code"] for item in overview if item["status_code"] == "pending"],
             "pending_stages": [item["step"] for item in overview if item["status_code"] == "pending"],
-            "blocked_stage_codes": [current] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARSER_STALL", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
-            "blocked_stages": [stage_label(current)] if current in {"BLOCKED", "REQUIREMENTS_PENDING", "PARSER_STALL", "PARAMETER_SOURCE_APPROVAL_PENDING"} else [],
-            "next_required_action": localize_action(next_action), "completed_steps": completed_count,
-            "total_steps": len(PROCESS_STAGES), "percent": round(completed_count / len(PROCESS_STAGES) * 100)}
+            "blocked_stage_codes": [current] if blocked else [],
+            "blocked_stages": [stage_label(current)] if blocked else [],
+            "next_required_action": localize_action(next_action),
+            "completed_steps": len(projection.completed_steps),
+            "total_steps": len(projection.workflow_overview),
+            "percent": projection.progress_percent}
 
 
 def run_process_chat_turn(session_id: str, message: str, message_id: str | None = None) -> dict[str, Any]:
@@ -80,6 +74,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
     collected = dict(state.get("collected_slots") or {})
     task = dict(collected.get("process_task_spec") or {})
     workflow = dict(collected.get("process_workflow") or {})
+    BusinessStateController.ensure(workflow)
     context = ClarificationContextService.build(state, "complex_process_task", task)
     if _task_intake_required(workflow, task, context):
         extraction = TaskFieldExtractionService(
@@ -101,7 +96,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         missing = MissingFieldEvaluator.evaluate(task, context)
         extraction_events = _record_field_extraction_events(
             session_id, message_id, message, validated, merge_result,
-            workflow.get("state") or "INTAKE", missing,
+            workflow.get("substatus") or "INTAKE", missing,
         )
         collected["process_task_spec"] = task
         collected["process_task_field_provenance"] = merge_result.field_provenance
@@ -149,7 +144,10 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                 for field in missing
             ],
         ]
-        workflow.update({"state": "PARSER_STALL" if parser_stall else "REQUIREMENTS_PENDING", "missing_fields": missing,
+        BusinessStateController.transition(
+            workflow, "PARSER_STALL" if parser_stall else "REQUIREMENTS_PENDING"
+        )
+        workflow.update({"missing_fields": missing,
                          "clarification_round": clarification_round,
                          "max_clarification_rounds": 3,
                          "ordered_fields": missing,
@@ -165,7 +163,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
             "active_workflow": "complex_process_task", "active_skill": "complex_process_task",
             "workflow_stage": "parser_stall" if parser_stall else "clarification", "pending_questions": missing})
         upsert_workflow_progress(
-            session_id, "complex_process_task", workflow["state"], "waiting_user",
+            session_id, "complex_process_task", workflow["substatus"], "waiting_user",
             "字段解析停滞，等待结构化输入。" if parser_stall else "等待用户补充加工要求。",
             completed_steps=["工作流路由完成"],
             pending_steps=missing, missing_slots=missing,
@@ -204,7 +202,8 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
     if not selected:
         result = _execute_workflow(session_id, task, selected_trial_mode=None)
         selection = result["data"].get("trial_selection") or {}
-        workflow.update({"state": "TRIAL_MODE_PENDING", "workflow_run_id": result["run_id"]})
+        BusinessStateController.transition(workflow, "TRIAL_MODE_PENDING")
+        workflow["workflow_run_id"] = result["run_id"]
         collected["process_workflow"] = workflow
         update_session_state(session_id, {"collected_slots": collected, "workflow_stage": "trial_mode_pending",
                                           "pending_questions": ["trial_mode"]})
@@ -214,7 +213,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                 "events": [*extraction_events, *result["events"]],
                 "workflow_result": result}
 
-    if workflow.get("state") in {"FORMAL_PROCESS_READY", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
+    if workflow.get("substatus") in {"FORMAL_PROCESS_READY", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
                                  "FINAL_INSPECTION_PENDING", "QUALITY_DECISION", "REPORT_PENDING", "ARCHIVE_PENDING"}:
         formal_result = _run_formal_turn(session_id, message, collected, workflow, task)
         formal_result["events"] = [*extraction_events, *(formal_result.get("events") or [])]
@@ -229,10 +228,13 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         workflow["parameter_recommendation"] = recommendation.model_dump(mode="json")
         if not recommendation.parameters:
             workflow["selected_trial_mode"] = selected
-            workflow["state"] = "BLOCKED" if allow_exploration else "PARAMETER_SOURCE_APPROVAL_PENDING"
+            BusinessStateController.transition(
+                workflow,
+                "BLOCKED" if allow_exploration else "PARAMETER_SOURCE_APPROVAL_PENDING",
+            )
             collected["process_workflow"] = workflow
             update_session_state(session_id, {"collected_slots": collected,
-                "workflow_stage": workflow["state"].lower(),
+                "workflow_stage": workflow["substatus"].lower(),
                 "pending_questions": [] if allow_exploration else ["allow_exploratory_candidates"]})
             content = ("参数工具链已依次执行：" + " → ".join(call_order) + "。\n"
                        "BO 与 RAG 均不足。" +
@@ -248,10 +250,12 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                                    approved_parameter_candidates=[candidate])
         plan = result["data"].get("trial_plan")
         if not plan:
-            return {"content": "试切模式不允许或试切方案生成失败，流程已阻塞。", "state": {"state": "BLOCKED"},
+            blocked = BusinessStateController.transition({}, "BLOCKED")
+            return {"content": "试切模式不允许或试切方案生成失败，流程已阻塞。", "state": blocked,
                     "next_action": {"action_type": "review_trial_mode", "blocking": True},
                     "events": [*extraction_events, *result["events"]]}
-        workflow.update({"state": "TRIAL_RESULT_PENDING", "selected_trial_mode": selected,
+        BusinessStateController.transition(workflow, "TRIAL_RESULT_PENDING")
+        workflow.update({"selected_trial_mode": selected,
                          "trial_plan": plan, "parameter_provenance": provenance,
                          "workflow_run_id": result["run_id"]})
         workflow["campaign"] = _create_campaign(session_id, task, selected, candidate).model_dump(mode="json")
@@ -267,7 +271,8 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         return {"content": "当前等待试切结果。请按下方 JSON 输入契约提交，不得以文字确认代替实测数据。",
                 "state": workflow, "next_action": _trial_result_contract(), "events": extraction_events}
     evaluation = _ingest_and_evaluate(workflow["trial_plan"], payload)
-    workflow.update({"state": "TRIAL_RESULT_EVALUATION", "trial_evaluation": evaluation,
+    BusinessStateController.transition(workflow, "TRIAL_RESULT_EVALUATION")
+    workflow.update({"trial_evaluation": evaluation,
                      "verified_trial_payload": payload})
     collected["process_workflow"] = workflow
     update_session_state(session_id, {"collected_slots": collected, "workflow_stage": "trial_result_evaluation",
@@ -286,7 +291,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                 "constraint_results": {"trial_acceptance": True}, "attachments": payload["files"]})
             workflow["campaign_observation"] = observation
             workflow["model_snapshot"] = campaign_service.update_model(campaign_data["campaign_id"])
-        workflow["state"] = "FORMAL_PROCESS_READY"
+        BusinessStateController.transition(workflow, "FORMAL_PROCESS_READY")
         collected["process_workflow"] = workflow
         update_session_state(session_id, {"collected_slots": collected, "workflow_stage": "formal_process_ready",
                                           "pending_questions": ["formal_preflight"]})
@@ -304,7 +309,7 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
                      task: dict[str, Any]) -> dict[str, Any]:
     payload = _json_payload(message)
     repository = ProcessWorkflowRepository()
-    state = workflow["state"]
+    state = workflow["substatus"]
     if state == "FORMAL_PROCESS_READY":
         required = ("equipment_revision", "material_batch", "operator_confirmation")
         missing = [key for key in required if not payload or payload.get(key) in (None, "", False)]
@@ -312,7 +317,9 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
         if payload and payload.get("equipment_revision") != trial.get("equipment_revision"):
             missing.append("equipment_revision_match")
         if missing:
-            return _save_formal(session_id, collected, {**workflow, "state": "FORMAL_PREFLIGHT"},
+            pending = dict(workflow)
+            BusinessStateController.transition(pending, "FORMAL_PREFLIGHT")
+            return _save_formal(session_id, collected, pending,
                 "正式加工 preflight 未通过：" + "、".join(sorted(set(missing))) + "。",
                 {"action_type": "submit_formal_preflight", "required_fields": list(required), "blocking": True})
         plan_id = stable_id("formal-plan", f"process-{session_id}", workflow["trial_plan"]["trial_plan_id"])
@@ -326,19 +333,20 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
         execution_id = stable_id("formal-exec", plan_id, utc_now_iso())
         execution = {"execution_id": execution_id, "plan_id": plan_id,
             "actual_parameters": trial["actual_parameters"], "actual_path": trial.get("actual_path") or {},
-            "runtime_log": {"progress_percent": 0, "checkpoints": []}, "started_at": utc_now_iso(),
-            "finished_at": None, "status": "running"}
+            "runtime_log": {"progress_percent": 0, "checkpoints": [], "source": "user_reported"},
+            "started_at": utc_now_iso(), "finished_at": None, "status": "external_in_progress"}
         repository.save_execution(execution)
-        workflow.update({"state": "FORMAL_PROCESS_RUNNING", "formal_plan": plan,
+        BusinessStateController.transition(workflow, "FORMAL_PROCESS_RUNNING")
+        workflow.update({"formal_plan": plan,
                          "formal_execution": execution, "material_batch": payload["material_batch"]})
         workflow["formal_campaign"] = _create_campaign(
             session_id, task, "formal_process", trial["actual_parameters"], payload["equipment_revision"]
         ).model_dump(mode="json")
         return _save_formal(session_id, collected, workflow,
-            "Preflight 已通过，正式加工模拟已启动。请提交检查点 JSON。",
+            "Preflight 已通过，已登记用户的外部正式加工开始。系统未连接、控制或监控设备；请由用户提交检查点 JSON。",
             {"action_type": "submit_formal_checkpoint", "required_fields": ["progress_percent", "deviation_level", "observation"], "blocking": True})
     if state == "FORMAL_PREFLIGHT":
-        workflow["state"] = "FORMAL_PROCESS_READY"
+        BusinessStateController.transition(workflow, "FORMAL_PROCESS_READY")
         return _run_formal_turn(session_id, message, collected, workflow, task)
     if state == "FORMAL_PROCESS_RUNNING":
         if not payload or "progress_percent" not in payload:
@@ -353,7 +361,7 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
         level = int(payload.get("deviation_level", 0))
         decision = "abort_return_to_trial" if level >= 3 else "pause_for_confirmation" if level == 2 else "continue"
         checkpoint = {"checkpoint_id": stable_id("checkpoint", execution["execution_id"], str(progress)),
-            "execution_id": execution["execution_id"], "checkpoint_type": "formal_runtime",
+            "execution_id": execution["execution_id"], "checkpoint_type": "user_reported_external_progress",
             "progress_percent": progress, "observation": payload.get("observation") or {},
             "decision": decision, "created_at": utc_now_iso()}
         repository.save_checkpoint(checkpoint)
@@ -363,7 +371,7 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
         execution["runtime_log"] = runtime
         if level >= 3:
             execution["status"] = "aborted"
-            workflow["state"] = "BLOCKED"
+            BusinessStateController.transition(workflow, "BLOCKED")
             repository.update_execution(execution)
             return _save_formal(session_id, collected, workflow, "发现 Level 3 偏差，已中止并返回试切评估。",
                 {"action_type": "return_to_trial", "blocking": True})
@@ -374,7 +382,7 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
                 {"action_type": "confirm_checkpoint_resume", "blocking": True})
         if progress == 100:
             execution["status"], execution["finished_at"] = "finished", utc_now_iso()
-            workflow["state"] = "FINAL_INSPECTION_PENDING"
+            BusinessStateController.transition(workflow, "FINAL_INSPECTION_PENDING")
             repository.update_execution(execution)
             return _save_formal(session_id, collected, workflow, "正式加工完成，但任务尚不能关闭；请提交最终检测 JSON。",
                 {"action_type": "submit_final_inspection", "required_fields": ["required_metrics", "measurements", "constraint_results", "files"], "blocking": True})
@@ -389,7 +397,8 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
                 {"action_type": "complete_final_inspection", "required_fields": missing, "blocking": True})
         decision = quality_decision(payload["required_metrics"], payload["measurements"], payload["constraint_results"])
         if decision["decision"] != "accepted":
-            workflow.update({"state": "QUALITY_DECISION", "quality_decision": decision})
+            BusinessStateController.transition(workflow, "QUALITY_DECISION")
+            workflow["quality_decision"] = decision
             return _save_formal(session_id, collected, workflow, f"质量判定：{decision['decision']}，不能归档。",
                 {"action_type": "assess_rework", "blocking": True})
         execution_id = workflow["formal_execution"]["execution_id"]
@@ -406,10 +415,12 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
         report = TaskReportService().generate(f"process-{session_id}", {
             "task_spec": task, "trial_plan": workflow.get("trial_plan"),
             "trial_result": workflow.get("trial_evaluation"), "quality_plan": {"decision": decision},
-            "bo": {"model_status": eligibility["status"]}, "next_step": "archived"})
+            "bo": {"model_status": eligibility["status"]}, "next_step": "archived",
+            "business_state": BusinessState.COMPLETED.value, "substatus": "COMPLETED"})
         allowed, _ = archive_gate(quality_decided=True, report_generated=report["status"] == "completed",
                                   experiment_record_validated=True)
-        workflow.update({"state": "COMPLETED" if allowed else "ARCHIVE_PENDING", "quality_decision": decision,
+        BusinessStateController.transition(workflow, "COMPLETED" if allowed else "ARCHIVE_PENDING")
+        workflow.update({"quality_decision": decision,
                          "experiment_record": experiment, "bo_eligibility": eligibility,
                          "report": report})
         return _save_formal(session_id, collected, workflow,
@@ -421,8 +432,10 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
 
 def _save_formal(session_id: str, collected: dict[str, Any], workflow: dict[str, Any],
                  content: str, action: dict[str, Any]) -> dict[str, Any]:
+    if not workflow.get("business_state"):
+        BusinessStateController.ensure(workflow, str(workflow.get("state") or "BLOCKED"))
     collected["process_workflow"] = workflow
-    update_session_state(session_id, {"collected_slots": collected, "workflow_stage": workflow["state"].lower(),
+    update_session_state(session_id, {"collected_slots": collected, "workflow_stage": workflow["substatus"].lower(),
                                       "pending_questions": [] if not action.get("blocking") else [action["action_type"]]})
     return {"content": content, "state": workflow, "next_action": action, "events": []}
 
@@ -503,7 +516,7 @@ def _ingest_and_evaluate(plan: dict[str, Any], payload: dict[str, Any]) -> dict[
 
 
 def _task_intake_required(workflow: dict[str, Any], task: dict[str, Any], context) -> bool:
-    state = workflow.get("state")
+    state = workflow.get("substatus") or workflow.get("state")
     if state in {None, "", "INTAKE", "REQUIREMENTS_PENDING", "PARSER_STALL"}:
         return True
     return bool(MissingFieldEvaluator.evaluate(task, context))

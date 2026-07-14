@@ -81,7 +81,7 @@ def chat_session_messages(session_id: str) -> dict:
 @router.get("/sessions/{session_id}/progress")
 def chat_session_progress(session_id: str) -> dict:
     from ultrafast_memory.db.init_db import init_database
-    from ultrafast_memory.chat.workflow_status import get_latest_progress, list_public_thinking_status
+    from ultrafast_memory.chat.legacy_projection_adapter import get_latest_progress, list_public_thinking_status
 
     init_database()
     return {
@@ -94,7 +94,7 @@ def chat_session_progress(session_id: str) -> dict:
 @router.get("/sessions/{session_id}/thinking-status")
 def chat_session_thinking_status(session_id: str) -> dict:
     from ultrafast_memory.db.init_db import init_database
-    from ultrafast_memory.chat.workflow_status import list_public_thinking_status
+    from ultrafast_memory.chat.legacy_projection_adapter import list_public_thinking_status
 
     init_database()
     return {"session_id": session_id, "events": list_public_thinking_status(session_id)}
@@ -117,6 +117,7 @@ def chat_session_agent_trace(session_id: str, message_id: str | None = None) -> 
 def chat_session_knowledge_bootstrap(session_id: str) -> dict:
     from ultrafast_integrations.storage.read_models import get_session_bootstrap_read_model
     from ultrafast_memory.chat.session_state import get_session_state
+    from ultrafast_memory.db.init_db import init_database
 
     init_database()
     state = get_session_state(session_id)
@@ -139,6 +140,7 @@ def chat_session_knowledge_bootstrap_run(
     session_id: str, request: ChatBootstrapRunRequest
 ) -> dict:
     from ultrafast_memory.chat.session_state import get_session_state, update_session_state
+    from ultrafast_memory.db.init_db import init_database
     from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge
 
     init_database()

@@ -12,6 +12,9 @@ EVOLVABLE_TYPES = frozenset(
     }
 )
 
+FORMALLY_ENABLED_EVOLUTION_TYPES = frozenset({"bo_model", "bo_acquisition_strategy"})
+RESERVED_EVOLUTION_TYPES = EVOLVABLE_TYPES - FORMALLY_ENABLED_EVOLUTION_TYPES
+
 FORBIDDEN_AUTOMATIC_ACTIVATION = frozenset(
     {"equipment_hard_boundary", "database_schema", "production_code", "safety_rule", "tool", "validated_rule"}
 )
@@ -86,4 +89,3 @@ class EvaluationRun:
         value = asdict(self)
         value["failures"] = list(self.failures)
         return value
-

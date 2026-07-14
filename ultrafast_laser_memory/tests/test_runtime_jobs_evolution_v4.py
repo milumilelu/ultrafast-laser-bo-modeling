@@ -70,9 +70,11 @@ def test_job_timeout_retry_and_cancellation_states(isolated_root):
 
 def test_evolution_requires_evaluation_and_approval_and_rolls_back():
     service = EvolutionService()
-    base = service.register_artifact_version("router", "router_policy", {"threshold": 0.7}, status="active")
+    base = service.register_artifact_version(
+        "bo-surrogate", "bo_model", {"threshold": 0.7}, status="active"
+    )
     candidate = service.create_evolution_candidate(
-        "router_policy", "router", {"threshold": 0.8}, "improve routing", "manual_proposal",
+        "bo_model", "bo-surrogate", {"threshold": 0.8}, "improve model", "manual_proposal",
         target_version_id=base.artifact_version_id,
     )
     with pytest.raises(ValueError):
@@ -88,16 +90,26 @@ def test_evolution_requires_evaluation_and_approval_and_rolls_back():
     service.approve_promotion(candidate.candidate_id, "expert")
     active = service.activate_version(candidate.candidate_id, activation_reason="passed", rollback_condition="accuracy drop")
     assert active.status == "active" and active.parent_version_id == base.artifact_version_id
-    restored = service.rollback_version("router", "regression")
+    restored = service.rollback_version("bo-surrogate", "regression")
     assert restored.artifact_version_id == base.artifact_version_id and restored.status == "active"
 
 
 def test_evolution_state_survives_service_restart(isolated_root):
     init_database()
     first = EvolutionService(SQLiteEvolutionRepository())
-    version = first.register_artifact_version("workflow", "workflow_policy", {"mode": "safe"}, status="active")
+    version = first.register_artifact_version(
+        "workflow", "workflow_policy", {"mode": "safe"}, status="experimental"
+    )
     second = EvolutionService(SQLiteEvolutionRepository())
-    restored = second.get_active_version("workflow")
-    assert restored is not None
-    assert restored.artifact_version_id == version.artifact_version_id
-    assert restored.content == {"mode": "safe"}
+    restored = second.list_versions("workflow")
+    assert restored[0].artifact_version_id == version.artifact_version_id
+    assert restored[0].status == "experimental"
+    assert restored[0].content == {"mode": "safe"}
+
+
+def test_reserved_evolution_type_cannot_be_activated():
+    service = EvolutionService()
+    with pytest.raises(ValueError, match="reserved evolution type"):
+        service.register_artifact_version(
+            "router", "router_policy", {"threshold": 0.7}, status="active"
+        )
