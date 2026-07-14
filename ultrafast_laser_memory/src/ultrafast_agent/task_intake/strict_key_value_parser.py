@@ -70,6 +70,7 @@ class StrictKeyValueParser:
             unresolved_fields=[field for field in context.pending_fields if field not in covered],
             extraction_version=STRICT_EXTRACTOR_VERSION,
             extraction_mode="strict_key_value",
+            schema_valid=True,
         )
 
     @staticmethod

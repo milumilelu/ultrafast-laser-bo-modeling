@@ -8,10 +8,14 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def health() -> dict:
+    from ultrafast_memory.core.runtime_identity import runtime_identity
+
     return {
         "status": "ok",
         "api_version": "0.3.0",
         "workflow_contract": "process-workflow-v3",
+        "task_intake_contract": "llm-structured-v1",
+        "runtime_identity": runtime_identity(),
     }
 
 

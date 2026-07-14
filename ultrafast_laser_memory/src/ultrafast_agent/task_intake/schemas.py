@@ -69,6 +69,7 @@ class TaskSpecPatch(BaseModel):
     rejected_candidates: list[dict[str, Any]] = Field(default_factory=list)
     extraction_version: str = EXTRACTION_VERSION
     llm_attempted: bool = False
+    schema_valid: bool | None = None
     degraded: bool = False
     provider: str | None = None
     model: str | None = None

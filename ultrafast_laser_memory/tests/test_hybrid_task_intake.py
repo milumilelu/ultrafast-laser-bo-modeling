@@ -93,6 +93,25 @@ class ScriptedTaskIntakeLLM:
                 _llm_update("material", "CFRP", "碳纤维复合板"),
                 _llm_update("thickness_mm", 3, "3mm", unit="mm"),
             ]
+        elif "切割2mm厚的碳纤维板，要求切缝碳纤维无分层" in prompt:
+            updates = [
+                _llm_update("process_type", "cutting", "切割"),
+                _llm_update("material", "CFRP", "碳纤维板"),
+                _llm_update("thickness_mm", 2, "2mm", unit="mm"),
+                _llm_update("quality_requirement", "no_delamination", "切缝碳纤维无分层"),
+            ]
+        elif "100；无；压缩空气；允许" in prompt:
+            updates = [
+                _llm_update("cut_length_mm", 100, "100", unit="mm"),
+                _llm_update("efficiency_requirement", "none", "无"),
+                _llm_update("auxiliary", "compressed_air", "压缩空气"),
+                _llm_update("layer_cut_allowed", True, "允许"),
+            ]
+        elif "100mm；允许" in prompt:
+            updates = [
+                _llm_update("cut_length_mm", 100, "100mm", unit="mm"),
+                _llm_update("layer_cut_allowed", True, "允许"),
+            ]
         elif "切割5mm厚型号为T300的碳纤维复合板" in prompt:
             updates = [
                 _llm_update("process_type", "cutting", "切割"),
@@ -178,6 +197,62 @@ def test_llm_primary_real_log_with_comma_and_contextual_short_answers(isolated_r
     assert task["layer_cut_allowed"] is True
     assert result["workflow_state"]["missing_slots"] == []
     assert llm.calls == 2
+
+
+def test_exact_reported_two_turn_chat_uses_llm_context(isolated_root, monkeypatch):
+    _equipment()
+    llm = ScriptedTaskIntakeLLM()
+    monkeypatch.setattr(
+        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        lambda config: llm,
+    )
+    client = TestClient(app)
+    session_id = _session(client, "exact-reported-two-turn-log")
+
+    _chat(client, session_id, "/mode debug")
+    _chat(client, session_id, "/trace full")
+    _chat(client, session_id, "切割2mm厚的碳纤维板，要求切缝碳纤维无分层")
+    result = _chat(client, session_id, "100；无；压缩空气；允许")
+
+    task = result["workflow_state"]["task_spec"]
+    assert task["cut_length_mm"] == 100
+    assert task["efficiency_requirement"] == "none"
+    assert task["auxiliary"] == "compressed_air"
+    assert task["layer_cut_allowed"] is True
+    assert result["workflow_state"]["missing_slots"] == []
+    completed = next(
+        item for item in result["execution_trace"]
+        if item["event_type"] == "field_extraction_completed"
+    )
+    assert completed["payload"]["llm_attempted"] is True
+    assert completed["payload"]["schema_valid"] is True
+    assert completed["payload"]["merge_applied"] == [
+        "cut_length_mm", "efficiency_requirement", "auxiliary", "layer_cut_allowed",
+    ]
+    assert completed["payload"]["remaining_missing"] == []
+
+
+def test_contextual_100mm_and_allowed_chat_turn(isolated_root, monkeypatch):
+    _equipment()
+    llm = ScriptedTaskIntakeLLM()
+    monkeypatch.setattr(
+        "ultrafast_memory.process_workflow.chat_orchestrator.create_llm_client",
+        lambda config: llm,
+    )
+    client = TestClient(app)
+    session_id = _session(client, "contextual-two-field-log")
+
+    _chat(
+        client,
+        session_id,
+        "加工类型=切割；材料=CFRP；厚度=2mm；质量要求=无分层；效率要求=无；辅助介质=压缩空气",
+    )
+    result = _chat(client, session_id, "100mm；允许")
+
+    task = result["workflow_state"]["task_spec"]
+    assert task["cut_length_mm"] == 100
+    assert task["layer_cut_allowed"] is True
+    assert result["workflow_state"]["missing_slots"] == []
 
 
 def test_cutting_clarification_log_regression(isolated_root, monkeypatch):

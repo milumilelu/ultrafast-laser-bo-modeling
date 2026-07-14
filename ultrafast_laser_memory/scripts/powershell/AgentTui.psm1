@@ -1,4 +1,4 @@
-$script:RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+﻿$script:RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
 $script:Providers = @{
     "1" = @{ Id = "openai"; Name = "OpenAI"; Env = "OPENAI_API_KEY"; Base = "https://api.openai.com/v1"; Models = @("gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano") }
@@ -325,7 +325,12 @@ function Invoke-AgentScan {
 function Start-AgentApiServer {
     if (-not (Test-AgentPythonEnvironment)) { return }
     Push-Location $script:RepoRoot
-    try { python -m uvicorn ultrafast_memory.apps.api.main:app --reload --host 127.0.0.1 --port 8000 } finally { Pop-Location }
+    $previousPythonPath = $env:PYTHONPATH
+    $env:PYTHONPATH = (Join-Path $script:RepoRoot "src") + [IO.Path]::PathSeparator + $previousPythonPath
+    try { python -m uvicorn ultrafast_memory.apps.api.main:app --reload --host 127.0.0.1 --port 8000 } finally {
+        $env:PYTHONPATH = $previousPythonPath
+        Pop-Location
+    }
 }
 
 function Export-AgentBoDataset {
@@ -386,6 +391,31 @@ function Test-AgentApiServer {
         }
         return $false
     }
+}
+
+function Show-AgentRuntimeIdentity {
+    param($Health)
+    if ($null -eq $Health -or $null -eq $Health.runtime_identity) { return }
+    $identity = $Health.runtime_identity
+    Write-Host "[Runtime Identity]" -ForegroundColor Cyan
+    Write-Host ("git_commit={0}" -f $identity.git_commit)
+    Write-Host ("python={0}" -f $identity.python)
+    Write-Host ("package_root={0}" -f $identity.package_root)
+    Write-Host ("chat_orchestrator={0}" -f $identity.chat_orchestrator)
+    Write-Host ("task_intake_service={0}" -f $identity.task_intake_service)
+    Write-Host ("llm_extractor={0}" -f $identity.llm_extractor)
+    Write-Host ("backend_pid={0}" -f $identity.backend_pid)
+    Write-Host ("backend_started_at={0}" -f $identity.backend_started_at)
+}
+
+function Test-AgentRuntimeIdentity {
+    param($Health)
+    if ($null -eq $Health -or $Health.task_intake_contract -ne "llm-structured-v1") { return $false }
+    if ($null -eq $Health.runtime_identity) { return $false }
+    $localCommit = (& git -C $script:RepoRoot rev-parse HEAD 2>$null).Trim()
+    $expectedRoot = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot "src")).TrimEnd('\').ToLowerInvariant()
+    $actualRoot = [IO.Path]::GetFullPath([string]$Health.runtime_identity.package_root).TrimEnd('\').ToLowerInvariant()
+    return ($localCommit -and $Health.runtime_identity.git_commit -eq $localCommit -and $actualRoot -eq $expectedRoot)
 }
 
 function Test-AgentEquipmentApiServer {
@@ -482,8 +512,9 @@ function Start-AgentApiServerBackground {
                 $health = $null
                 try { $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health" -TimeoutSec 3 } catch { $health = $null }
                 $staleWorkflowBackend = ($null -eq $health -or $health.workflow_contract -ne "process-workflow-v3")
-                if ($staleWorkflowBackend) {
-                    Write-Host ("检测到旧版后端，必须重启以加载 process-workflow-v3：{0}" -f $baseUrl) -ForegroundColor Yellow
+                $staleRuntimeIdentity = -not (Test-AgentRuntimeIdentity -Health $health)
+                if ($staleWorkflowBackend -or $staleRuntimeIdentity) {
+                    Write-Host ("检测到后端版本或运行源码身份不一致，必须重启：{0}" -f $baseUrl) -ForegroundColor Yellow
                     $RestartExisting = $true
                 }
                 if ($RestartExisting) {
@@ -503,6 +534,7 @@ function Start-AgentApiServerBackground {
                     }
                 } else {
                     Write-Host ("FastAPI 后端已运行：{0}" -f $baseUrl)
+                    Show-AgentRuntimeIdentity -Health $health
                     return $baseUrl
                 }
             }
@@ -516,11 +548,17 @@ function Start-AgentApiServerBackground {
             continue
         }
         Write-Host ("正在后台启动 FastAPI 后端：{0} ..." -f $baseUrl)
-        $process = Start-Process -FilePath "python" `
-            -ArgumentList @("-m", "uvicorn", "ultrafast_memory.apps.api.main:app", "--host", "127.0.0.1", "--port", "$port") `
-            -WorkingDirectory $script:RepoRoot `
-            -WindowStyle Hidden `
-            -PassThru
+        $previousPythonPath = $env:PYTHONPATH
+        $env:PYTHONPATH = (Join-Path $script:RepoRoot "src") + [IO.Path]::PathSeparator + $previousPythonPath
+        try {
+            $process = Start-Process -FilePath "python" `
+                -ArgumentList @("-m", "uvicorn", "ultrafast_memory.apps.api.main:app", "--host", "127.0.0.1", "--port", "$port") `
+                -WorkingDirectory $script:RepoRoot `
+                -WindowStyle Hidden `
+                -PassThru
+        } finally {
+            $env:PYTHONPATH = $previousPythonPath
+        }
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Milliseconds 500
             if (Test-AgentApiServer -BaseUrl $baseUrl -Quiet) {
@@ -532,6 +570,8 @@ function Start-AgentApiServerBackground {
                     break
                 }
                 Write-Host ("FastAPI 后端已启动。PID: {0}; URL: {1}" -f $process.Id, $baseUrl)
+                $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health" -TimeoutSec 3
+                Show-AgentRuntimeIdentity -Health $health
                 return $baseUrl
             }
             if ($process.HasExited) {
@@ -641,6 +681,9 @@ function Show-AgentTraceEvent {
     $label = if ($Event.title) { $Event.title } else { $Event.event_type }
     $summary = if ($Event.summary) { $Event.summary } else { "" }
     Write-Host ("{0} {1}: {2}" -f $mark, $label, $summary) -ForegroundColor DarkCyan
+    if ($mode -eq "debug" -and $Event.event_type -in @("field_extraction_started", "field_extraction_completed")) {
+        Show-AgentFieldExtractionTrace -Event $Event
+    }
     if ($mode -eq "debug") {
         if ($Event.sequence) { Write-Host ("  sequence: {0}" -f $Event.sequence) -ForegroundColor DarkGray }
         $toolName = if ($Event.tool_name) { $Event.tool_name } else { $Event.tool }
@@ -652,6 +695,24 @@ function Show-AgentTraceEvent {
         if ($null -ne $Event.duration_ms) { Write-Host ("  duration_ms: {0}" -f $Event.duration_ms) -ForegroundColor DarkGray }
         if ($null -ne $Event.cache_hit) { Write-Host ("  cache_hit: {0}" -f $Event.cache_hit) -ForegroundColor DarkGray }
         if ($Event.attempt) { Write-Host ("  attempt: {0}" -f $Event.attempt) -ForegroundColor DarkGray }
+    }
+}
+
+function Show-AgentFieldExtractionTrace {
+    param($Event)
+    $details = $Event.payload
+    if ($null -eq $details) { return }
+    Write-Host ("  mode={0}; provider={1}; model={2}; llm_attempted={3}; schema_valid={4}" -f `
+        $details.extraction_mode, $details.provider, $details.model, $details.llm_attempted, $details.schema_valid) -ForegroundColor DarkGray
+    if ($Event.event_type -eq "field_extraction_completed") {
+        foreach ($item in @($details.accepted)) {
+            Write-Host ("  accepted: {0}={1} <- {2}" -f $item.field_name, $item.value, $item.evidence) -ForegroundColor DarkGray
+        }
+        foreach ($item in @($details.rejected)) {
+            Write-Host ("  rejected: {0} ({1})" -f $item.field_name, $item.reason) -ForegroundColor Yellow
+        }
+        Write-Host ("  merge_applied: {0}" -f (@($details.merge_applied) -join ", ")) -ForegroundColor DarkGray
+        Write-Host ("  remaining_missing: {0}" -f (@($details.remaining_missing) -join ", ")) -ForegroundColor DarkGray
     }
 }
 
@@ -1301,7 +1362,8 @@ function Start-AgentDeepSeekAutoLaunch {
     }
 
     Initialize-AgentLocalBootstrap -Force:$ForceInitialize
-    $baseUrl = Start-AgentApiServerBackground -RestartExisting:$Reconfigure
+    # The launcher owns this local backend: restart it so updated source and credentials cannot be shadowed by an old process.
+    $baseUrl = Start-AgentApiServerBackground -RestartExisting
     if (-not $baseUrl) { return }
     if (-not $SkipLlmConfig) {
         Test-AgentLlmConnection -BaseUrl $baseUrl | Out-Null
@@ -1380,4 +1442,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentFieldExtractionTrace, Show-AgentRuntimeIdentity, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret

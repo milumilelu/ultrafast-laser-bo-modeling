@@ -528,6 +528,8 @@ def _field_extraction_debug(patch, merge_result, missing: list[str]) -> dict[str
         "extractor_version": patch.extraction_version,
         "extraction_mode": patch.extraction_mode,
         "attempt_count": patch.attempt_count,
+        "llm_attempted": patch.llm_attempted,
+        "schema_valid": patch.schema_valid,
         "recognized_fields": [
             {
                 "field_name": item.field_name,
@@ -562,7 +564,8 @@ def _record_field_extraction_events(
         title="字段抽取开始",
         summary=(
             f"字段抽取模式 {patch.extraction_mode}；provider={patch.provider or 'none'}；"
-            f"model={patch.model or 'none'}；extractor={patch.extraction_version}。"
+            f"model={patch.model or 'none'}；llm_attempted={str(patch.llm_attempted).lower()}；"
+            f"schema_valid={str(patch.schema_valid).lower()}；extractor={patch.extraction_version}。"
         ),
         skill="complex_process_task",
         tool="task_field_extraction_service",
@@ -571,6 +574,14 @@ def _record_field_extraction_events(
             f"provider={patch.provider or 'none'}; model={patch.model or 'none'}; "
             f"extractor_version={patch.extraction_version}; attempts={patch.attempt_count}"
         ),
+        payload={
+            "extraction_mode": patch.extraction_mode,
+            "provider": patch.provider,
+            "model": patch.model,
+            "llm_attempted": patch.llm_attempted,
+            "schema_valid": patch.schema_valid,
+            "attempt_count": patch.attempt_count,
+        },
         status="running",
     )]
     for candidate in patch.updates:
@@ -665,6 +676,24 @@ def _record_field_extraction_events(
             f"recognized={len(patch.updates)}; rejected={len(patch.rejected_candidates)}; "
             f"conflicts={len(merge_result.conflicts)}; missing={','.join(missing)}"
         ),
+        payload={
+            "extraction_mode": patch.extraction_mode,
+            "provider": patch.provider,
+            "model": patch.model,
+            "llm_attempted": patch.llm_attempted,
+            "schema_valid": patch.schema_valid,
+            "accepted": [
+                {
+                    "field_name": item.field_name,
+                    "value": item.normalized_value,
+                    "evidence": item.evidence,
+                }
+                for item in patch.updates
+            ],
+            "rejected": list(patch.rejected_candidates),
+            "merge_applied": [item.field_name for item in merge_result.applied],
+            "remaining_missing": list(missing),
+        },
         status="completed" if not patch.degraded else "warning",
     ))
     return events
