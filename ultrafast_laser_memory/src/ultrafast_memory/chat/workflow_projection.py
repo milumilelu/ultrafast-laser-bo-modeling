@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ultrafast_agent.task_intake.missing_field_service import MissingFieldEvaluator
+from ultrafast_agent.task_intake.schemas import PROCESS_REQUIRED_FIELDS
 from ultrafast_memory.process_workflow.business_state import (
     BUSINESS_STATE_LABELS,
     BUSINESS_STATE_ORDER,
@@ -50,7 +51,11 @@ class WorkflowProjectionService:
             workflow_type="complex_process_task",
             business_state=business_state.value,
             substatus=canonical["substatus"],
-            progress_percent=cls._business_percent(business_state, completed_count),
+            progress_percent=cls._business_percent(
+                business_state,
+                completed_count,
+                task_fields_complete=len(PROCESS_REQUIRED_FIELDS) - len(missing),
+            ),
             missing_fields=missing,
             current_step=cls._current_step(recent_events),
             next_action=dict(next_action or {}),
@@ -116,9 +121,17 @@ class WorkflowProjectionService:
         return BUSINESS_STATE_ORDER.index(state) if state in BUSINESS_STATE_ORDER else 0
 
     @staticmethod
-    def _business_percent(state: BusinessState, completed_count: int) -> int:
+    def _business_percent(
+        state: BusinessState,
+        completed_count: int,
+        *,
+        task_fields_complete: int = 0,
+    ) -> int:
         if state == BusinessState.COMPLETED:
             return 100
+        if state == BusinessState.INTAKE:
+            intake_fraction = task_fields_complete / len(PROCESS_REQUIRED_FIELDS)
+            return round(intake_fraction / len(BUSINESS_STATE_ORDER) * 100)
         return round(completed_count / len(BUSINESS_STATE_ORDER) * 100)
 
     @staticmethod

@@ -44,7 +44,10 @@ def test_thinking_status_api_returns_only_public_events(isolated_root):
 
     progress_response = client.get(f"/chat/sessions/{response.session_id}/progress")
     assert progress_response.status_code == 200
-    assert progress_response.json()["progress"]["progress_percent"] > 0
+    progress = progress_response.json()["progress"]
+    assert progress is not None
+    assert progress["business_state"] == "INTAKE"
+    assert progress["progress_percent"] == 0
 
 
 def test_tool_and_evidence_events_can_be_saved_and_queried(isolated_root):

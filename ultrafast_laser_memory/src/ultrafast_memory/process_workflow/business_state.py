@@ -112,6 +112,7 @@ class BusinessStateController:
             business_state = mapped
         workflow["substatus"] = substatus
         workflow["state"] = substatus  # read compatibility for persisted V3 records
+        workflow.setdefault("execution_step", substatus)
         workflow["business_state"] = business_state.value
         workflow["business_state_changed"] = False
         return workflow
@@ -131,6 +132,7 @@ class BusinessStateController:
                 )
         workflow["substatus"] = substatus
         workflow["state"] = substatus  # legacy read adapter; not a second state calculation
+        workflow["execution_step"] = substatus
         workflow["business_state"] = business_state.value
         changed = previous != business_state.value
         workflow["business_state_changed"] = changed

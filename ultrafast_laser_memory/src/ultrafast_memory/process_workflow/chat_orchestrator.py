@@ -13,9 +13,7 @@ from ultrafast_agent.task_intake import (
     TaskSpecMergeService,
 )
 from ultrafast_agent.task_intake.schemas import MergeResult, TaskSpecPatch
-from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
-from ultrafast_memory.chat.legacy_projection_adapter import upsert_workflow_progress
 from ultrafast_memory.chat.workflow_projection import WorkflowProjectionService
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.llm.factory import create_llm_client
@@ -29,6 +27,7 @@ from ultrafast_memory.core.time_utils import utc_now_iso
 from .closure import archive_gate, bo_sample_eligibility, quality_decision
 from .campaign import CampaignService
 from .business_state import BusinessState, BusinessStateController
+from .events import record_process_event
 from .recommendation_service import recommend_trial_parameters
 from .repository import ProcessWorkflowRepository
 from .tools import parameter_provenance_registry_tool
@@ -162,12 +161,6 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         update_session_state(session_id, {"collected_slots": collected,
             "active_workflow": "complex_process_task", "active_skill": "complex_process_task",
             "workflow_stage": "parser_stall" if parser_stall else "clarification", "pending_questions": missing})
-        upsert_workflow_progress(
-            session_id, "complex_process_task", workflow["substatus"], "waiting_user",
-            "字段解析停滞，等待结构化输入。" if parser_stall else "等待用户补充加工要求。",
-            completed_steps=["工作流路由完成"],
-            pending_steps=missing, missing_slots=missing,
-        )
         if parser_stall:
             extraction_events.append(_record_parser_stall(session_id, message_id, message, missing))
         return {
@@ -213,8 +206,14 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                 "events": [*extraction_events, *result["events"]],
                 "workflow_result": result}
 
-    if workflow.get("substatus") in {"FORMAL_PROCESS_READY", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
-                                 "FINAL_INSPECTION_PENDING", "QUALITY_DECISION", "REPORT_PENDING", "ARCHIVE_PENDING"}:
+    if BusinessState(workflow["business_state"]) in {
+        BusinessState.READY_FOR_EXTERNAL_PROCESS,
+        BusinessState.WAITING_EXTERNAL_RESULT,
+        BusinessState.QUALITY_REVIEW,
+    } and workflow.get("execution_step") in {
+        "FORMAL_PROCESS_READY", "FORMAL_PREFLIGHT", "FORMAL_PROCESS_RUNNING",
+        "FINAL_INSPECTION_PENDING", "QUALITY_DECISION", "REPORT_PENDING", "ARCHIVE_PENDING",
+    }:
         formal_result = _run_formal_turn(session_id, message, collected, workflow, task)
         formal_result["events"] = [*extraction_events, *(formal_result.get("events") or [])]
         return formal_result
@@ -309,7 +308,7 @@ def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], w
                      task: dict[str, Any]) -> dict[str, Any]:
     payload = _json_payload(message)
     repository = ProcessWorkflowRepository()
-    state = workflow["substatus"]
+    state = workflow["execution_step"]
     if state == "FORMAL_PROCESS_READY":
         required = ("equipment_revision", "material_batch", "operator_confirmation")
         missing = [key for key in required if not payload or payload.get(key) in (None, "", False)]
@@ -435,7 +434,7 @@ def _save_formal(session_id: str, collected: dict[str, Any], workflow: dict[str,
     if not workflow.get("business_state"):
         BusinessStateController.ensure(workflow, str(workflow.get("state") or "BLOCKED"))
     collected["process_workflow"] = workflow
-    update_session_state(session_id, {"collected_slots": collected, "workflow_stage": workflow["substatus"].lower(),
+    update_session_state(session_id, {"collected_slots": collected, "workflow_stage": workflow["execution_step"].lower(),
                                       "pending_questions": [] if not action.get("blocking") else [action["action_type"]]})
     return {"content": content, "state": workflow, "next_action": action, "events": []}
 
@@ -516,8 +515,8 @@ def _ingest_and_evaluate(plan: dict[str, Any], payload: dict[str, Any]) -> dict[
 
 
 def _task_intake_required(workflow: dict[str, Any], task: dict[str, Any], context) -> bool:
-    state = workflow.get("substatus") or workflow.get("state")
-    if state in {None, "", "INTAKE", "REQUIREMENTS_PENDING", "PARSER_STALL"}:
+    business_state = workflow.get("business_state")
+    if business_state in {None, "", BusinessState.INTAKE.value}:
         return True
     return bool(MissingFieldEvaluator.evaluate(task, context))
 
@@ -555,7 +554,7 @@ def _record_field_extraction_events(
     stage: str,
     missing: list[str],
 ) -> list[dict[str, Any]]:
-    events = [record_agent_trace_event(
+    events = [record_process_event(
         session_id=session_id,
         message_id=message_id,
         event_type="field_extraction_started",
@@ -575,7 +574,7 @@ def _record_field_extraction_events(
         status="running",
     )]
     for candidate in patch.updates:
-        events.append(record_agent_trace_event(
+        events.append(record_process_event(
             session_id=session_id,
             message_id=message_id,
             event_type="field_candidate_extracted",
@@ -594,7 +593,7 @@ def _record_field_extraction_events(
             status="completed",
         ))
     for rejected in patch.rejected_candidates:
-        events.append(record_agent_trace_event(
+        events.append(record_process_event(
             session_id=session_id,
             message_id=message_id,
             event_type="field_candidate_rejected",
@@ -609,7 +608,7 @@ def _record_field_extraction_events(
             status="completed",
         ))
     for conflict in merge_result.conflicts:
-        events.append(record_agent_trace_event(
+        events.append(record_process_event(
             session_id=session_id,
             message_id=message_id,
             event_type="field_conflict_detected",
@@ -625,7 +624,7 @@ def _record_field_extraction_events(
         ))
     if merge_result.applied:
         fields = [item.field_name for item in merge_result.applied]
-        events.append(record_agent_trace_event(
+        events.append(record_process_event(
             session_id=session_id,
             message_id=message_id,
             event_type="task_spec_patched",
@@ -638,7 +637,7 @@ def _record_field_extraction_events(
             status="completed",
         ))
     if patch.degraded:
-        events.append(record_agent_trace_event(
+        events.append(record_process_event(
             session_id=session_id,
             message_id=message_id,
             event_type="field_extraction_degraded",
@@ -649,7 +648,7 @@ def _record_field_extraction_events(
             tool="llm_task_field_extractor",
             status="completed",
         ))
-    events.append(record_agent_trace_event(
+    events.append(record_process_event(
         session_id=session_id,
         message_id=message_id,
         event_type="field_extraction_completed",
@@ -705,7 +704,7 @@ def _record_parser_stall(
     message: str,
     missing: list[str],
 ) -> dict[str, Any]:
-    return record_agent_trace_event(
+    return record_process_event(
         session_id=session_id,
         message_id=message_id,
         event_type="clarification_parser_failed",

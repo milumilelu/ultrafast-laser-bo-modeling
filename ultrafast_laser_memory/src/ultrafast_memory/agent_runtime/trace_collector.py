@@ -6,6 +6,7 @@ from ultrafast_memory.core.ids import stable_id
 from ultrafast_agent.runtime.event_service import canonical_agent_events
 from ultrafast_agent.runtime.events import redact_public_data
 from ultrafast_integrations.storage.runtime_event_repository import RuntimeEventRepository
+from ultrafast_memory.migrations.legacy_trace import legacy_session_fallback
 
 
 FORBIDDEN_TRACE_KEYS = {"chain_of_thought", "raw_thoughts", "hidden_reasoning", "model_reasoning_tokens"}
@@ -59,7 +60,9 @@ def list_agent_trace_events(session_id: str, message_id: str | None = None) -> l
     events = RuntimeEventRepository().list_session_events(session_id)
     if message_id is not None:
         events = [event for event in events if event.get("message_id") == message_id]
-    return events
+    if events:
+        return events
+    return legacy_session_fallback(session_id, message_id)
 
 
 def trace_from_progress(session_id: str, message_id: str | None, progress: dict[str, Any], skill: str | None = None) -> dict[str, Any]:

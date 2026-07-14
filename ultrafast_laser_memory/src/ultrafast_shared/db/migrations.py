@@ -323,6 +323,20 @@ BASELINE_MIGRATIONS = (
                 WHERE idempotency_key IS NOT NULL""",
         ),
     ),
+    Migration(
+        migration_id="0011_legacy_trace_migration_ledger",
+        description="Track resumable and idempotent legacy Trace backfill",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS legacy_trace_migration (
+                source_table TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                migrated_at TEXT NOT NULL,
+                PRIMARY KEY(source_table, source_id),
+                UNIQUE(event_id)
+            )""",
+        ),
+    ),
 )
 
 
