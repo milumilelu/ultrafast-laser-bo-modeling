@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from ultrafast_agent.task_intake import (
     ClarificationContextService,
     MissingFieldEvaluator,
-    TaskFieldExtractionService,
-    TaskFieldNormalizer,
-    TaskSpecPatchValidator,
-    TaskSpecMergeService,
+    update_task_spec_contract,
 )
-from ultrafast_agent.task_intake.schemas import MergeResult, TaskSpecPatch
+from ultrafast_agent.runtime import ToolExecutor, ToolRegistry
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
 from ultrafast_memory.chat.workflow_projection import WorkflowProjectionService
 from ultrafast_memory.core.llm_config import get_llm_config
@@ -26,7 +22,8 @@ from ultrafast_memory.core.time_utils import utc_now_iso
 
 from .closure import archive_gate, bo_sample_eligibility, quality_decision
 from .campaign import CampaignService
-from .business_state import BusinessState, BusinessStateController
+from .agent_controller import ProcessAgentController
+from .business_state import BusinessState, BusinessStateController, allowed_agent_actions
 from .events import record_process_event
 from .recommendation_service import recommend_trial_parameters
 from .repository import ProcessWorkflowRepository
@@ -75,63 +72,74 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
     workflow = dict(collected.get("process_workflow") or {})
     BusinessStateController.ensure(workflow)
     context = ClarificationContextService.build(state, "complex_process_task", task)
+    allowed_actions = allowed_agent_actions(workflow["business_state"])
+    workflow["allowed_actions"] = allowed_actions
     if _task_intake_required(workflow, task, context):
-        extraction = TaskFieldExtractionService(
-            create_llm_client(get_llm_config())
-        ).extract(message, task, context)
-        normalized = TaskFieldNormalizer.normalize(extraction)
-        validated = TaskSpecPatchValidator.validate(
-            normalized, task, context, user_message=message
-        )
-        merge_result = TaskSpecMergeService.merge(
-            task,
-            validated,
-            current_provenance=collected.get("process_task_field_provenance") or {},
-            revision_history=collected.get("process_task_revision_history") or [],
-            message_id=message_id,
+        action = ProcessAgentController(create_llm_client(get_llm_config())).decide(
+            message=message,
+            task_spec=task,
+            business_state=workflow["business_state"],
             context=context,
+            allowed_actions=allowed_actions,
+            campaign=workflow.get("campaign"),
+            recent_tool_results=collected.get("process_agent_tool_history") or [],
         )
-        task = merge_result.task_spec
-        missing = MissingFieldEvaluator.evaluate(task, context)
-        extraction_events = _record_field_extraction_events(
-            session_id, message_id, message, validated, merge_result,
-            workflow.get("substatus") or "INTAKE", missing,
-        )
-        collected["process_task_spec"] = task
-        collected["process_task_field_provenance"] = merge_result.field_provenance
-        collected["process_task_revision_history"] = merge_result.revision_history
-        collected["process_task_extraction_history"] = [
-            *(collected.get("process_task_extraction_history") or [])[-19:],
-            {
-                "message_id": message_id,
-                "evidence": message,
-                "pending_fields": context.pending_fields,
-                "applied_fields": [item.field_name for item in merge_result.applied],
-                "rejected_candidates": validated.rejected_candidates,
-                "conflicts": merge_result.conflicts,
-                "ambiguities": validated.ambiguities,
-                "degraded": validated.degraded,
-                "provider": validated.provider,
-                "model": validated.model,
-                "extraction_mode": validated.extraction_mode,
-                "extractor_version": validated.extraction_version,
-                "missing_fields": missing,
-            },
+        agent_events = [_record_agent_decision(session_id, message_id, action, workflow)]
+        tool_output: dict[str, Any] | None = None
+        if action.action == "call_tool" and action.tool_name == "update_task_spec":
+            agent_events.append(_record_agent_tool_call(
+                session_id, message_id, action, workflow.get("substatus") or "INTAKE"
+            ))
+            registry = ToolRegistry()
+            registry.register(update_task_spec_contract())
+            execution = ToolExecutor(registry).execute(
+                "update_task_spec",
+                action.arguments,
+                {
+                    "session_id": session_id,
+                    "message_id": message_id,
+                    "user_message": message,
+                    "clarification_context": context.model_dump(mode="json"),
+                },
+            )
+            if execution.status == "succeeded" and isinstance(execution.output, dict):
+                tool_output = execution.output
+            else:
+                tool_output = {
+                    "status": "failed",
+                    "error_code": execution.error_code,
+                    "message": execution.error_message,
+                    "applied": [],
+                    "rejected": [],
+                    "conflicts": [],
+                    "remaining_missing": list(context.pending_fields),
+                }
+            agent_events.append(_record_agent_tool_result(
+                session_id, message_id, tool_output, workflow.get("substatus") or "INTAKE"
+            ))
+            if tool_output.get("task_spec") is not None:
+                task = dict(tool_output["task_spec"])
+                collected["process_task_spec"] = task
+                collected["process_task_field_provenance"] = tool_output.get("field_provenance") or {}
+                collected["process_task_revision_history"] = tool_output.get("revision_history") or []
+            missing = list(tool_output.get("remaining_missing") or [])
+        else:
+            missing = MissingFieldEvaluator.evaluate(task, context)
+        history_entry = {
+            "message_id": message_id,
+            "action": action.model_dump(mode="json"),
+            "tool_result": tool_output,
+        }
+        collected["process_agent_tool_history"] = [
+            *(collected.get("process_agent_tool_history") or [])[-19:], history_entry,
         ]
     else:
         missing = []
-        validated = TaskSpecPatch(extraction_mode="not_run")
-        merge_result = MergeResult(
-            task_spec=task,
-            field_provenance=collected.get("process_task_field_provenance") or {},
-            revision_history=collected.get("process_task_revision_history") or [],
-        )
-        extraction_events = []
+        action = None
+        tool_output = None
+        agent_events = []
     if missing:
         clarification_round = min(int(workflow.get("clarification_round") or 0) + 1, 3)
-        parser_guard, repeated_stall = _parser_guard(workflow, context.pending_fields, message, merge_result)
-        extraction_failed = validated.degraded and validated.extraction_mode == "llm_structured"
-        parser_stall = extraction_failed or repeated_stall
         previous_questions = [
             *(workflow.get("previous_questions") or [])[-20:],
             *[
@@ -143,52 +151,46 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
                 for field in missing
             ],
         ]
-        BusinessStateController.transition(
-            workflow, "PARSER_STALL" if parser_stall else "REQUIREMENTS_PENDING"
-        )
+        BusinessStateController.transition(workflow, "REQUIREMENTS_PENDING")
         workflow.update({"missing_fields": missing,
                          "clarification_round": clarification_round,
                          "max_clarification_rounds": 3,
                          "ordered_fields": missing,
                          "previous_questions": previous_questions,
-                         "parser_guard": parser_guard,
-                         "field_conflicts": merge_result.conflicts,
-                         "field_extraction": _field_extraction_debug(validated, merge_result, missing),
+                         "allowed_actions": allowed_agent_actions(BusinessState.INTAKE),
+                         "agent_action": action.model_dump(mode="json") if action else None,
+                         "last_tool_result": tool_output,
                          "task_spec": task,
-                         "field_provenance": merge_result.field_provenance,
-                         "revision_history": merge_result.revision_history})
+                         "field_provenance": collected.get("process_task_field_provenance") or {},
+                         "revision_history": collected.get("process_task_revision_history") or []})
         collected["process_workflow"] = workflow
         update_session_state(session_id, {"collected_slots": collected,
             "active_workflow": "complex_process_task", "active_skill": "complex_process_task",
-            "workflow_stage": "parser_stall" if parser_stall else "clarification", "pending_questions": missing})
-        if parser_stall:
-            extraction_events.append(_record_parser_stall(session_id, message_id, message, missing))
+            "workflow_stage": "clarification", "pending_questions": missing})
         return {
             "content": (
-                _degraded_extraction_message(missing) if extraction_failed
-                else _parser_stall_message(message, missing) if parser_stall
+                (action.message + "\n\n" + _requirements_message(task, missing, clarification_round))
+                if action and action.action == "ask_user" and action.message
+                else action.message if action and action.action == "direct_answer" and action.message
+                else _tool_failure_message(tool_output, missing) if tool_output and tool_output.get("status") == "failed"
                 else _requirements_message(task, missing, clarification_round)
             ),
             "state": workflow,
             "next_action": {
-                "action_type": "submit_structured_fields" if parser_stall else "submit_required_fields",
+                "action_type": "submit_required_fields",
                 "required_fields": missing,
                 "blocking": True,
             },
-            "events": extraction_events,
+            "events": agent_events,
         }
 
-    last_extraction_debug = workflow.get("field_extraction")
-    if validated.extraction_mode != "not_run":
-        last_extraction_debug = _field_extraction_debug(validated, merge_result, missing)
     workflow.update({
-        "parser_guard": {},
         "missing_fields": [],
         "task_spec": task,
-        "field_provenance": merge_result.field_provenance,
-        "revision_history": merge_result.revision_history,
-        "field_conflicts": merge_result.conflicts,
-        "field_extraction": last_extraction_debug,
+        "field_provenance": collected.get("process_task_field_provenance") or {},
+        "revision_history": collected.get("process_task_revision_history") or [],
+        "agent_action": action.model_dump(mode="json") if action else workflow.get("agent_action"),
+        "last_tool_result": tool_output,
     })
 
     selected = _trial_choice(message) or workflow.get("selected_trial_mode")
@@ -203,7 +205,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         return {"content": _trial_choice_message(selection), "state": workflow,
                 "next_action": selection.get("next_required_action") or {"action_type": "select_trial_mode",
                     "allowed_values": list(TRIAL_CHOICES.values()), "blocking": True},
-                "events": [*extraction_events, *result["events"]],
+                "events": [*agent_events, *result["events"]],
                 "workflow_result": result}
 
     if BusinessState(workflow["business_state"]) in {
@@ -215,7 +217,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         "FINAL_INSPECTION_PENDING", "QUALITY_DECISION", "REPORT_PENDING", "ARCHIVE_PENDING",
     }:
         formal_result = _run_formal_turn(session_id, message, collected, workflow, task)
-        formal_result["events"] = [*extraction_events, *(formal_result.get("events") or [])]
+        formal_result["events"] = [*agent_events, *(formal_result.get("events") or [])]
         return formal_result
 
     if not workflow.get("trial_plan"):
@@ -242,7 +244,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
             return {"content": content, "state": workflow,
                     "next_action": {"action_type": "resolve_parameter_evidence" if allow_exploration else "approve_llm_fallback",
                                     "allowed_values": ["允许探索性候选"] if not allow_exploration else [], "blocking": True},
-                    "events": extraction_events}
+                    "events": agent_events}
         candidate = {item.name: item.value for item in recommendation.parameters if item.value is not None}
         provenance = parameter_provenance_registry_tool(recommendation)
         result = _execute_workflow(session_id, task, selected_trial_mode=selected,
@@ -252,7 +254,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
             blocked = BusinessStateController.transition({}, "BLOCKED")
             return {"content": "试切模式不允许或试切方案生成失败，流程已阻塞。", "state": blocked,
                     "next_action": {"action_type": "review_trial_mode", "blocking": True},
-                    "events": [*extraction_events, *result["events"]]}
+                    "events": [*agent_events, *result["events"]]}
         BusinessStateController.transition(workflow, "TRIAL_RESULT_PENDING")
         workflow.update({"selected_trial_mode": selected,
                          "trial_plan": plan, "parameter_provenance": provenance,
@@ -262,13 +264,13 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
         update_session_state(session_id, {"collected_slots": collected, "workflow_stage": "trial_result_pending",
                                           "pending_questions": ["trial_result"]})
         return {"content": _trial_plan_message(plan), "state": workflow,
-                "next_action": _trial_result_contract(), "events": [*extraction_events, *result["events"]],
+                "next_action": _trial_result_contract(), "events": [*agent_events, *result["events"]],
                 "workflow_result": result}
 
     payload = _json_payload(message)
     if payload is None:
         return {"content": "当前等待试切结果。请按下方 JSON 输入契约提交，不得以文字确认代替实测数据。",
-                "state": workflow, "next_action": _trial_result_contract(), "events": extraction_events}
+                "state": workflow, "next_action": _trial_result_contract(), "events": agent_events}
     evaluation = _ingest_and_evaluate(workflow["trial_plan"], payload)
     BusinessStateController.transition(workflow, "TRIAL_RESULT_EVALUATION")
     workflow.update({"trial_evaluation": evaluation,
@@ -301,7 +303,7 @@ def run_process_chat_turn(session_id: str, message: str, message_id: str | None 
     else:
         content = f"试切结果已完成结构化评价：{decision}。流程不能进入正式加工。"
         next_action = {"action_type": "review_trial_failure", "blocking": True}
-    return {"content": content, "state": workflow, "next_action": next_action, "events": extraction_events}
+    return {"content": content, "state": workflow, "next_action": next_action, "events": agent_events}
 
 
 def _run_formal_turn(session_id: str, message: str, collected: dict[str, Any], workflow: dict[str, Any],
@@ -521,263 +523,91 @@ def _task_intake_required(workflow: dict[str, Any], task: dict[str, Any], contex
     return bool(MissingFieldEvaluator.evaluate(task, context))
 
 
-def _field_extraction_debug(patch, merge_result, missing: list[str]) -> dict[str, Any]:
-    return {
-        "provider": patch.provider,
-        "model": patch.model,
-        "extractor_version": patch.extraction_version,
-        "extraction_mode": patch.extraction_mode,
-        "attempt_count": patch.attempt_count,
-        "llm_attempted": patch.llm_attempted,
-        "schema_valid": patch.schema_valid,
-        "recognized_fields": [
-            {
-                "field_name": item.field_name,
-                "value": item.normalized_value,
-                "unit": item.unit,
-                "evidence": item.evidence,
-                "operation": item.operation,
-            }
-            for item in patch.updates
-        ],
-        "rejected_fields": list(patch.rejected_candidates),
-        "conflicts": list(merge_result.conflicts),
-        "missing_fields": list(missing),
-        "degraded": patch.degraded,
-    }
-
-
-def _record_field_extraction_events(
+def _record_agent_decision(
     session_id: str,
     message_id: str | None,
-    message: str,
-    patch,
-    merge_result,
-    stage: str,
-    missing: list[str],
-) -> list[dict[str, Any]]:
-    events = [record_process_event(
-        session_id=session_id,
-        message_id=message_id,
-        event_type="field_extraction_started",
-        stage=stage,
-        title="字段抽取开始",
-        summary=(
-            f"字段抽取模式 {patch.extraction_mode}；provider={patch.provider or 'none'}；"
-            f"model={patch.model or 'none'}；llm_attempted={str(patch.llm_attempted).lower()}；"
-            f"schema_valid={str(patch.schema_valid).lower()}；extractor={patch.extraction_version}。"
-        ),
-        skill="complex_process_task",
-        tool="task_field_extraction_service",
-        input_summary=message[:240],
-        output_summary=(
-            f"provider={patch.provider or 'none'}; model={patch.model or 'none'}; "
-            f"extractor_version={patch.extraction_version}; attempts={patch.attempt_count}"
-        ),
-        payload={
-            "extraction_mode": patch.extraction_mode,
-            "provider": patch.provider,
-            "model": patch.model,
-            "llm_attempted": patch.llm_attempted,
-            "schema_valid": patch.schema_valid,
-            "attempt_count": patch.attempt_count,
-        },
-        status="running",
-    )]
-    for candidate in patch.updates:
-        events.append(record_process_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="field_candidate_extracted",
-            stage=stage,
-            title=f"识别字段候选：{candidate.field_name}",
-            summary=(
-                f"识别到 {FIELD_LABELS.get(candidate.field_name, candidate.field_name)}，"
-                f"证据为“{candidate.evidence}”。"
-            ),
-            skill="complex_process_task",
-            tool="task_field_extraction_service",
-            output_summary=(
-                f"field={candidate.field_name}; source={candidate.extraction_source}; "
-                f"confidence={candidate.confidence:.2f}; operation={candidate.operation}"
-            ),
-            status="completed",
-        ))
-    for rejected in patch.rejected_candidates:
-        events.append(record_process_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="field_candidate_rejected",
-            stage=stage,
-            title=f"拒绝字段候选：{rejected.get('field_name') or 'unknown'}:{rejected.get('reason') or 'unknown'}",
-            summary=(
-                f"字段 {rejected.get('field_name') or 'unknown'} 未通过确定性校验："
-                f"{rejected.get('reason') or 'unknown'}。"
-            ),
-            skill="complex_process_task",
-            tool="task_field_validator",
-            status="completed",
-        ))
-    for conflict in merge_result.conflicts:
-        events.append(record_process_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="field_conflict_detected",
-            stage=stage,
-            title=f"检测到字段冲突：{conflict['field_name']}",
-            summary=(
-                f"{FIELD_LABELS.get(conflict['field_name'], conflict['field_name'])}已有确认值，"
-                "新候选不含明确修正语义，已拒绝覆盖。"
-            ),
-            skill="complex_process_task",
-            tool="task_spec_merge_service",
-            status="completed",
-        ))
-    if merge_result.applied:
-        fields = [item.field_name for item in merge_result.applied]
-        events.append(record_process_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="task_spec_patched",
-            stage=stage,
-            title="更新任务字段",
-            summary="已通过治理层写入：" + "、".join(FIELD_LABELS.get(field, field) for field in fields) + "。",
-            skill="complex_process_task",
-            tool="task_spec_merge_service",
-            output_summary="fields=" + ",".join(fields),
-            status="completed",
-        ))
-    if patch.degraded:
-        events.append(record_process_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="field_extraction_degraded",
-            stage=stage,
-            title="字段抽取降级",
-            summary="LLM 结构化抽取不可用或返回无效结果；未写入候选，已保留现有任务状态。",
-            skill="complex_process_task",
-            tool="llm_task_field_extractor",
-            status="completed",
-        ))
-    events.append(record_process_event(
-        session_id=session_id,
-        message_id=message_id,
-        event_type="field_extraction_completed",
-        stage=stage,
-        title="字段抽取结果",
-        summary=(
-            "识别字段：" + ("、".join(item.field_name for item in patch.updates) or "无") + "；"
-            f"拒绝字段：{len(patch.rejected_candidates)}；冲突字段：{len(merge_result.conflicts)}；"
-            "最终缺失字段：" + ("、".join(missing) or "无") + "。"
-        ),
-        skill="complex_process_task",
-        tool="task_spec_patch_validator",
-        output_summary=(
-            f"recognized={len(patch.updates)}; rejected={len(patch.rejected_candidates)}; "
-            f"conflicts={len(merge_result.conflicts)}; missing={','.join(missing)}"
-        ),
-        payload={
-            "extraction_mode": patch.extraction_mode,
-            "provider": patch.provider,
-            "model": patch.model,
-            "llm_attempted": patch.llm_attempted,
-            "schema_valid": patch.schema_valid,
-            "accepted": [
-                {
-                    "field_name": item.field_name,
-                    "value": item.normalized_value,
-                    "evidence": item.evidence,
-                }
-                for item in patch.updates
-            ],
-            "rejected": list(patch.rejected_candidates),
-            "merge_applied": [item.field_name for item in merge_result.applied],
-            "remaining_missing": list(missing),
-        },
-        status="completed" if not patch.degraded else "warning",
-    ))
-    return events
-
-
-def _parser_guard(
+    action,
     workflow: dict[str, Any],
-    pending_fields: list[str],
-    message: str,
-    merge_result,
-) -> tuple[dict[str, Any], bool]:
-    prior = dict(workflow.get("parser_guard") or {})
-    evidence = re.sub(r"[\s；;，,。]+", "", message).lower()
-    effective_fields = {
-        item.field_name for item in [*merge_result.applied, *merge_result.unchanged]
-        if item.field_name in pending_fields
-    }
-    failed = bool(pending_fields) and not effective_fields
-    same_pending = list(prior.get("pending_fields") or []) == list(pending_fields)
-    same_evidence = prior.get("evidence") == evidence
-    if failed:
-        failures = int(prior.get("consecutive_failures") or 0) + 1 if same_pending and same_evidence else 1
-    else:
-        failures = 0
-    guard = {
-        "pending_fields": list(pending_fields),
-        "evidence": evidence,
-        "raw_evidence": message,
-        "consecutive_failures": failures,
-    }
-    return guard, failures >= 2
-
-
-def _record_parser_stall(
-    session_id: str,
-    message_id: str | None,
-    message: str,
-    missing: list[str],
 ) -> dict[str, Any]:
+    selected = action.tool_name if action.action == "call_tool" else action.action
     return record_process_event(
         session_id=session_id,
         message_id=message_id,
-        event_type="clarification_parser_failed",
-        stage="PARSER_STALL",
-        title="澄清解析停滞",
-        summary="字段抽取未生成可靠 Patch，已切换为严格字段化输入模板。",
+        event_type="agent_decision",
+        stage=workflow.get("substatus") or "INTAKE",
+        title="Agent 行动决策",
+        summary=action.decision_summary,
         skill="complex_process_task",
-        tool="parser_stall_guard",
-        input_summary=message[:240],
-        output_summary="pending_fields=" + ",".join(missing),
-        status="waiting_user",
+        tool="main_agent",
+        payload={
+            "action": action.action,
+            "selected": selected,
+            "provider": action.provider,
+            "model": action.model,
+            "allowed_actions": workflow.get("allowed_actions") or [],
+        },
+        status="completed",
     )
 
 
-def _parser_stall_message(message: str, missing: list[str]) -> str:
-    template = _structured_input_template(missing)
-    return (
-        "系统未能可靠解析以下回答：\n"
-        f"“{message}”\n\n"
-        "已保留此前确认的全部字段，不会进入 BO。请按下列字段化格式重试：\n"
-        f"{template}"
+def _record_agent_tool_call(
+    session_id: str,
+    message_id: str | None,
+    action,
+    stage: str,
+) -> dict[str, Any]:
+    updates = list(action.arguments.get("updates") or [])
+    return record_process_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type="tool_started",
+        stage=stage,
+        title="调用 update_task_spec",
+        summary=f"主 Agent 请求校验并提交 {len(updates)} 个结构化任务字段。",
+        skill="complex_process_task",
+        tool="update_task_spec",
+        payload={"fields": [str(item.get("field_name")) for item in updates]},
+        status="running",
     )
 
 
-def _degraded_extraction_message(missing: list[str]) -> str:
-    return (
-        "字段解析服务暂时无法可靠理解当前回答。已保留此前确认的全部字段，不会进入 BO。\n\n"
-        "请按以下严格字段格式输入：\n"
-        + _structured_input_template(missing)
+def _record_agent_tool_result(
+    session_id: str,
+    message_id: str | None,
+    result: dict[str, Any],
+    stage: str,
+) -> dict[str, Any]:
+    status = str(result.get("status") or "failed")
+    applied = list(result.get("applied") or [])
+    missing = list(result.get("remaining_missing") or [])
+    return record_process_event(
+        session_id=session_id,
+        message_id=message_id,
+        event_type="tool_completed" if status != "failed" else "tool_failed",
+        stage=stage,
+        title="update_task_spec 执行结果",
+        summary=(
+            "已写入：" + ("、".join(applied) or "无") + "；"
+            "剩余缺失：" + ("、".join(missing) or "无") + "。"
+        ),
+        skill="complex_process_task",
+        tool="update_task_spec",
+        payload={
+            "status": status,
+            "applied": applied,
+            "rejected": result.get("rejected") or [],
+            "conflicts": result.get("conflicts") or [],
+            "remaining_missing": missing,
+            "error_code": result.get("error_code"),
+        },
+        status="completed" if status == "success" else "warning" if status == "partial" else "failed",
     )
 
 
-def _structured_input_template(missing: list[str]) -> str:
-    examples = {
-        "material": "材料=CFRP_T300",
-        "process_type": "加工类型=切割",
-        "thickness_mm": "厚度=5 mm",
-        "quality_requirement": "质量要求=切缝区域无分层",
-        "cut_length_mm": "切割长度=100 mm；轮廓=直线",
-        "efficiency_requirement": "效率要求=无",
-        "auxiliary": "辅助介质=压缩空气",
-        "layer_cut_allowed": "允许分层切割=true",
-    }
-    return "；\n".join(examples[field] for field in missing if field in examples)
+def _tool_failure_message(result: dict[str, Any], missing: list[str]) -> str:
+    reason = result.get("error_code") or result.get("message") or "tool_failed"
+    labels = "、".join(FIELD_LABELS.get(field, field) for field in missing)
+    return f"任务状态写入工具未成功（{reason}）。现有状态未被覆盖。仍缺少：{labels}。"
 
 
 def _requirements_message(task: dict[str, Any], missing: list[str], clarification_round: int = 1) -> str:

@@ -25,6 +25,9 @@ class ToolContract:
     enabled: bool = True
     cache_policy: str = "none"
     sensitive_input_fields: tuple[str, ...] = field(default_factory=tuple)
+    permission_level: int = 1
+    requires_human_approval: bool = False
+    prohibited: bool = False
 
 
 class ToolRegistry:
@@ -74,6 +77,18 @@ class ToolExecutor:
         cancellation_requested: Callable[[], bool] | None = None,
     ) -> ToolExecutionResult:
         contract = self.registry.get(name)
+        if contract.prohibited or contract.permission_level >= 4:
+            return ToolExecutionResult(
+                "failed",
+                error_code="tool_prohibited",
+                error_message=f"tool is prohibited: {name}",
+            )
+        if contract.requires_human_approval and not bool((context or {}).get("human_approved")):
+            return ToolExecutionResult(
+                "failed",
+                error_code="human_approval_required",
+                error_message=f"human approval required: {name}",
+            )
         if not contract.enabled:
             return ToolExecutionResult("failed", error_code="tool_disabled", error_message=f"tool disabled: {name}")
         validation_error = _validate_required(payload, contract.input_schema)

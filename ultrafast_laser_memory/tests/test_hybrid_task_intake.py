@@ -222,11 +222,9 @@ def test_exact_reported_two_turn_chat_uses_llm_context(isolated_root, monkeypatc
     assert result["workflow_state"]["missing_slots"] == []
     completed = next(
         item for item in result["execution_trace"]
-        if item["event_type"] == "field_extraction_completed"
+        if item["event_type"] == "tool_completed" and item["tool"] == "update_task_spec"
     )
-    assert completed["payload"]["llm_attempted"] is True
-    assert completed["payload"]["schema_valid"] is True
-    assert completed["payload"]["merge_applied"] == [
+    assert completed["payload"]["applied"] == [
         "cut_length_mm", "efficiency_requirement", "auxiliary", "layer_cut_allowed",
     ]
     assert completed["payload"]["remaining_missing"] == []
@@ -277,22 +275,24 @@ def test_cutting_clarification_log_regression(isolated_root, monkeypatch):
     assert task["layer_cut_allowed"] is True
     assert state["missing_slots"] == []
     assert state["field_provenance"]["cut_length_mm"]["evidence"] == "100mm"
-    assert state["field_provenance"]["cut_length_mm"]["source"] == "llm_semantic_extraction"
-    assert state["field_provenance"]["cut_length_mm"]["extractor_version"] == "llm-task-intake-v1"
-    assert state["field_extraction"]["provider"] == "deepseek"
-    assert state["field_extraction"]["model"] == "deepseek-v4-flash"
-    assert state["field_extraction"]["missing_fields"] == []
+    assert state["field_provenance"]["cut_length_mm"]["source"] == "main_agent_tool_call"
+    assert state["field_provenance"]["cut_length_mm"]["extractor_version"] == \
+        "agent-update-task-spec-v1"
+    assert state["agent_action"]["provider"] == "deepseek"
+    assert state["agent_action"]["model"] == "deepseek-v4-flash"
+    assert state["last_tool_result"]["remaining_missing"] == []
     event_types = {item["event_type"] for item in result["execution_trace"]}
-    assert "field_candidate_extracted" in event_types
-    assert "task_spec_patched" in event_types
+    assert "agent_decision" in event_types
+    assert "tool_started" in event_types
     assert sum(
-        item["event_type"] == "field_extraction_completed"
+        item["event_type"] == "tool_completed" and item.get("tool") == "update_task_spec"
         for item in result["execution_trace"]
     ) == 1
     with get_connection() as conn:
         canonical = conn.execute(
-            "SELECT COUNT(*) FROM runtime_public_event WHERE session_id=? AND event_type=?",
-            (session_id, "field_extraction_completed"),
+            "SELECT COUNT(*) FROM runtime_public_event "
+            "WHERE session_id=? AND event_type=? AND tool=?",
+            (session_id, "tool_completed", "update_task_spec"),
         ).fetchone()[0]
         legacy = conn.execute(
             "SELECT COUNT(*) FROM agent_trace_event WHERE session_id=?", (session_id,)
@@ -589,7 +589,7 @@ def test_llm_cannot_inject_unallowed_process_parameter():
     assert merged.task_spec == current
 
 
-def test_parser_stall_stops_repeating_identical_question(isolated_root, monkeypatch):
+def test_unrecognized_answer_never_creates_parser_business_state(isolated_root, monkeypatch):
     _equipment()
     llm = ScriptedTaskIntakeLLM()
     monkeypatch.setattr(
@@ -601,12 +601,12 @@ def test_parser_stall_stops_repeating_identical_question(isolated_root, monkeypa
     first = _chat(client, session_id, "切割5mm厚型号为T300的碳纤维复合板")
     assert first["workflow_state"]["current_stage_code"] == "REQUIREMENTS_PENDING"
     _chat(client, session_id, "无法识别的回答")
-    stalled = _chat(client, session_id, "无法识别的回答")
-    assert stalled["workflow_state"]["current_stage_code"] == "PARSER_STALL"
-    assert "系统未能可靠解析" in stalled["assistant_message"]
-    assert "字段化格式" in stalled["assistant_message"]
-    assert stalled["workflow_state"]["task_spec"]["thickness_mm"] == 5
-    assert stalled["next_required_action"]["action_type"] == "submit_structured_fields"
+    result = _chat(client, session_id, "无法识别的回答")
+    assert result["workflow_state"]["current_stage_code"] == "REQUIREMENTS_PENDING"
+    assert "字段化格式" not in result["assistant_message"]
+    assert result["workflow_state"]["task_spec"]["thickness_mm"] == 5
+    assert result["next_required_action"]["action_type"] == "submit_required_fields"
+    assert "update_task_spec" in result["workflow_state"]["allowed_actions"]
 
 
 def test_stream_and_non_stream_workflow_state_are_consistent(isolated_root, monkeypatch):

@@ -338,7 +338,7 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     yield {
         "type": "meta", "session_id": response.session_id,
         "provider": "system" if process_workflow else "workflow",
-        "model": "deterministic-process-workflow-v3" if process_workflow else "shared-chat-workflow-v1",
+        "model": "agent-native-tools-v1" if process_workflow else "shared-chat-workflow-v1",
     }
     if response.progress:
         yield _progress_event(response.progress)

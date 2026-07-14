@@ -39,7 +39,7 @@ def test_streaming_process_chat_accumulates_fields_and_requires_trial_choice(iso
     assert "推荐参数" not in first
     assert len([item for item in first_events if item.get("type") == "progress"]) == 1
     assert next(item for item in first_events if item.get("type") == "meta")["model"] == \
-        "deterministic-process-workflow-v3"
+        "agent-native-tools-v1"
     state = next(item for item in first_events if item.get("type") == "workflow_state")
     assert state["current_stage"] == "等待补充加工要求"
     assert state["current_stage_code"] == "REQUIREMENTS_PENDING"

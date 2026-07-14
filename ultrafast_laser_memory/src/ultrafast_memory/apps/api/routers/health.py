@@ -14,7 +14,7 @@ def health() -> dict:
         "status": "ok",
         "api_version": "0.3.0",
         "workflow_contract": "process-workflow-v3",
-        "task_intake_contract": "llm-structured-v1",
+        "task_intake_contract": "agent-native-tools-v1",
         "runtime_identity": runtime_identity(),
     }
 

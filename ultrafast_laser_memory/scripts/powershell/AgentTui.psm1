@@ -402,15 +402,15 @@ function Show-AgentRuntimeIdentity {
     Write-Host ("python={0}" -f $identity.python)
     Write-Host ("package_root={0}" -f $identity.package_root)
     Write-Host ("chat_orchestrator={0}" -f $identity.chat_orchestrator)
-    Write-Host ("task_intake_service={0}" -f $identity.task_intake_service)
-    Write-Host ("llm_extractor={0}" -f $identity.llm_extractor)
+    Write-Host ("main_agent_controller={0}" -f $identity.main_agent_controller)
+    Write-Host ("update_task_spec_tool={0}" -f $identity.update_task_spec_tool)
     Write-Host ("backend_pid={0}" -f $identity.backend_pid)
     Write-Host ("backend_started_at={0}" -f $identity.backend_started_at)
 }
 
 function Test-AgentRuntimeIdentity {
     param($Health)
-    if ($null -eq $Health -or $Health.task_intake_contract -ne "llm-structured-v1") { return $false }
+    if ($null -eq $Health -or $Health.task_intake_contract -ne "agent-native-tools-v1") { return $false }
     if ($null -eq $Health.runtime_identity) { return $false }
     $localCommit = (& git -C $script:RepoRoot rev-parse HEAD 2>$null).Trim()
     $expectedRoot = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot "src")).TrimEnd('\').ToLowerInvariant()
@@ -681,9 +681,6 @@ function Show-AgentTraceEvent {
     $label = if ($Event.title) { $Event.title } else { $Event.event_type }
     $summary = if ($Event.summary) { $Event.summary } else { "" }
     Write-Host ("{0} {1}: {2}" -f $mark, $label, $summary) -ForegroundColor DarkCyan
-    if ($mode -eq "debug" -and $Event.event_type -in @("field_extraction_started", "field_extraction_completed")) {
-        Show-AgentFieldExtractionTrace -Event $Event
-    }
     if ($mode -eq "debug") {
         if ($Event.sequence) { Write-Host ("  sequence: {0}" -f $Event.sequence) -ForegroundColor DarkGray }
         $toolName = if ($Event.tool_name) { $Event.tool_name } else { $Event.tool }
@@ -695,24 +692,6 @@ function Show-AgentTraceEvent {
         if ($null -ne $Event.duration_ms) { Write-Host ("  duration_ms: {0}" -f $Event.duration_ms) -ForegroundColor DarkGray }
         if ($null -ne $Event.cache_hit) { Write-Host ("  cache_hit: {0}" -f $Event.cache_hit) -ForegroundColor DarkGray }
         if ($Event.attempt) { Write-Host ("  attempt: {0}" -f $Event.attempt) -ForegroundColor DarkGray }
-    }
-}
-
-function Show-AgentFieldExtractionTrace {
-    param($Event)
-    $details = $Event.payload
-    if ($null -eq $details) { return }
-    Write-Host ("  mode={0}; provider={1}; model={2}; llm_attempted={3}; schema_valid={4}" -f `
-        $details.extraction_mode, $details.provider, $details.model, $details.llm_attempted, $details.schema_valid) -ForegroundColor DarkGray
-    if ($Event.event_type -eq "field_extraction_completed") {
-        foreach ($item in @($details.accepted)) {
-            Write-Host ("  accepted: {0}={1} <- {2}" -f $item.field_name, $item.value, $item.evidence) -ForegroundColor DarkGray
-        }
-        foreach ($item in @($details.rejected)) {
-            Write-Host ("  rejected: {0} ({1})" -f $item.field_name, $item.reason) -ForegroundColor Yellow
-        }
-        Write-Host ("  merge_applied: {0}" -f (@($details.merge_applied) -join ", ")) -ForegroundColor DarkGray
-        Write-Host ("  remaining_missing: {0}" -f (@($details.remaining_missing) -join ", ")) -ForegroundColor DarkGray
     }
 }
 
@@ -1442,4 +1421,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentFieldExtractionTrace, Show-AgentRuntimeIdentity, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentRuntimeIdentity, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
