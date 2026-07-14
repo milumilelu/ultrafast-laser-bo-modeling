@@ -49,6 +49,8 @@ class AgentEvent:
     summary: str
     status: str
     event_id: str = field(default_factory=lambda: f"agent-event-{uuid.uuid4().hex}")
+    stream_id: str | None = None
+    idempotency_key: str | None = None
     trace_id: str | None = None
     session_id: str | None = None
     workflow_id: str | None = None
@@ -73,6 +75,7 @@ class AgentEvent:
     payload: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.stream_id = self.stream_id or self.run_id
         self.trace_id = self.trace_id or self.run_id
         self.tool_name = self.tool_name or self.tool
         self.public_summary = self.public_summary or self.summary

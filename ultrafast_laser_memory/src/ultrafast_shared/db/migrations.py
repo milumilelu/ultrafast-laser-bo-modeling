@@ -302,6 +302,27 @@ BASELINE_MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_document_element_document ON document_element(document_id, page_number)",
         ),
     ),
+    Migration(
+        migration_id="0010_atomic_runtime_event_sequence",
+        description="Add transactional stream sequence allocation and event idempotency",
+        statements=(
+            "ALTER TABLE runtime_public_event ADD COLUMN stream_id TEXT",
+            "ALTER TABLE runtime_public_event ADD COLUMN idempotency_key TEXT",
+            "UPDATE runtime_public_event SET stream_id=run_id WHERE stream_id IS NULL",
+            """CREATE TABLE IF NOT EXISTS runtime_event_sequence (
+                stream_id TEXT PRIMARY KEY,
+                next_sequence INTEGER NOT NULL CHECK(next_sequence >= 1)
+            )""",
+            """INSERT OR REPLACE INTO runtime_event_sequence(stream_id, next_sequence)
+                SELECT run_id, COALESCE(MAX(sequence), 0) + 1
+                FROM runtime_public_event GROUP BY run_id""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_event_stream_sequence
+                ON runtime_public_event(stream_id, sequence)""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_event_stream_idempotency
+                ON runtime_public_event(stream_id, idempotency_key)
+                WHERE idempotency_key IS NOT NULL""",
+        ),
+    ),
 )
 
 

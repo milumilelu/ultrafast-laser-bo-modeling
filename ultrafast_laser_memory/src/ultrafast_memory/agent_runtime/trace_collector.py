@@ -25,6 +25,7 @@ def record_agent_trace_event(
     workflow_id: str | None = None,
     visibility: str = "public",
     payload: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     run_id = stable_id("agent-run", session_id, message_id or "session")
     workflow_id = workflow_id or stable_id("workflow", session_id, skill or "chat")
@@ -49,6 +50,7 @@ def record_agent_trace_event(
         tool=tool,
         payload=safe_payload,
         visibility=visibility,
+        idempotency_key=idempotency_key,
     )
     return event.to_dict()
 

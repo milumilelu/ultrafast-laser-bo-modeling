@@ -38,7 +38,14 @@ flowchart LR
     E --> G["DebugTraceRenderer"]
 ```
 
-`EventBus` is the only canonical sequence allocator. `render_sequence` is presentation order and is not an event sequence. The historical tables `agent_trace_event`, `reasoning_status_trace`, and `public_reasoning_trace` remain in migrations for old data compatibility but receive no new writes.
+SQLite is the canonical durable sequence allocator. `run_id` defines one event stream; `EventBus`
+sequence values are provisional until `DatabaseEventSink` atomically allocates and inserts the durable
+sequence. Allocation uses `BEGIN IMMEDIATE`, `runtime_event_sequence`, and a unique
+`(stream_id, sequence)` constraint in the same transaction. A unique
+`(stream_id, idempotency_key)` constraint makes retries return the original canonical event.
+`render_sequence` is presentation order and is not an event sequence. The historical tables
+`agent_trace_event`, `reasoning_status_trace`, and `public_reasoning_trace` remain in migrations for
+old data compatibility but receive no new writes.
 
 ## Business State and substatus
 

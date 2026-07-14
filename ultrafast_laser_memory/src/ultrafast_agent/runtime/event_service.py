@@ -38,6 +38,7 @@ class AgentEventService:
         step: str | None = None,
         payload: dict[str, Any] | None = None,
         visibility: str = "public",
+        idempotency_key: str | None = None,
     ) -> AgentEvent:
         bus = self._bus(run_id, session_id)
         return bus.emit(
@@ -54,6 +55,7 @@ class AgentEventService:
             message_id=message_id,
             data=payload,
             visibility=visibility,
+            idempotency_key=idempotency_key,
         )
 
     def _bus(self, run_id: str, session_id: str | None) -> EventBus:

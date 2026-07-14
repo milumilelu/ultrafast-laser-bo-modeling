@@ -14,6 +14,9 @@ def get_connection(db_path: str | Path | None = None, *, read_only: bool = False
     else:
         connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=10)
     connection.row_factory = sqlite3.Row
+    if not read_only:
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 10000")
     return connection

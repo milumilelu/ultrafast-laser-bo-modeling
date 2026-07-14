@@ -61,12 +61,15 @@ class EventBus:
         workflow_id: str | None = None,
         message_id: str | None = None,
         step: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AgentEvent:
         with self._lock:
             self._sequence += 1
             safe_data = redact_public_data(data or {})
             event = AgentEvent(
                 run_id=self.run_id,
+                stream_id=self.run_id,
+                idempotency_key=idempotency_key,
                 trace_id=self.trace_id,
                 session_id=self.session_id,
                 workflow_id=workflow_id,
