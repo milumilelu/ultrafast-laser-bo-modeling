@@ -413,6 +413,32 @@ function Show-AgentRuntimeIdentity {
     Write-Host ("backend_started_at={0}" -f $identity.backend_started_at)
 }
 
+function Show-AgentRagHealth {
+    param([string]$BaseUrl = "http://127.0.0.1:8000")
+    try {
+        $doctor = Invoke-RestMethod -Method Get -Uri "$BaseUrl/doctor" -TimeoutSec 10
+        $rag = $doctor.checks | Where-Object { $_.name -eq "rag" } | Select-Object -First 1
+        if (-not $rag) {
+            Write-Host "[RAG] 健康检查未返回 RAG 状态。" -ForegroundColor Yellow
+            return
+        }
+        $details = $rag.details
+        $indexId = if ($details.index_id) { $details.index_id } else { "missing" }
+        $provider = if ($details.embedding_provider) { $details.embedding_provider } else { $details.configured_provider }
+        $model = if ($details.embedding_model) { $details.embedding_model } else { $details.configured_model }
+        $indexStatus = if ($details.index_status) { $details.index_status } else { "missing" }
+        $vectors = if ($null -ne $details.vector_entry_count) { $details.vector_entry_count } else { 0 }
+        $lexicalOnly = if ($null -ne $details.lexical_only_entry_count) { $details.lexical_only_entry_count } else { 0 }
+        $color = if ($rag.status -eq "pass") { "Green" } else { "Yellow" }
+        Write-Host ("[RAG] index={0}; status={1}; provider={2}; model={3}; vectors={4}; lexical_only={5}" -f $indexId, $indexStatus, $provider, $model, $vectors, $lexicalOnly) -ForegroundColor $color
+        if ($rag.status -ne "pass") {
+            Write-Host ("[RAG warning] {0}" -f $rag.summary) -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host ("[RAG warning] 健康检查失败：{0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
 function Test-AgentRuntimeIdentity {
     param($Health)
     if ($null -eq $Health -or $Health.agent_capability_contract -ne "skill-discovery-v2") { return $false }
@@ -548,6 +574,7 @@ function Start-AgentApiServerBackground {
                 } else {
                     Write-Host ("FastAPI 后端已运行：{0}" -f $baseUrl)
                     Show-AgentRuntimeIdentity -Health $health
+                    Show-AgentRagHealth -BaseUrl $baseUrl
                     return $baseUrl
                 }
             }
@@ -585,6 +612,7 @@ function Start-AgentApiServerBackground {
                 Write-Host ("FastAPI 后端已启动。PID: {0}; URL: {1}" -f $process.Id, $baseUrl)
                 $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health" -TimeoutSec 3
                 Show-AgentRuntimeIdentity -Health $health
+                Show-AgentRagHealth -BaseUrl $baseUrl
                 return $baseUrl
             }
             if ($process.HasExited) {
@@ -1464,4 +1492,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Resolve-AgentDocumentPath, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentRuntimeIdentity, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Resolve-AgentDocumentPath, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentRuntimeIdentity, Show-AgentRagHealth, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret

@@ -19,6 +19,7 @@ from ultrafast_memory.ingestion.pipeline import ingest_file
 from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge as bootstrap_service
 from ultrafast_memory.process_workflow.closure import bo_sample_eligibility, quality_decision
 from ultrafast_memory.process_workflow.repository import ProcessWorkflowRepository
+from ultrafast_memory.rag.parameter_recommendation import recommend_from_evidence
 from ultrafast_memory.rag.query_service import query_rag
 from ultrafast_memory.reports.task_report_service import TaskReportService
 from ultrafast_memory.trial.service import TrialApplicationService
@@ -43,9 +44,21 @@ def build_main_agent_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     contracts = (
         _contract("get_equipment_context", "Read authoritative fixed equipment conditions and tunable capabilities.", _equipment, default=True, cache="equipment_revision"),
-        _contract("search_knowledge", "Search reviewed internal knowledge with traceable evidence.", _search, cache="turn"),
+        _contract(
+            "search_knowledge",
+            "Search purpose-governed internal evidence with review authority and citations.",
+            _search,
+            cache="turn",
+        ),
         _contract("recommend_parameters_bo", "Compute provenance-bearing process setpoints from validated matching BO samples.", _recommend_bo, timeout=60_000, required=("equipment_snapshot.tunable_capabilities",)),
-        _contract("recommend_parameters_rag", "Retrieve reviewed evidence for a conservative parameter candidate.", _recommend_rag),
+        _contract(
+            "recommend_parameters_rag",
+            "Extract and equipment-check a conservative candidate from reviewed RAG evidence.",
+            _recommend_rag,
+            input_schema={"type": "object", "required": [
+                "task_context", "process_plan", "variables", "equipment_context",
+            ]},
+        ),
         _contract(
             "propose_exploratory_parameters",
             "Safety-check a Main-Agent exploratory hypothesis for selected ProcessPlan variables.",
@@ -127,10 +140,20 @@ def _search(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     )).strip()
     if not query:
         return {"status": "insufficient_data", "summary": "缺少可检索的任务描述。", "missing": ["query_or_task_context"]}
-    result = query_rag({"query": query, "top_k": int(payload.get("top_k") or 8)})
-    return {"status": "success", "summary": "内部知识检索完成。", "query": query, "result": result,
+    purpose = str(payload.get("purpose") or "literature_background")
+    result = query_rag({
+        "query": query,
+        "top_k": int(payload.get("top_k") or 8),
+        "filters": dict(payload.get("filters") or {}),
+        "purpose": purpose,
+        "index_name": str(payload.get("index_name") or "literature_default"),
+        "session_id": context.get("session_id"),
+    })
+    authorities = sorted({str(hit.get("authority_level")) for hit in result.get("hits") or []})
+    return {"status": "success", "summary": "内部知识检索完成。", "query": query,
+            "purpose": purpose, "result": result,
             "hits": result.get("hits") or [],
-            "provenance": [{"source_type": "reviewed_rag"}]}
+            "provenance": [{"source_type": "rag_evidence", "authority_levels": authorities}]}
 
 
 def _bootstrap(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -146,6 +169,7 @@ def _parameter_result(*, status: str, parameters: dict[str, Any], source_type: s
                       variables: list[str] | None = None, authority_level: str | None = None,
                       strategy_parameters: dict[str, Any] | None = None,
                       parameter_units: dict[str, str | None] | None = None,
+                      parameter_details: dict[str, dict[str, Any]] | None = None,
                       validated: bool = False, allowed_for_trial: bool = True,
                       allowed_for_formal_process: bool = False,
                       allowed_for_bo_training: bool = False) -> dict[str, Any]:
@@ -154,6 +178,7 @@ def _parameter_result(*, status: str, parameters: dict[str, Any], source_type: s
     selected = list(dict.fromkeys(variables or list(parameters)))
     refs = [str(item) for item in (source_refs or [])]
     parameter_units = parameter_units or {}
+    parameter_details = parameter_details or {}
     process_parameters: dict[str, dict[str, Any]] = {}
     for name in selected:
         if name in fixed or name not in parameters:
@@ -161,15 +186,18 @@ def _parameter_result(*, status: str, parameters: dict[str, Any], source_type: s
         value = parameters[name]
         if not isinstance(value, (int, float, str)):
             continue
+        details = parameter_details.get(name) or {}
         parameter = ParameterValue(
             name=name,
             value=value,
-            unit=PARAMETER_UNITS.get(name),
+            unit=details.get("unit") or PARAMETER_UNITS.get(name),
             role="process_setpoint",
             source_type=source_type,
-            source_refs=refs,
-            authority_level=authority_level or evidence_level,
-            uncertainty=dict(uncertainty or {}),
+            source_refs=[str(item) for item in details.get("source_refs") or refs],
+            authority_level=str(
+                details.get("authority_level") or authority_level or evidence_level
+            ),
+            uncertainty=dict(details.get("uncertainty") or uncertainty or {}),
             validated=validated,
             allowed_for_trial=allowed_for_trial,
             allowed_for_formal_process=allowed_for_formal_process,
@@ -180,15 +208,18 @@ def _parameter_result(*, status: str, parameters: dict[str, Any], source_type: s
     for name, value in (strategy_parameters or {}).items():
         if not isinstance(value, (int, float, str)):
             continue
+        details = parameter_details.get(name) or {}
         parameter = ParameterValue(
             name=name,
             value=value,
-            unit=parameter_units.get(name) or PARAMETER_UNITS.get(name),
+            unit=details.get("unit") or parameter_units.get(name) or PARAMETER_UNITS.get(name),
             role="strategy_parameter",
             source_type=source_type,
-            source_refs=refs,
-            authority_level=authority_level or evidence_level,
-            uncertainty=dict(uncertainty or {}),
+            source_refs=[str(item) for item in details.get("source_refs") or refs],
+            authority_level=str(
+                details.get("authority_level") or authority_level or evidence_level
+            ),
+            uncertainty=dict(details.get("uncertainty") or uncertainty or {}),
             validated=validated,
             allowed_for_trial=allowed_for_trial,
             allowed_for_formal_process=allowed_for_formal_process,
@@ -239,17 +270,98 @@ def _recommend_bo(payload: dict[str, Any], context: dict[str, Any]) -> dict[str,
 
 
 def _recommend_rag(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    equipment = _equipment_snapshot(context)
-    evidence = _search(payload, context)
-    if evidence.get("status") == "insufficient_data":
-        return _parameter_result(status="insufficient_data", parameters={}, source_type="reviewed_rag",
-                                 limitations=["缺少检索上下文"], evidence_level="none",
-                                 equipment=equipment)
-    return _parameter_result(status="success", parameters=payload.get("parameters") or {},
-                             source_type="reviewed_rag", data_support={"evidence": evidence},
-                             limitations=["检索证据需由主 Agent 结合任务解释，不代表全局最优。"],
-                             evidence_level="reviewed_evidence", authority_level="reviewed_evidence",
-                             equipment=equipment, variables=list(payload.get("variables") or []))
+    process_plan = payload.get("process_plan") or {}
+    variables = list(dict.fromkeys(map(str, payload.get("variables") or [])))
+    roles = _declared_process_variable_roles(process_plan)
+    invalid = [name for name in variables if name not in roles]
+    if not variables or invalid:
+        return {
+            "status": "validation_error",
+            "summary": "variables 必须由当前 ProcessPlan 明确选择。",
+            "invalid_variables": invalid,
+        }
+    equipment = _normalize_equipment(
+        payload.get("equipment_context") or _equipment_snapshot(context)
+    )
+    fixed = set((equipment.get("fixed_conditions") or {}).keys())
+    if any(name in fixed for name in variables):
+        return {
+            "status": "validation_error",
+            "summary": "设备固定条件不能作为 RAG 推荐变量。",
+            "invalid_variables": [name for name in variables if name in fixed],
+        }
+    task = payload.get("task_context") or _task(context)
+    material = task.get("material") if isinstance(task, dict) else None
+    if isinstance(material, dict):
+        material = material.get("name")
+    process_type = None
+    if isinstance(task, dict):
+        process_type = task.get("process_type") or task.get("process_intent")
+    filters = dict(payload.get("filters") or {})
+    if material:
+        filters.setdefault("material", material)
+    if process_type:
+        filters.setdefault("process_type", process_type)
+    query = str(payload.get("query") or " ".join(
+        str(item or "") for item in (material, process_type, *variables)
+    )).strip()
+    evidence = _search(
+        {
+            **payload,
+            "query": query,
+            "filters": filters,
+            "purpose": "parameter_recommendation",
+        },
+        context,
+    )
+    hits = list(evidence.get("hits") or [])
+    recommendation = recommend_from_evidence(
+        variables,
+        {name: _canonical_parameter_role(roles[name]) for name in variables},
+        hits,
+        safety_bounds_from_equipment(equipment),
+    )
+    details = recommendation["parameter_details"]
+    refs = list(dict.fromkeys(
+        str(ref)
+        for item in details.values()
+        for ref in item.get("source_refs") or []
+    ))
+    if recommendation["missing_variables"]:
+        return _parameter_result(
+            status="insufficient_data",
+            parameters={},
+            source_type="reviewed_rag",
+            source_refs=refs,
+            data_support={"evidence": evidence, "extraction": recommendation},
+            limitations=[
+                "审核证据未覆盖全部当前变量，未生成可执行参数候选。",
+                "不得用调用者预填值补齐缺失证据。",
+            ],
+            evidence_level="insufficient_reviewed_evidence",
+            authority_level="literature_prior",
+            equipment=equipment,
+            variables=variables,
+            allowed_for_trial=False,
+        ) | {"missing_variables": recommendation["missing_variables"]}
+    return _parameter_result(
+        status="success",
+        parameters=recommendation["process_parameters"],
+        strategy_parameters=recommendation["strategy_parameters"],
+        parameter_details=details,
+        source_type="reviewed_rag",
+        source_refs=refs,
+        data_support={"evidence": evidence, "extraction": recommendation},
+        limitations=["基于审核文献先验，仅允许试切；不代表全局最优或正式工艺。"],
+        evidence_level="reviewed_evidence",
+        authority_level="literature_prior",
+        equipment=equipment,
+        variables=variables,
+        validated=False,
+        allowed_for_trial=True,
+        allowed_for_formal_process=False,
+        allowed_for_bo_training=False,
+    )
 
 
 def _exploratory(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

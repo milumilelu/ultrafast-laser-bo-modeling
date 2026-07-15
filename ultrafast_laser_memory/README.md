@@ -503,6 +503,28 @@ ultrafast rag query "diamond CRL femtosecond laser machining"
 解析或重建当前索引；更换 embedding provider、model 或 dimension 时应创建新索引，
 不得覆盖旧索引，从而保留可审计性。
 
+默认生产配置使用
+`sentence_transformers / sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 / 384`，
+兼顾中英文检索与本地部署体积。安装项目会安装 `sentence-transformers`，模型权重由
+该运行库在首次实际建索引时加载。也可在
+`configs/local.yaml` 配置 OpenAI-compatible embedding：
+
+```yaml
+rag:
+  embedding:
+    provider: openai_compatible
+    model: your-embedding-model
+    dimension: 1024
+    base_url: https://your-endpoint/v1
+    api_key_env: ULTRAFAST_EMBEDDING_API_KEY
+```
+
+凭据只从环境变量读取。真实 embedding 不可用时索引明确标记为 `degraded`，仅保留
+可搜索的词法索引，不会静默切换到 mock。TUI 启动时和 `GET /doctor` 都会显示实际
+provider、model、向量条目数及 lexical-only 条目数。补齐本地模型权重或远端凭据后，
+执行 `ultrafast rag index --name literature_default --force` 将 lexical-only 条目重建为
+向量条目；普通增量索引只处理新增或内容变化的 chunk。
+
 ### 原始证据、chunk 与 Evidence Pack
 
 PDF 使用 PyMuPDF 分页解析，页码统一为 1-based；章节按 Abstract、Methods、Results、
@@ -523,6 +545,16 @@ laser_type, year_min, year_max, evidence_level, review_status, section_type
 ```text
 [paper_id, p.12, chunk_id]
 ```
+
+文献和审核知识只使用一条正式检索链：审核动作先把 `rag_document` 投影为 canonical
+`literature_paper/section/chunk`，再由统一 Index Service 写入 lexical/vector index 和
+`rag_index_entry`。只有向量与词法索引都成功时 `rag_document.indexed=1`；仅词法成功时
+审核结果保留、内容可检索，但索引任务为 `partial`，便于重试和健康检查。
+
+`purpose` 决定证据权限：背景检索可以返回未审核候选并明确标记 `candidate`；参数推荐
+只允许 Level 2 及以上审核证据；正式工艺只允许 Level 3 及以上先验。Level 2 文献参数
+只能形成带逐参数来源与不确定性的试切候选，不能直接用于正式加工或 BO 训练。缺少任一
+ProcessPlan 变量的证据、证据值超出设备边界或来源权限不足时，不生成参数候选。
 
 主要 API：
 

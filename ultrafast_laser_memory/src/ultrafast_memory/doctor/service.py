@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import platform
 import socket
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 from ultrafast_bo import BOStatusService
@@ -158,19 +160,89 @@ class DoctorService:
 
     def _rag(self) -> dict[str, Any]:
         try:
-            index = get_index_by_name("literature_default")
+            rag_config = load_config().get("rag", {})
+            name = str(rag_config.get("default_index_name") or "literature_default")
+            configured_embedding = rag_config.get("embedding") or {}
+            configured_provider = str(configured_embedding.get("provider") or "mock")
+            configured_model = str(
+                configured_embedding.get("model") or "deterministic-mock-v1"
+            )
+            provider_available = _embedding_runtime_available(
+                configured_provider, configured_embedding
+            )
+            model_available = _embedding_model_available(
+                configured_provider, configured_model, configured_embedding
+            )
+            index = get_index_by_name(name)
             if not index:
-                return {"name": "rag", "status": "warning", "summary": "literature_default index not found", "details": {}}
+                return {
+                    "name": "rag",
+                    "status": "warning",
+                    "summary": f"{name} index not found",
+                    "details": {
+                        "configured_provider": configured_provider,
+                        "configured_model": configured_model,
+                        "embedding_runtime_available": provider_available,
+                        "embedding_model_available": model_available,
+                    },
+                }
             with get_connection() as connection:
-                count = connection.execute(
+                indexed = connection.execute(
                     "SELECT COUNT(*) FROM rag_index_entry WHERE index_id=? AND status='indexed'",
                     (index["index_id"],),
                 ).fetchone()[0]
+                lexical = connection.execute(
+                    "SELECT COUNT(*) FROM rag_index_entry WHERE index_id=? AND status='lexical_indexed'",
+                    (index["index_id"],),
+                ).fetchone()[0]
+                active = connection.execute(
+                    "SELECT COUNT(*) FROM literature_chunk WHERE active=1"
+                ).fetchone()[0]
+                unindexed_reviewed = connection.execute(
+                    """
+                    SELECT COUNT(*) FROM rag_document d
+                    JOIN knowledge_candidate c ON c.candidate_id=d.candidate_id
+                    WHERE c.review_status IN ('accepted_to_rag','accepted_as_literature_evidence')
+                      AND d.indexed=0
+                    """
+                ).fetchone()[0]
+            provider_matches = (
+                index.get("embedding_provider") == configured_provider
+                and index.get("embedding_model") == configured_model
+            )
+            production_embedding = index.get("embedding_provider") != "mock"
+            pending = max(0, int(active) - int(indexed) - int(lexical))
+            ready = (
+                indexed > 0
+                and pending == 0
+                and unindexed_reviewed == 0
+                and provider_matches
+                and provider_available
+                and model_available
+                and production_embedding
+                and index.get("status") == "ready"
+            )
             return {
                 "name": "rag",
-                "status": "pass" if count > 0 else "warning",
-                "summary": "RAG index available" if count > 0 else "RAG index has no entries",
-                "details": {"index_id": index["index_id"], "status": index.get("status"), "entry_count": count},
+                "status": "pass" if ready else "warning",
+                "summary": "production RAG index ready" if ready else "RAG index requires attention",
+                "details": {
+                    "index_id": index["index_id"],
+                    "index_status": index.get("status"),
+                    "embedding_provider": index.get("embedding_provider"),
+                    "embedding_model": index.get("embedding_model"),
+                    "configured_provider": configured_provider,
+                    "configured_model": configured_model,
+                    "provider_matches_config": provider_matches,
+                    "embedding_runtime_available": provider_available,
+                    "embedding_model_available": model_available,
+                    "mock_embedding": not production_embedding,
+                    "vector_entry_count": indexed,
+                    "lexical_only_entry_count": lexical,
+                    "active_chunk_count": active,
+                    "pending_chunk_count": pending,
+                    "unindexed_reviewed_document_count": unindexed_reviewed,
+                },
             }
         except Exception as exc:
             return self._failure("rag", exc)
@@ -248,3 +320,49 @@ class DoctorService:
 
     def _failure(self, name: str, exc: Exception) -> dict[str, Any]:
         return {"name": name, "status": "fail", "summary": f"{type(exc).__name__}: {exc}", "details": {}}
+
+
+def _embedding_runtime_available(provider: str, config: dict[str, Any]) -> bool:
+    normalized = provider.strip().lower()
+    if normalized == "mock":
+        return True
+    if normalized in {"sentence_transformers", "sentence-transformers", "local"}:
+        return importlib.util.find_spec("sentence_transformers") is not None
+    if normalized in {"openai_compatible", "openai-compatible", "openai"}:
+        api_key_env = str(config.get("api_key_env") or "ULTRAFAST_EMBEDDING_API_KEY")
+        base_url = str(config.get("base_url") or os.environ.get("ULTRAFAST_EMBEDDING_BASE_URL") or "")
+        return bool(base_url and os.environ.get(api_key_env))
+    return False
+
+
+def _embedding_model_available(
+    provider: str,
+    model: str,
+    config: dict[str, Any],
+) -> bool:
+    normalized = provider.strip().lower()
+    if normalized == "mock":
+        return True
+    if normalized in {"openai_compatible", "openai-compatible", "openai"}:
+        return _embedding_runtime_available(provider, config)
+    if normalized not in {"sentence_transformers", "sentence-transformers", "local"}:
+        return False
+    candidates: list[Path] = []
+    direct = Path(model).expanduser()
+    if direct.exists():
+        candidates.append(direct)
+    slug = "models--" + model.replace("/", "--")
+    hf_home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    hub = Path(os.environ.get("HF_HUB_CACHE") or hf_home / "hub")
+    candidates.append(hub / slug)
+    sentence_home = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
+    if sentence_home:
+        candidates.extend([Path(sentence_home) / slug, Path(sentence_home) / model])
+    weight_suffixes = {".safetensors", ".bin"}
+    return any(
+        path.is_file() and path.stat().st_size > 1024
+        for candidate in candidates
+        if candidate.exists()
+        for path in candidate.rglob("*")
+        if path.suffix.lower() in weight_suffixes
+    )

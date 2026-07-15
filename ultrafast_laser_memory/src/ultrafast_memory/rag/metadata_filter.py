@@ -9,6 +9,19 @@ FILTER_FIELDS = {
     "laser_type", "evidence_level", "review_status", "section_type",
 }
 
+REVIEWED_STATUSES = {
+    "accepted", "approved", "reviewed", "accepted_to_rag",
+    "accepted_as_literature_evidence",
+}
+TARGET_LEVEL_RANK = {
+    "LEVEL_0_UNVERIFIED_CANDIDATE": 0,
+    "LEVEL_1_RAG_BACKGROUND": 1,
+    "LEVEL_2_LITERATURE_EVIDENCE": 2,
+    "LEVEL_3_PROCESS_PRIOR": 3,
+    "LEVEL_4_VALIDATED_RULE": 4,
+    "LEVEL_5_BO_TRAINING_SAMPLE": 5,
+}
+
 
 def metadata_for_hit(hit: dict[str, Any]) -> dict[str, Any]:
     metadata = hit.get("metadata")
@@ -58,14 +71,47 @@ def apply_metadata_filters(hits: list[dict[str, Any]], filters: dict[str, Any] |
 
 def enforce_purpose(hit: dict[str, Any], purpose: str) -> bool:
     metadata = metadata_for_hit(hit)
+    normalized_purpose = purpose.strip().lower()
     not_usable = metadata.get("not_usable_for") or []
     if isinstance(not_usable, str):
         try:
             not_usable = json.loads(not_usable)
         except json.JSONDecodeError:
             not_usable = [not_usable]
-    if purpose in not_usable:
+    normalized_not_usable = {str(item).strip().lower() for item in not_usable}
+    if normalized_purpose in normalized_not_usable:
         return False
-    if purpose in {"BO", "BO_boundary", "direct_parameter_recommendation"}:
-        return hit.get("evidence_level") == "process_prior" and hit.get("review_status") in {"accepted", "approved"}
+    status = str(hit.get("review_status") or metadata.get("review_status") or "pending_review")
+    evidence_level = str(hit.get("evidence_level") or metadata.get("evidence_level") or "")
+    target_rank = TARGET_LEVEL_RANK.get(str(metadata.get("target_level") or ""), 0)
+    reviewed = status in REVIEWED_STATUSES
+    if normalized_purpose in {
+        "parameter_recommendation", "rag_parameter_recommendation",
+    }:
+        return reviewed and (
+            target_rank >= 2
+            or evidence_level in {"literature_evidence", "process_prior", "validated_rule"}
+        )
+    if normalized_purpose in {
+        "formal_process", "direct_parameter_recommendation", "bo", "bo_boundary",
+    }:
+        return reviewed and (
+            target_rank >= 3 or evidence_level in {"process_prior", "validated_rule"}
+        )
     return True
+
+
+def evidence_authority(hit: dict[str, Any]) -> str:
+    metadata = metadata_for_hit(hit)
+    status = str(hit.get("review_status") or metadata.get("review_status") or "pending_review")
+    evidence_level = str(hit.get("evidence_level") or metadata.get("evidence_level") or "")
+    target_rank = TARGET_LEVEL_RANK.get(str(metadata.get("target_level") or ""), 0)
+    if status not in REVIEWED_STATUSES:
+        return "candidate"
+    if target_rank >= 4 or evidence_level == "validated_rule":
+        return "validated_rule"
+    if target_rank >= 3 or evidence_level == "process_prior":
+        return "process_prior"
+    if target_rank >= 2 or evidence_level == "literature_evidence":
+        return "reviewed_literature"
+    return "reviewed_background"

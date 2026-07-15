@@ -14,12 +14,13 @@ from ultrafast_memory.core.config import get_database_path, load_config
 from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.rag.citation_builder import build_citations
-from ultrafast_memory.rag.embedding import DeterministicMockEmbeddingProvider
+from ultrafast_memory.rag.embedding import build_embedding_provider
 from ultrafast_memory.rag.evidence_pack import build_evidence_pack
 from ultrafast_memory.rag.hybrid_retriever import HybridRetriever
 from ultrafast_memory.rag.index_service import get_index_by_name
 from ultrafast_memory.rag.lexical_index import SQLiteLexicalIndex
 from ultrafast_memory.rag.metadata_filter import apply_metadata_filters
+from ultrafast_memory.rag.reranker import rerank_hits
 from ultrafast_memory.rag.schemas import RagQueryRequest
 from ultrafast_memory.rag.vector_store import SQLiteVectorStore
 
@@ -38,7 +39,7 @@ def query_rag(request: RagQueryRequest | dict[str, Any]) -> dict[str, Any]:
         return _degraded_pack(req, "index_lookup", exc, total_started)
     index_lookup_ms = (perf_counter() - stage) * 1000
     if not index:
-        pack = build_evidence_pack(req.query, req.filters, [])
+        pack = build_evidence_pack(req.query, req.filters, [], purpose=req.purpose)
         pack["warnings"].append(f"RAG index not found: {req.index_name}")
         pack["citations"] = []
         return pack
@@ -50,37 +51,13 @@ def query_rag(request: RagQueryRequest | dict[str, Any]) -> dict[str, Any]:
     cache_hit = results is not None
     retrieval_failure: Exception | None = None
     if results is None:
-        provider = DeterministicMockEmbeddingProvider(int(index.get("embedding_dimension") or 64))
-        retriever = HybridRetriever(provider, SQLiteVectorStore(index["index_id"]), SQLiteLexicalIndex())
-        try:
-            results = retriever.retrieve(
-                normalize_query(req.query),
-                req.filters,
-                req.purpose,
-                lexical_top_k=int(retrieval.get("lexical_top_k", 20)),
-                vector_top_k=int(retrieval.get("vector_top_k", 20)),
-                fusion_top_k=int(retrieval.get("fusion_top_k", 15)),
-                rerank_top_k=min(req.top_k, int(retrieval.get("rerank_top_k", req.top_k))),
-                max_chunks_per_paper=int(retrieval.get("max_chunks_per_paper", 3)),
+        if index.get("status") != "ready":
+            retrieval_failure = RuntimeError(
+                f"vector index is not ready: {index.get('status') or 'unknown'}"
             )
-            _cache_put(cache_key, results)
-        except Exception as exc:
-            retrieval_failure = exc
             try:
-                lexical_limit = int(retrieval.get("lexical_top_k", 20))
-                lexical = apply_metadata_filters(
-                    retriever.lexical_index.search(
-                        normalize_query(req.query), lexical_limit * 5 if req.filters else lexical_limit
-                    ),
-                    req.filters,
-                )[: min(req.top_k, lexical_limit)]
-                results = {
-                    "lexical_hits": lexical,
-                    "vector_hits": [],
-                    "hits": lexical,
-                    "waterfall_ms": {"fallback_lexical": round((perf_counter() - stage) * 1000, 3)},
-                }
-            except Exception:
+                results = _lexical_fallback(req, retrieval, stage)
+            except Exception as exc:
                 return _degraded_pack(
                     req,
                     "retrieval",
@@ -89,9 +66,45 @@ def query_rag(request: RagQueryRequest | dict[str, Any]) -> dict[str, Any]:
                     index=index,
                     index_lookup_ms=index_lookup_ms,
                 )
+        else:
+            try:
+                embedding_options = config.get("embedding") or {}
+                provider = build_embedding_provider(
+                    str(index.get("embedding_provider") or embedding_options.get("provider") or "mock"),
+                    str(index.get("embedding_model") or embedding_options.get("model") or "deterministic-mock-v1"),
+                    int(index.get("embedding_dimension") or embedding_options.get("dimension") or 64),
+                    embedding_options,
+                )
+                retriever = HybridRetriever(
+                    provider, SQLiteVectorStore(index["index_id"]), SQLiteLexicalIndex()
+                )
+                results = retriever.retrieve(
+                    normalize_query(req.query),
+                    req.filters,
+                    req.purpose,
+                    lexical_top_k=int(retrieval.get("lexical_top_k", 20)),
+                    vector_top_k=int(retrieval.get("vector_top_k", 20)),
+                    fusion_top_k=int(retrieval.get("fusion_top_k", 15)),
+                    rerank_top_k=min(req.top_k, int(retrieval.get("rerank_top_k", req.top_k))),
+                    max_chunks_per_paper=int(retrieval.get("max_chunks_per_paper", 3)),
+                )
+                _cache_put(cache_key, results)
+            except Exception as exc:
+                retrieval_failure = exc
+                try:
+                    results = _lexical_fallback(req, retrieval, stage)
+                except Exception:
+                    return _degraded_pack(
+                        req,
+                        "retrieval",
+                        exc,
+                        total_started,
+                        index=index,
+                        index_lookup_ms=index_lookup_ms,
+                    )
     retrieval_ms = (perf_counter() - stage) * 1000
     stage = perf_counter()
-    pack = build_evidence_pack(req.query, req.filters, results["hits"])
+    pack = build_evidence_pack(req.query, req.filters, results["hits"], purpose=req.purpose)
     pack["citations"] = build_citations(pack)
     evidence_pack_ms = (perf_counter() - stage) * 1000
     pack["retrieval_metadata"] = {
@@ -140,7 +153,7 @@ def _degraded_pack(
     index: dict[str, Any] | None = None,
     index_lookup_ms: float | None = None,
 ) -> dict[str, Any]:
-    pack = build_evidence_pack(req.query, req.filters, [])
+    pack = build_evidence_pack(req.query, req.filters, [], purpose=req.purpose)
     pack["warnings"].append(f"RAG {stage} unavailable; no evidence returned")
     pack["citations"] = []
     pack["retrieval_metadata"] = {
@@ -157,6 +170,32 @@ def _degraded_pack(
         "source_retrieval_waterfall_ms": {},
     }
     return pack
+
+
+def _lexical_fallback(
+    req: RagQueryRequest,
+    retrieval: dict[str, Any],
+    started: float,
+) -> dict[str, Any]:
+    lexical_limit = int(retrieval.get("lexical_top_k", 20))
+    lexical = apply_metadata_filters(
+        SQLiteLexicalIndex().search(
+            normalize_query(req.query),
+            lexical_limit * 5 if req.filters else lexical_limit,
+        ),
+        req.filters,
+    )
+    lexical = rerank_hits(
+        lexical, req.filters, req.purpose, min(req.top_k, lexical_limit)
+    )
+    return {
+        "lexical_hits": lexical,
+        "vector_hits": [],
+        "hits": lexical,
+        "waterfall_ms": {
+            "fallback_lexical": round((perf_counter() - started) * 1000, 3)
+        },
+    }
 
 
 def clear_rag_query_cache() -> None:

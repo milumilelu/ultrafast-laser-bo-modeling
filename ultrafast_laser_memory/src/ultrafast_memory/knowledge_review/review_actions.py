@@ -11,7 +11,7 @@ from ultrafast_memory.db.session import get_connection
 from ultrafast_memory.knowledge_review.review_policy import IMPLEMENTED_ACTIONS, STUB_ACTIONS
 from ultrafast_memory.knowledge_review.schemas import ReviewActionRequest
 from ultrafast_memory.rag.document_builder import build_rag_document_from_candidate
-from ultrafast_memory.rag.index_stub import index_rag_document
+from ultrafast_memory.rag.index_service import index_rag_document
 
 
 def apply_review_action(review_id: str, request: ReviewActionRequest) -> dict:
@@ -43,6 +43,7 @@ def apply_review_action(review_id: str, request: ReviewActionRequest) -> dict:
     source_dict = dict(source) if source else {}
     now = utc_now_iso()
     rag_doc = None
+    index_job = None
     literature_evidence = None
 
     if request.action == "reject":
@@ -58,15 +59,23 @@ def apply_review_action(review_id: str, request: ReviewActionRequest) -> dict:
         review_status = "accepted_to_rag"
         candidate_status = "accepted"
         candidate_dict["review_status"] = review_status
+        candidate_dict["target_level"] = request.target_level or "LEVEL_1_RAG_BACKGROUND"
+        candidate_dict["evidence_level"] = "reviewed_background"
         rag_doc = build_rag_document_from_candidate(candidate_dict, source_dict)
-        index_rag_document(rag_doc["rag_doc_id"], request.payload.get("index_name", "default"))
+        index_job = index_rag_document(
+            rag_doc["rag_doc_id"], request.payload.get("index_name", "literature_default")
+        )
     elif request.action == "accept_as_literature_evidence":
         review_status = "accepted_as_literature_evidence"
         candidate_status = "accepted"
         literature_evidence = _write_literature_evidence(candidate_dict, now)
         candidate_dict["review_status"] = review_status
+        candidate_dict["target_level"] = request.target_level or "LEVEL_2_LITERATURE_EVIDENCE"
+        candidate_dict["evidence_level"] = "literature_evidence"
         rag_doc = build_rag_document_from_candidate(candidate_dict, source_dict)
-        index_rag_document(rag_doc["rag_doc_id"], request.payload.get("index_name", "default"))
+        index_job = index_rag_document(
+            rag_doc["rag_doc_id"], request.payload.get("index_name", "literature_default")
+        )
 
     with get_connection() as conn:
         conn.execute(
@@ -113,6 +122,7 @@ def apply_review_action(review_id: str, request: ReviewActionRequest) -> dict:
         "review_id": review_id,
         "candidate_id": candidate_dict["candidate_id"],
         "rag_document": rag_doc,
+        "index_job": index_job,
         "literature_evidence": literature_evidence,
     }
 

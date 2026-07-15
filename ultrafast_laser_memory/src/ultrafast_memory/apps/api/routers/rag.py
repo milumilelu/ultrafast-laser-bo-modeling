@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ultrafast_memory.rag.schemas import RagQueryRequest
 
@@ -8,15 +8,15 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 
 
 class RagIndexRequest(BaseModel):
-    candidate_ids: list[str] = []
-    index_name: str = "default"
+    candidate_ids: list[str] = Field(default_factory=list)
+    index_name: str = "literature_default"
 
 
 class RagCreateIndexRequest(BaseModel):
     index_name: str = "literature_default"
-    embedding_provider: str = "mock"
-    embedding_model: str = "deterministic-mock-v1"
-    embedding_dimension: int = 64
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    embedding_dimension: int | None = None
 
 
 class RagRunIndexRequest(BaseModel):
@@ -70,7 +70,7 @@ def rag_query_endpoint(request: RagQueryRequest) -> dict:
 @router.post("/index")
 def rag_index(request: RagIndexRequest) -> dict:
     from ultrafast_integrations.storage.read_models import find_candidate_rag_documents
-    from ultrafast_memory.rag.index_stub import index_rag_document
+    from ultrafast_memory.rag.index_service import index_rag_document
 
     jobs = []
     for candidate_id in request.candidate_ids:

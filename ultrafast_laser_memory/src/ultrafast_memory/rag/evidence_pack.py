@@ -3,11 +3,21 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ultrafast_memory.rag.metadata_filter import metadata_for_hit
+from ultrafast_memory.rag.metadata_filter import (
+    evidence_authority,
+    enforce_purpose,
+    metadata_for_hit,
+)
 from ultrafast_memory.rag.schemas import EvidenceHit, EvidencePack
 
 
-def build_evidence_pack(query: str, filters: dict[str, Any], hits: list[dict[str, Any]]) -> dict[str, Any]:
+def build_evidence_pack(
+    query: str,
+    filters: dict[str, Any],
+    hits: list[dict[str, Any]],
+    *,
+    purpose: str = "literature_background",
+) -> dict[str, Any]:
     evidence_hits: list[EvidenceHit] = []
     warnings: list[str] = []
     for hit in hits:
@@ -15,8 +25,9 @@ def build_evidence_pack(query: str, filters: dict[str, Any], hits: list[dict[str
         usable = _as_list(metadata.get("usable_for"))
         not_usable = _as_list(metadata.get("not_usable_for"))
         review_status = hit.get("review_status") or metadata.get("review_status") or "pending_review"
-        if review_status == "pending_review" and "pending_review evidence is candidate evidence" not in warnings:
-            warnings.append("pending_review evidence is candidate evidence")
+        authority = evidence_authority(hit)
+        if authority == "candidate" and "unreviewed evidence is candidate-only" not in warnings:
+            warnings.append("unreviewed evidence is candidate-only")
         evidence_hits.append(
             EvidenceHit(
                 chunk_id=hit["chunk_id"],
@@ -37,6 +48,12 @@ def build_evidence_pack(query: str, filters: dict[str, Any], hits: list[dict[str
                 review_status=review_status,
                 usable_for=usable,
                 not_usable_for=not_usable,
+                authority_level=authority,
+                allowed_for_parameter_recommendation=enforce_purpose(
+                    hit, "parameter_recommendation"
+                ),
+                allowed_for_formal_process=enforce_purpose(hit, "formal_process"),
+                metadata=metadata,
             )
         )
     paper_count = len({hit.paper_id for hit in evidence_hits})
@@ -56,6 +73,7 @@ def build_evidence_pack(query: str, filters: dict[str, Any], hits: list[dict[str
         missing = ["matching traceable literature chunks"]
     return EvidencePack(
         query=query,
+        purpose=purpose,
         filters=filters,
         evidence_status=status,
         hits=evidence_hits,

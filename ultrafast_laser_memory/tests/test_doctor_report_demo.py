@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from ultrafast_memory.apps.api.main import app
 from ultrafast_memory.demo.service import DemoService
 import sqlite3
+import json
 
 
 def test_doctor_reports_core_health_without_external_call(isolated_root):
@@ -33,6 +34,32 @@ def test_doctor_reports_core_health_without_external_call(isolated_root):
     assert checks["database"]["status"] == "pass"
     assert checks["bo"]["status"] == "pass"
     assert checks["bo"]["details"]["adapter_placeholder"] is False
+
+
+def test_doctor_reports_missing_local_embedding_model_without_external_call(
+    isolated_root, monkeypatch,
+):
+    monkeypatch.setenv(
+        "ULTRAFAST_CONFIG_OVERRIDES",
+        json.dumps({
+            "rag": {
+                "default_index_name": "literature_default",
+                "embedding": {
+                    "provider": "sentence_transformers",
+                    "model": "missing/local-model",
+                    "dimension": 384,
+                },
+            }
+        }),
+    )
+
+    body = TestClient(app).get("/doctor").json()
+    rag = next(item for item in body["checks"] if item["name"] == "rag")
+
+    assert rag["status"] == "warning"
+    assert rag["details"]["embedding_runtime_available"] is True
+    assert rag["details"]["embedding_model_available"] is False
+    assert body["external_call_performed"] is False
 
 
 def test_task_report_writes_markdown_json_and_database_record(isolated_root):

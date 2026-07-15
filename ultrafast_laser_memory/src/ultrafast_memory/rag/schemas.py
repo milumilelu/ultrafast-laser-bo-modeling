@@ -33,10 +33,15 @@ class EvidenceHit(BaseModel):
     review_status: str = ""
     usable_for: list[str] = Field(default_factory=list)
     not_usable_for: list[str] = Field(default_factory=list)
+    authority_level: str = "candidate"
+    allowed_for_parameter_recommendation: bool = False
+    allowed_for_formal_process: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvidencePack(BaseModel):
     query: str
+    purpose: str = "literature_background"
     filters: dict[str, Any] = Field(default_factory=dict)
     evidence_status: str
     hits: list[EvidenceHit] = Field(default_factory=list)

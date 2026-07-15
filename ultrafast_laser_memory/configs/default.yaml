@@ -140,8 +140,13 @@ rag:
     rerank_top_k: 8
     max_chunks_per_paper: 3
   embedding:
-    provider: "mock"
-    model: "deterministic-mock-v1"
+    provider: "sentence_transformers"
+    model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    dimension: 384
+    device: null
+    batch_size: 8
+    local_files_only: false
+    allow_mock_in_production: false
   vector_store:
     provider: "sqlite"
   lexical_index:

@@ -22,6 +22,7 @@ from ultrafast_memory.literature.service import (
 )
 from ultrafast_memory.rag.index_service import (
     create_index,
+    ensure_index,
     get_index_by_name,
     get_index_status,
     index_pending_chunks,
@@ -119,9 +120,16 @@ def literature_show(paper_id: str) -> None:
 @rag_app.command("create-index")
 def rag_create_index(
     name: str = typer.Option("literature_default", "--name"),
-    dimension: int = typer.Option(64, "--dimension"),
+    provider: str | None = typer.Option(None, "--provider"),
+    model: str | None = typer.Option(None, "--model"),
+    dimension: int | None = typer.Option(None, "--dimension"),
 ) -> None:
-    result = create_index({"index_name": name, "embedding_dimension": dimension})
+    result = create_index({
+        "index_name": name,
+        "embedding_provider": provider,
+        "embedding_model": model,
+        "embedding_dimension": dimension,
+    })
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -130,9 +138,7 @@ def rag_index_chunks(
     name: str = typer.Option("literature_default", "--name"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    index = get_index_by_name(name)
-    if not index:
-        index = create_index({"index_name": name})
+    index = ensure_index(name)
     typer.echo(json.dumps(index_pending_chunks(index["index_id"], force), ensure_ascii=False, indent=2))
 
 
