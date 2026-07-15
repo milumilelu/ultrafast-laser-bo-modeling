@@ -223,13 +223,13 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 
 ## 任务进度与公开思考状态
 
-聊天返回 Agent 步骤、Skill 加载、ToolResult 和 BusinessState 投影。进度百分比是展示信息，不是动作门槛；澄清只由下一项具体工具所需上下文触发，不再执行全局固定表单。
+聊天返回 Agent 动作、Skill 加载、ToolResult 和 Working Context 投影。开放式任务不伪造进度百分比；澄清只针对会改变加工路线或工具输入的关键歧义。
 
-所有启用 Skill 的聊天统一进入 Main Agent Loop：主 LLM 读取渐进式 `TaskSpec`、已加载 Skill 指导、当前可发现 Tool Schema、上一轮工具观察和状态投影，决定加载能力、直接回答、澄清或连续调用工具。用户明确提供或修正任务信息时，主 Agent 调用 `update_task_context`；LLM 不直接写会话状态或数据库。
+所有聊天统一进入 Main Agent Loop：主 LLM 读取开放式 `WorkingContext`、已加载 Skill 指导、全部前台安全 Tool Schema 和工具观察，决定加载能力、直接回答、澄清或连续调用工具。用户明确提供或修正任务信息时，Planner 通过 `AgentAction.context_updates` 更新内存上下文；持久化是非阻断旁路。
 
-`update_task_context` 只接受已经结构化的字段更新，不理解自然语言。工具内部统一执行字段白名单、类型、枚举、单位、适用性、原文 evidence、冲突和修正语义校验，再通过 `TaskSpecMergeService` 更新 canonical `TaskSpec`、provenance 和 revision history。孔类事实同时投影到嵌套 `geometry`。工具失败保持原状态，由主 Agent 重新规划或澄清。
+Working Context 允许部分信息、未知字段和自定义几何；具体 Tool 输入仍严格校验。上下文、Trace、报告和知识治理失败只产生 warning，不中断当前用户任务。
 
-`BusinessState` 仅投影已发生事件，用于进度、审计和恢复，不再裁剪 Agent 的工具集合。Tool Registry 向 Agent 公开能力与 Schema；每个 Tool 自行检查动作所需上下文、设备边界、权限与审批。Tool 权限分四级：认知操作、受控写入、必须人工批准和禁止操作；设备控制、硬边界修改及自动绕过审批属于禁止操作。
+状态仅投影已发生事件，用于进度、审计和恢复，不裁剪 Agent 的工具集合。Skill 只影响工具排序；所有前台安全 Tool 始终可发现。只有设备硬安全、明确 unsafe 状态和当前不可逆动作未获本次确认可以阻断。
 
 系统不展示模型原始隐藏推理链。返回和 TUI 展示的是可公开的 Agent 执行轨迹、任务状态、工具调用状态、证据检查结果和简要推理摘要，字段使用 `progress`、`thinking_status`、`workflow_state`、`execution_trace`、`audit_trace`。
 
@@ -238,28 +238,27 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 ```json
 {
   "progress": {
-    "workflow_type": "crl_task_planning",
-    "current_stage": "evidence_gap_checking",
-    "progress_percent": 85,
+    "workflow_type": "main_agent",
+    "current_stage": "ask_user",
+    "progress_percent": null,
     "status": "waiting_user"
   },
   "thinking_status": [
     {
-      "event_type": "task_parsed",
-      "title": "任务解析",
-      "summary": "已识别材料 diamond、对象 CRL。"
+      "event_type": "agent_decision",
+      "title": "主 Agent 决策",
+      "summary": "关键几何会改变加工路线，先向用户确认。"
     }
   ],
   "workflow_state": {
-    "missing_slots": ["diamond_type", "laser_system", "post_processing_allowed"],
-    "clarification_round": 1,
-    "max_clarification_rounds": 3
+    "missing_slots": ["geometry.depth_mm"],
+    "current_stage_code": "ask_user"
   },
   "execution_trace": [
     {
-      "event_type": "state_update",
-      "title": "任务解析",
-      "summary": "已识别材料 diamond、对象 CRL。"
+      "event_type": "agent_decision",
+      "title": "主 Agent 决策",
+      "summary": "关键几何会改变加工路线，先向用户确认。"
     }
   ]
 }
@@ -268,9 +267,9 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 流式 `/chat/stream_ndjson` 会在 `delta` 前输出：
 
 ```json
-{"type":"progress","workflow_type":"task_intake","stage":"clarification_round_1","progress_percent":40}
-{"type":"thinking_status","event_type":"slot_check","summary":"仍缺少激光器参数范围。"}
-{"type":"agent_trace","event_type":"state_update","title":"缺失字段检查","summary":"仍缺少激光器参数范围。"}
+{"type":"progress","workflow_type":"main_agent","stage":"agent_planning","progress_percent":null}
+{"type":"thinking_status","event_type":"agent_planning_started","summary":"正在根据 Working Context 规划下一动作。"}
+{"type":"heartbeat","component":"main_agent_planner","elapsed_s":3.0}
 {"type":"delta","content":"..."}
 {"type":"done"}
 ```
@@ -377,9 +376,9 @@ BO 默认要求 active equipment profile。没有 active profile 时，系统阻
 
 ## 架构与回滚
 
-关键事实源已收敛为：正式 `TaskSpec`、宏观 `BusinessState`、`ProcessRecommendation` 和 canonical `AgentEvent`。细粒度旧流程状态仅作为 `substatus` 兼容；NDJSON、TUI 和 Debug 只是同一事件的 Renderer。完整映射见仓库根目录 `docs/architecture/single_source_of_truth.md`。
+前台事实源已收敛为 `WorkingContext`、Tool Observation 和 canonical AgentEvent；NDJSON、TUI 和 Debug 只是同一事件的 Renderer。
 
-多轮试切—反馈—BO—正式加工候选闭环通过 `/api/v1/trial-campaigns` 提供；反馈必须先通过 Eligibility 和明确审批，系统不连接或控制设备。
+多轮试切与正式加工都由 Main Agent 编排，分别通过单一 `manage_trial` 和 `manage_process` Tool 执行。BO Eligibility 只控制训练数据准入，不控制当前任务是否继续；系统不连接或控制设备。
 
 - 版本化迁移：`schema_migration`。
 - 重构前备份：`../scripts/backup_before_refactor.ps1`。

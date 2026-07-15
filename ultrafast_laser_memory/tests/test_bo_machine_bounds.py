@@ -20,7 +20,6 @@ def test_bo_tool_reports_missing_action_context_without_active_profile(isolated_
     )
 
     assert execution.status == "insufficient_data"
-    assert "task_spec.objective" in execution.output["missing"]
     assert "equipment_snapshot.machine_bounds" in execution.output["missing"]
 
 

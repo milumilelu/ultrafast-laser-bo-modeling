@@ -40,7 +40,7 @@ def test_single_agent_chain_reuses_canonical_session_task_spec(isolated_root):
         ChatRequest(session_id=first.session_id, message="暂时没有更多信息")
     )
 
-    assert first.workflow_state["task_spec"]["material"] == "diamond"
+    assert first.workflow_state["task_spec"]["material"]["name"] == "diamond"
     assert second.workflow_state["task_spec"] == first.workflow_state["task_spec"]
 
 
@@ -52,6 +52,6 @@ def test_llm_failure_keeps_state_without_parser_stall(isolated_root):
 
     assert third.workflow_state["clarification_round"] <= 3
     assert third.workflow_state["current_stage_code"] == "ask_user"
-    assert third.workflow_state["task_spec"]["material"] == "diamond"
+    assert third.workflow_state["task_spec"]["material"]["name"] == "diamond"
     assert "现有任务状态未被修改" in third.assistant_message
     assert "严格字段格式" not in third.assistant_message

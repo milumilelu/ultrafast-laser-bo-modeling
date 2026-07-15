@@ -1,13 +1,13 @@
 skills:
   - name: task_understanding
     version: 2.0.0
-    description: 渐进理解用户任务，规范术语、单位、材料、几何、目标与约束，并维护可修订的 TaskSpec。
+    description: 渐进理解用户任务，规范术语、单位、材料、几何、目标与约束，并维护开放式 Working Context。
     when_to_use: [新任务、自然语言补充、字段纠正、附件带来新任务事实]
     guidance:
       - 只提交用户明确给出或可靠解析出的事实，不猜测材料牌号、几何或设备参数。
-      - TaskSpec 可渐进补充；仅当下一步工具确实需要时才追问缺失字段。
-      - 孔类几何写入 geometry.hole_diameter_mm、geometry.hole_depth_mm、geometry.through_hole。
-    recommended_tools: [update_task_context, get_equipment_context, ingest_files]
+      - Working Context 可渐进补充；仅当关键歧义改变路线或工具输入时追问。
+      - 几何统一写入 geometry.feature_type、dimensions 和自由描述，不新增场景级顶层字段。
+    recommended_tools: [get_equipment_context]
 
   - name: evidence_research
     version: 2.0.0
@@ -17,7 +17,7 @@ skills:
       - 区分内部已审核证据与外部候选；未审核候选不得进入正式 RAG 或 BO。
       - 检索结果必须保留来源、适用范围与不确定性。
       - 外部知识引入需要用户授权，正式采用需要专家审核。
-    recommended_tools: [search_knowledge, bootstrap_external_knowledge, ingest_files, review_knowledge_candidate]
+    recommended_tools: [search_knowledge]
 
   - name: process_planning
     version: 2.0.0
@@ -27,7 +27,7 @@ skills:
       - 先读取设备边界；区分硬约束、质量约束和可优化变量。
       - 路线是建议，不得伪装成已验证工艺。
       - 是否试验由证据和风险决定，不由固定状态机强制决定。
-    recommended_tools: [get_equipment_context, search_knowledge, recommend_parameters_rag, manage_trial, generate_report]
+    recommended_tools: [get_equipment_context, search_knowledge, recommend_parameters_rag, manage_trial, manage_process]
 
   - name: parameter_recommendation
     version: 2.0.0
@@ -45,9 +45,9 @@ skills:
     when_to_use: [创建或推进试验、摄取观测、运行 BO 迭代、调整搜索空间]
     guidance:
       - 仅使用校验合格且与上下文匹配的观测更新模型。
-      - 每轮记录候选、约束过滤、模型快照、预算和停止理由。
+      - 每轮记录候选、约束过滤、预算提示和停止理由；预算不强制终止任务。
       - 正式加工、危险动作和知识晋升仍需真实的安全或人工审批守卫。
-    recommended_tools: [manage_trial, run_bo_iteration, record_process_result, get_equipment_context]
+    recommended_tools: [manage_trial, recommend_parameters_bo, recommend_parameters_rag, propose_exploratory_parameters, record_process_result, get_equipment_context]
 
   - name: result_learning
     version: 2.0.0
@@ -57,4 +57,4 @@ skills:
       - 原始结果、质量判断、候选知识和已批准知识必须分层存储。
       - 创建知识候选不等于进入 RAG；必须保留证据与适用范围。
       - 报告只汇总可追溯事实，不补造缺失测量值。
-    recommended_tools: [record_process_result, create_knowledge_candidate, generate_report, review_knowledge_candidate]
+    recommended_tools: [record_process_result, manage_trial, manage_process]

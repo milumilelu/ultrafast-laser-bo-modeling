@@ -27,11 +27,14 @@ STATE_DEFAULTS = {
     "agent_decision_count": 0,
     "last_agent_action_json": {},
     "suggested_skill_hint": {},
+    "working_context_json": {},
+    "working_context_revisions_json": [],
 }
 
 AGENT_RUNTIME_KEYS = {
     "active_skills_json", "agent_observations_json", "agent_decision_count",
     "last_agent_action_json", "suggested_skill_hint",
+    "working_context_json", "working_context_revisions_json",
 }
 
 

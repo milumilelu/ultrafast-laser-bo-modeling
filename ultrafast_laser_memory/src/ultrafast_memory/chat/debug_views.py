@@ -4,7 +4,7 @@ from typing import Any
 
 from ultrafast_integrations.storage.runtime_event_repository import RuntimeEventRepository
 from ultrafast_memory.agent_runtime.trace_collector import list_agent_trace_events
-from ultrafast_memory.process_workflow.repository import ProcessWorkflowRepository
+from ultrafast_memory.chat.session_state import get_session_state
 
 
 REASONING_EVENT_TYPES = {
@@ -52,10 +52,11 @@ def waterfall_view(session_id: str) -> dict[str, Any]:
 
 
 def campaign_view(session_id: str) -> dict[str, Any]:
-    campaigns = ProcessWorkflowRepository().list_campaigns_for_task(f"process-{session_id}")
-    return {"session_id": session_id, "campaigns": campaigns}
+    context = get_session_state(session_id).get("working_context_json") or {}
+    return {"session_id": session_id, "projection": context,
+            "note": "状态仅为 Working Context 投影，不控制 Agent 可用动作。"}
 
 
 def model_view(session_id: str) -> dict[str, Any]:
-    snapshots = ProcessWorkflowRepository().list_model_snapshots_for_task(f"process-{session_id}")
-    return {"session_id": session_id, "model_snapshots": snapshots}
+    return {"session_id": session_id, "model_snapshots": [],
+            "note": "模型与 BO 治理是旁路能力，不是前台状态机。"}

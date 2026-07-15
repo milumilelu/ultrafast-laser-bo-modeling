@@ -408,7 +408,7 @@ function Show-AgentRuntimeIdentity {
     Write-Host ("main_agent_planner={0}" -f $identity.main_agent_planner)
     Write-Host ("skill_registry={0}" -f $identity.skill_registry)
     Write-Host ("tool_registry={0}" -f $identity.tool_registry)
-    Write-Host ("update_task_context_tool={0}" -f $identity.update_task_context_tool)
+    Write-Host ("working_context={0}" -f $identity.working_context)
     Write-Host ("backend_pid={0}" -f $identity.backend_pid)
     Write-Host ("backend_started_at={0}" -f $identity.backend_started_at)
 }
@@ -524,7 +524,7 @@ function Start-AgentApiServerBackground {
             if (Test-AgentEquipmentApiServer -BaseUrl $baseUrl) {
                 $health = $null
                 try { $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health" -TimeoutSec 3 } catch { $health = $null }
-                $staleWorkflowBackend = ($null -eq $health -or $health.workflow_contract -ne "process-workflow-v3")
+                $staleWorkflowBackend = ($null -eq $health -or $health.workflow_contract -ne "main-agent-working-context-v1")
                 $staleRuntimeIdentity = -not (Test-AgentRuntimeIdentity -Health $health)
                 if ($staleWorkflowBackend -or $staleRuntimeIdentity) {
                     Write-Host ("检测到后端版本或运行源码身份不一致，必须重启：{0}" -f $baseUrl) -ForegroundColor Yellow

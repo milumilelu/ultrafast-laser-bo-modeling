@@ -24,24 +24,25 @@ def test_rectangular_groove_commits_all_facts_once_then_asks_depth(isolated_root
     assert response.current_stage_code == "ask_user"
     assert "目标深度" in response.assistant_message
     spec = response.workflow_state["task_spec"]
-    assert spec["material"] == "铝基碳化硅板材"
-    assert spec["process_type"] == "groove_machining"
+    assert spec["material"] == {"name": "铝基碳化硅板材"}
+    assert spec["process_intent"] == "groove_machining"
     assert spec["geometry"] == {
         "feature_type": "rectangular_groove",
         "dimensions": {"length_mm": 5.0, "width_mm": 5.0},
+        "description": "5×5 mm 矩形槽",
     }
     assert response.workflow_state["missing_slots"] == ["geometry.depth_mm"]
-    assert [item["tool_name"] for item in response.tool_calls] == ["update_task_context"]
+    assert response.tool_calls == []
     assert response.workflow_state["runtime_metrics"] == {
         "decision_count": 1,
-        "tool_call_count": 1,
+        "tool_call_count": 0,
     }
 
     completed = handle_chat(ChatRequest(session_id=response.session_id, message="1mm"))
     assert completed.current_stage_code == "final_answer"
     assert completed.workflow_state["task_spec"]["geometry"]["depth_mm"] == 1.0
     assert completed.workflow_state["missing_slots"] == []
-    assert [item["tool_name"] for item in completed.tool_calls] == ["update_task_context"]
+    assert completed.tool_calls == []
 
 
 def test_agent_can_finish_after_more_than_eight_decisions(isolated_root) -> None:

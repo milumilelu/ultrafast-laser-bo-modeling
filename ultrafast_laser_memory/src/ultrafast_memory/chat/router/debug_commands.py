@@ -11,6 +11,7 @@ from ultrafast_memory.chat.debug_views import (
 )
 from ultrafast_agent.skills import get_default_skill_registry
 from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
+from ultrafast_memory.agent_runtime.capability_discovery import exposed_tool_names
 from ultrafast_memory.chat.session_state import (
     get_session_state,
     reset_session_state,
@@ -58,12 +59,9 @@ def handle_debug_command(message: str, session_id: str) -> dict[str, Any] | None
                   for item in get_default_skill_registry().list()}
         return {"handled": True, "message": "registered skill inventory", "skills": skills}
     if text == "/tools":
-        state = get_session_state(session_id)
-        active = set(state.get("active_skills_json") or [])
         skill_registry = get_default_skill_registry()
-        discoverable = {"update_task_context", "get_equipment_context"}
-        for name in active:
-            discoverable.update(skill_registry.get(name).recommended_tools)
+        state = get_session_state(session_id)
+        discoverable = exposed_tool_names(skill_registry, list(state.get("active_skills_json") or []))
         tools = [{**item, "discoverable": item["name"] in discoverable}
                  for item in build_main_agent_tool_registry().schemas_for_agent()]
         return {"handled": True, "message": "Agent tool inventory", "tools": tools}

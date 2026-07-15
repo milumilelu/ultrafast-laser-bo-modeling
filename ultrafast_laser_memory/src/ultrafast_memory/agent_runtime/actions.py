@@ -14,6 +14,7 @@ class AgentAction(BaseModel):
     tool_name: str | None = None
     arguments: dict[str, Any] = Field(default_factory=dict)
     message: str | None = None
+    context_updates: dict[str, Any] = Field(default_factory=dict)
     provider: str | None = None
     model: str | None = None
     error_details: list[dict[str, str]] = Field(default_factory=list)

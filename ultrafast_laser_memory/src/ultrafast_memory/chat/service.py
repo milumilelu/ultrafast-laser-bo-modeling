@@ -20,6 +20,8 @@ from ultrafast_memory.chat.session_store import (
     session_exists,
 )
 from ultrafast_memory.core.config import load_config
+from ultrafast_memory.core.ids import stable_id
+from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.core.llm_config import get_llm_config
 from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge
 from ultrafast_memory.knowledge_review.review_queue import get_review_task
@@ -36,12 +38,12 @@ def handle_chat(
 ) -> ChatResponse:
     session_id = _ensure_session(request)
 
-    user_message = save_message(session_id, "user", request.message, {"mode": request.mode})
+    user_message = _safe_save_message(session_id, "user", request.message, {"mode": request.mode})
     state = get_session_state(session_id)
 
     mode_command = _handle_display_mode_command(request.message, session_id)
     if mode_command:
-        save_message(session_id, "assistant", mode_command["assistant_message"], {"display_mode": mode_command.get("display_mode")})
+        _safe_save_message(session_id, "assistant", mode_command["assistant_message"], {"display_mode": mode_command.get("display_mode")})
         return EventStateProjector.project_command(
             session_id=session_id,
             assistant_message=mode_command["assistant_message"],
@@ -54,7 +56,7 @@ def handle_chat(
 
     bootstrap_command = _handle_bootstrap_chat_command(request.message, session_id, state)
     if bootstrap_command:
-        save_message(session_id, "assistant", bootstrap_command["assistant_message"], {"knowledge_bootstrap": bootstrap_command.get("knowledge_bootstrap")})
+        _safe_save_message(session_id, "assistant", bootstrap_command["assistant_message"], {"knowledge_bootstrap": bootstrap_command.get("knowledge_bootstrap")})
         return EventStateProjector.project_command(
             session_id=session_id,
             assistant_message=bootstrap_command["assistant_message"],
@@ -71,7 +73,7 @@ def handle_chat(
 
     permission_result = _handle_bootstrap_permission_reply(request.message, session_id, state)
     if permission_result:
-        save_message(session_id, "assistant", permission_result["assistant_message"], {"knowledge_bootstrap": permission_result.get("knowledge_bootstrap")})
+        _safe_save_message(session_id, "assistant", permission_result["assistant_message"], {"knowledge_bootstrap": permission_result.get("knowledge_bootstrap")})
         return EventStateProjector.project_command(
             session_id=session_id,
             assistant_message=permission_result["assistant_message"],
@@ -88,7 +90,7 @@ def handle_chat(
 
     continuation_guard = _handle_review_guard(request.message, session_id, state)
     if continuation_guard:
-        save_message(session_id, "assistant", continuation_guard["assistant_message"], {"knowledge_bootstrap": continuation_guard.get("knowledge_bootstrap")})
+        _safe_save_message(session_id, "assistant", continuation_guard["assistant_message"], {"knowledge_bootstrap": continuation_guard.get("knowledge_bootstrap")})
         return EventStateProjector.project_command(
             session_id=session_id,
             assistant_message=continuation_guard["assistant_message"],
@@ -105,7 +107,7 @@ def handle_chat(
     debug_command = handle_debug_command(request.message, session_id)
     if debug_command and not request.message.strip().startswith("/skill "):
         assistant_content = _debug_response(debug_command)
-        save_message(session_id, "assistant", assistant_content, {"debug_command": True})
+        _safe_save_message(session_id, "assistant", assistant_content, {"debug_command": True})
         return EventStateProjector.project_command(
             session_id=session_id,
             assistant_message=assistant_content,
@@ -122,11 +124,14 @@ def handle_chat(
         session_id, user_message["message_id"], request.message, route_plan
     )
     _emit_live(event_sink, route_event)
-    save_skill_trace(session_id, user_message["message_id"], {
-        "selected_skill": selected_skill,
-        "confidence": route_plan.confidence,
-        "reason": route_plan.reason,
-    })
+    try:
+        save_skill_trace(session_id, user_message["message_id"], {
+            "selected_skill": selected_skill,
+            "confidence": route_plan.confidence,
+            "reason": route_plan.reason,
+        })
+    except Exception:  # noqa: BLE001 - audit persistence cannot block foreground
+        pass
     audit_trace = [{
         "step": "hybrid_router",
         "status": "success",
@@ -151,7 +156,7 @@ def handle_chat(
         "tool_call_count": len(agent_result["tool_calls"]),
     })
     assistant_content = agent_result["content"]
-    save_message(session_id, "assistant", assistant_content, {
+    _safe_save_message(session_id, "assistant", assistant_content, {
         "selected_skill": selected_skill,
         "active_skills": agent_result["active_skills"],
         "suggested_skills": suggested_skills,
@@ -315,20 +320,36 @@ def _record_route_decision_trace(
     route_plan,
     progress: int | float | None = None,
 ) -> dict:
-    return record_agent_trace_event(
-        session_id=session_id,
-        message_id=message_id,
-        event_type="decision",
-        stage=route_plan.workflow_stage,
-        title="路由决策",
-        summary=route_plan.reason,
-        progress=progress,
-        skill=route_plan.primary_skill,
-        tool="route_planner",
-        input_summary=message[:240],
-        output_summary=f"primary_skill={route_plan.primary_skill}; route_source={route_plan.route_source}",
-        status="completed",
-    )
+    try:
+        return record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="decision",
+            stage=route_plan.workflow_stage,
+            title="路由决策",
+            summary=route_plan.reason,
+            progress=progress,
+            skill=route_plan.primary_skill,
+            tool="route_planner",
+            input_summary=message[:240],
+            output_summary=f"primary_skill={route_plan.primary_skill}; route_source={route_plan.route_source}",
+            status="completed",
+        )
+    except Exception:  # noqa: BLE001 - route trace is a projection sidecar
+        return {
+            "event_id": stable_id("route-event", session_id, message_id or "", utc_now_iso()),
+            "event_type": "decision", "stage": route_plan.workflow_stage,
+            "title": "路由决策", "summary": route_plan.reason,
+            "skill": route_plan.primary_skill, "tool": "route_planner", "status": "completed",
+        }
+
+
+def _safe_save_message(session_id: str, role: str, content: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return save_message(session_id, role, content, metadata)
+    except Exception:  # noqa: BLE001 - conversation persistence is non-blocking
+        return {"message_id": stable_id("ephemeral-message", session_id, role, utc_now_iso()),
+                "session_id": session_id, "role": role, "content": content, "metadata": metadata}
 
 
 def _handle_display_mode_command(message: str, session_id: str) -> dict | None:

@@ -13,7 +13,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "api_version": "0.3.0",
-        "workflow_contract": "process-workflow-v3",
+        "workflow_contract": "main-agent-working-context-v1",
         "agent_capability_contract": "skill-discovery-v2",
         "runtime_identity": runtime_identity(),
     }

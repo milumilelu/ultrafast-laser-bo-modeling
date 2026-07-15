@@ -3,15 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from ultrafast_memory.app import launcher
 from ultrafast_memory.demo.service import DemoService
 from ultrafast_memory.doctor.service import DoctorService
-from ultrafast_memory.workflows.service import TaskWorkflowService
 
 
-COMMANDS = {"tui", "api", "doctor", "demo", "workflow"}
+COMMANDS = {"tui", "api", "doctor", "demo"}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -32,9 +30,6 @@ def _parser() -> argparse.ArgumentParser:
         "--trial-mode", choices=["simple_trial_cut", "full_trial_cut", "skip_trial"],
         help="Explicit trial strategy; omission returns the trial-mode review checkpoint.",
     )
-    workflow = subparsers.add_parser("workflow", help="Run a formal workflow from a JSON request")
-    workflow.add_argument("name", choices=["complex_process_task", "optical_component_task_workflow", "microhole_array_task_workflow"])
-    workflow.add_argument("--request", required=True, help="Path to WorkflowExecuteRequest JSON")
     return parser
 
 
@@ -69,12 +64,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["status"] in {"completed", "waiting_review", "read_only_demo"} else 1
-    if parsed.command == "workflow":
-        request_path = Path(parsed.request).resolve()
-        payload = json.loads(request_path.read_text(encoding="utf-8"))
-        result = TaskWorkflowService().execute(parsed.name, payload)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result["status"] == "completed" else 1
     _parser().print_help()
     return 0
 

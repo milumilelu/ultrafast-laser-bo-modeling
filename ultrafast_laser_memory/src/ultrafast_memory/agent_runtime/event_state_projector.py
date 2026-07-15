@@ -76,7 +76,7 @@ class EventStateProjector:
         equipment_call = next((
             call for call in reversed(agent_result.get("tool_calls") or [])
             if call.get("tool_name") == "get_equipment_context"
-            and (call.get("result") or {}).get("status") == "succeeded"
+            and (call.get("result") or {}).get("status") == "success"
         ), None)
         if equipment_call:
             equipment = dict((equipment_call.get("result") or {}).get("data") or {})

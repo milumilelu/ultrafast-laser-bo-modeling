@@ -1,3 +1,5 @@
+import pytest
+
 from ultrafast_agent.skills import get_default_skill_registry
 from ultrafast_memory.agent_runtime.planner import MainAgentPlanner
 
@@ -22,4 +24,3 @@ def test_legacy_names_are_rejected():
             {"action": "direct_answer", "decision_summary": "invalid", "message": "no"},
             [], [],
         )
-import pytest

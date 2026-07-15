@@ -13,11 +13,11 @@ BACKEND_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 def runtime_identity() -> dict[str, Any]:
     """Return the exact interpreter and source files loaded by this backend process."""
-    import ultrafast_agent.task_intake.update_task_context_tool as update_task_context_tool
     import ultrafast_memory.agent_runtime.main_agent_loop as main_agent_loop
     import ultrafast_memory.agent_runtime.planner as planner
     import ultrafast_memory.agent_runtime.skill_registry as skill_registry
     import ultrafast_memory.agent_runtime.tool_registry as tool_registry
+    import ultrafast_memory.agent_runtime.working_context as working_context
 
     project_root = Path(__file__).resolve().parents[3]
     return {
@@ -31,7 +31,7 @@ def runtime_identity() -> dict[str, Any]:
         "main_agent_planner": str(Path(planner.__file__).resolve()),
         "skill_registry": str(Path(skill_registry.__file__).resolve()),
         "tool_registry": str(Path(tool_registry.__file__).resolve()),
-        "update_task_context_tool": str(Path(update_task_context_tool.__file__).resolve()),
+        "working_context": str(Path(working_context.__file__).resolve()),
         "backend_pid": os.getpid(),
         "backend_started_at": BACKEND_STARTED_AT,
     }

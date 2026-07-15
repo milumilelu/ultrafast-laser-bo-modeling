@@ -82,8 +82,18 @@ class ToolExecutionResult:
 
     def to_tool_result(self, tool_name: str) -> dict[str, Any]:
         """Stable Agent-facing observation envelope for every tool."""
+        output = self.output if isinstance(self.output, dict) else {}
+        public_status = str(output.get("status") or "")
+        allowed = {"success", "partial", "insufficient_data", "blocked", "validation_error", "failed", "exploratory"}
+        if public_status not in allowed:
+            public_status = "success" if self.status == "succeeded" else (
+                "validation_error" if self.error_code == "validation_failed" else "failed"
+            )
         return ToolResult(
-            tool_name=tool_name, status=self.status, data=self.output,
+            tool_name=tool_name, status=public_status, data=self.output,
+            summary=str(output.get("summary") or ""),
+            warnings=list(output.get("warnings") or []),
+            provenance=list(output.get("provenance") or []),
             error=({"code": self.error_code, "message": self.error_message}
                    if self.error_code or self.error_message else None),
             meta={"attempt": self.attempt, "duration_ms": round(self.duration_ms, 3)},
@@ -95,12 +105,16 @@ class ToolResult:
     tool_name: str
     status: str
     data: Any = None
+    summary: str = ""
+    warnings: list[str] = field(default_factory=list)
     error: dict[str, Any] | None = None
+    provenance: list[dict[str, Any]] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {"tool_name": self.tool_name, "status": self.status, "data": self.data,
-                "error": self.error, "meta": dict(self.meta)}
+                "summary": self.summary, "warnings": list(self.warnings), "error": self.error,
+                "provenance": list(self.provenance), "meta": dict(self.meta)}
 
 
 class ToolExecutor:

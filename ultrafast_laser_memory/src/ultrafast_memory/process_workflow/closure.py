@@ -9,20 +9,20 @@ def quality_decision(required_metrics: list[str], measurements: dict[str, Any],
     failed = [name for name, passed in constraint_results.items() if not passed]
     passed = [name for name, passed in constraint_results.items() if passed]
     if missing:
-        decision = "inconclusive"
+        decision = "INCOMPLETE_DATA"
     elif failed:
-        decision = "rework_required" if all(measurements.get("reworkable", True) for _ in [0]) else "rejected"
+        decision = "FAIL"
     else:
-        decision = "accepted"
+        decision = "PASS"
     return {"decision": decision, "passed_metrics": passed, "failed_metrics": failed,
-            "missing_metrics": missing, "can_close": decision == "accepted"}
+            "missing_metrics": missing, "can_close": decision == "PASS"}
 
 
 def bo_sample_eligibility(record: dict[str, Any]) -> dict[str, Any]:
     required = ["task_id", "execution_id", "equipment_revision", "material_batch", "parameters",
                 "measurements", "quality_decision", "fidelity_level"]
     missing = [key for key in required if record.get(key) in (None, "", {})]
-    valid_decisions = {"accepted", "conditional", "rework_required", "rejected"}
+    valid_decisions = {"PASS", "FAIL", "NEEDS_REVIEW"}
     reasons = [f"missing:{key}" for key in missing]
     if record.get("quality_decision") not in valid_decisions:
         reasons.append("quality_not_decided")

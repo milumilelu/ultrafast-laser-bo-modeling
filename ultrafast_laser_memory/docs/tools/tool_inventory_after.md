@@ -1,11 +1,11 @@
-# Agent tool inventory after refactor
+# Agent Tool inventory
 
-## Core tools (12)
+## Foreground safe (8)
 
-`update_task_context`, `get_equipment_context`, `search_knowledge`, `bootstrap_external_knowledge`, `recommend_parameters_bo`, `recommend_parameters_rag`, `propose_exploratory_parameters`, `manage_trial`, `run_bo_iteration`, `record_process_result`, `create_knowledge_candidate`, `generate_report`.
+`get_equipment_context`, `search_knowledge`, `recommend_parameters_bo`, `recommend_parameters_rag`, `propose_exploratory_parameters`, `manage_trial`, `manage_process`, `record_process_result`.
 
-## On-demand tools (2)
+## On demand post-process (3)
 
-`ingest_files`, `review_knowledge_candidate`.
+`bootstrap_external_knowledge`, `ingest_files`, `generate_report`。这些能力不进入普通前台默认发现集合。
 
-Initial discovery exposes only `update_task_context` and `get_equipment_context`. Loaded Skill descriptors reveal recommended tools. Every execution returns the same `ToolResult` envelope: `tool_name`, `status`, `data`, `error`, and `meta`.
+Skill 不控制 Tool 是否存在，只影响推荐顺序。公开 `ToolResult.status` 为 `success / partial / insufficient_data / blocked / validation_error / failed`（探索性参数额外标记 `exploratory`）。
