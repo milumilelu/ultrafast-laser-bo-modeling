@@ -15,5 +15,5 @@ def test_hybrid_router_marks_ambiguous_rule_candidate(isolated_root, monkeypatch
 
     assert plan.primary_skill == "experiment_optimization"
     assert "result_learning" in plan.secondary_skills
-    assert plan.route_source == "hybrid_router"
+    assert plan.route_source == "rule_router"
     assert plan.intent == "skill_hint"

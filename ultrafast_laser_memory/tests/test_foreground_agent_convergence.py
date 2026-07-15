@@ -231,3 +231,129 @@ def test_explicit_real_action_approval_is_scoped_to_start(isolated_root):
                  if item.get("type") == "UserApprovalObservation"]
     assert approvals[-1]["scope"] == {"tool": "manage_process", "operation": "start"}
     assert approvals[-1]["one_time"] is True
+
+
+def test_cfrp_regression_uses_one_runtime_and_composite_parameter_policy(isolated_root):
+    class IntakeLLM:
+        provider = "test"
+        model = "intake"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            return {"content": json.dumps({
+                "action": "ask_user",
+                "decision_summary": "只补充影响当前路线的信息",
+                "message": "目标切割轮廓和长度是多少？",
+            }, ensure_ascii=False)}
+
+    class PlanningLLM:
+        provider = "test"
+        model = "planning"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                action = {
+                    "action": "call_tool", "decision_summary": "读取设备事实",
+                    "tool_name": "get_equipment_context", "arguments": {},
+                }
+            elif self.calls == 2:
+                action = {
+                    "action": "call_tool", "decision_summary": "按统一策略推荐参数",
+                    "tool_name": "recommend_process_parameters",
+                    "arguments": {
+                        "task_context": {
+                            "material": {"name": "CFRP", "grade": "T300"},
+                            "process_intent": "cutting",
+                        },
+                        "process_plan": {
+                            "objective": "无分层切割试切",
+                            "controllable_variables": [
+                                {"name": "laser_power_W", "role": "process_setpoint"},
+                            ],
+                        },
+                        "variables": ["laser_power_W"],
+                        "equipment_context": build_machine_bounds(),
+                    },
+                }
+            else:
+                action = {
+                    "action": "ask_user", "decision_summary": "参数来源已检查",
+                    "message": "当前证据只支持试切；请选择简化试切还是完整试切？",
+                }
+            return {"content": json.dumps(action, ensure_ascii=False)}
+
+    session_id = _session()
+    intake_llm = IntakeLLM()
+    first = run_main_agent_turn(
+        session_id=session_id,
+        message="我想切割 5 mm 厚的碳纤维板，板号 T300。",
+        message_id="cfrp-1",
+        client=intake_llm,
+    )
+    assert first["final_action"]["action"] == "ask_user"
+    assert first["task_spec"]["material"]["grade"] == "T300"
+    assert first["task_spec"]["workpiece"]["thickness_mm"] == 5
+    assert first["workflow_state"]["runtime_metrics"]["model_call_count"] == 1
+
+    planning_llm = PlanningLLM()
+    second = run_main_agent_turn(
+        session_id=session_id,
+        message="只要求无分层，使用压缩空气，允许层切，无效率要求。",
+        message_id="cfrp-2",
+        client=planning_llm,
+    )
+    assert second["task_spec"]["quality_requirement"] == "no_delamination"
+    assert second["task_spec"]["auxiliary"] == "compressed_air"
+    assert second["task_spec"]["layer_cut_allowed"] is True
+    assert [item["tool_name"] for item in second["tool_calls"]] == [
+        "get_equipment_context", "recommend_process_parameters",
+    ]
+    policy_result = second["tool_calls"][1]["result"]["data"]
+    assert [item["step"] for item in policy_result["internal_trace"]][:2] == [
+        "bo_parameter_recommendation", "rag_parameter_recommendation",
+    ]
+    assert second["final_action"]["action"] == "ask_user"
+    assert second["workflow_state"]["runtime_metrics"]["model_call_count"] == 3
+
+
+def test_rule_based_bo_cannot_unlock_formal_process(isolated_root, monkeypatch):
+    from ultrafast_memory.agent_runtime import tool_registry as tool_module
+
+    class ColdStartAdapter:
+        def recommend(self, *args, **kwargs):
+            return {
+                "model_status": "rule_based_cold_start",
+                "sample_count": 0,
+                "recommended_parameters": {"laser_power_W": 1.0},
+                "bo_invoked": False,
+                "readiness_report": {
+                    "complete_feature_count": 0,
+                    "validation_metrics": {},
+                    "uncertainty_calibrated": False,
+                },
+            }
+
+    monkeypatch.setattr(tool_module, "LegacyBOCompatibilityAdapter", ColdStartAdapter)
+    result = tool_module._recommend_bo(
+        {"variables": ["laser_power_W"]},
+        {
+            "task_spec": {"material": "CFRP", "process_type": "cutting"},
+            "equipment_snapshot": {
+                "fixed_conditions": {},
+                "tunable_capabilities": {
+                    "laser_power_W": {"min": 0.1, "max": 5.0, "unit": "W"},
+                },
+            },
+        },
+    )
+    assert result["status"] == "partial_support"
+    assert result["data_support"]["model_mode"] == "rule_based_cold_start"
+    assert result["allowed_for_trial"] is True
+    assert result["allowed_for_formal_process"] is False

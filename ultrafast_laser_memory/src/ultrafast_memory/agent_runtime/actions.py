@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 class AgentAction(BaseModel):
     """The only wire-level action contract accepted by the main Agent loop."""
 
-    action: Literal["load_skill", "unload_skill", "call_tool", "ask_user", "final_answer"]
+    action: Literal["call_tool", "ask_user", "final_answer"]
     decision_summary: str
-    skill_name: str | None = None
+    skills_used: list[str] = Field(default_factory=list)
     tool_name: str | None = None
     arguments: dict[str, Any] = Field(default_factory=dict)
     message: str | None = None

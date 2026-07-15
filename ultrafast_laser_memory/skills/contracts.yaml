@@ -79,7 +79,7 @@ skills:
       - 设备固定条件、可调边界、运动和光学限制。
       - 当前真正需要控制的变量及不应变化的条件。
       - 检测方法、质量指标、成功标准、停止条件和调整逻辑。
-    recommended_tools: [get_equipment_context, search_knowledge, recommend_parameters_rag, manage_trial, manage_process]
+    recommended_tools: [get_equipment_context, search_knowledge, recommend_process_parameters, manage_trial, manage_process]
     output_expectations:
       - 输出开放的 objective、strategy、operations、fixed_conditions 和 controllable_variables。
       - evaluation_plan、risks、assumptions 和 adaptation_guidance 必须按当前任务动态生成。
@@ -110,7 +110,7 @@ skills:
       - 变量之间的耦合、派生指标和不能独立解释的参数组合。
       - BO 样本匹配性、RAG 证据适用范围及探索假设的不确定性。
       - 参数是否仅可试切、可正式加工或可进入 BO 训练。
-    recommended_tools: [get_equipment_context, recommend_parameters_bo, recommend_parameters_rag, propose_exploratory_parameters]
+    recommended_tools: [get_equipment_context, recommend_process_parameters]
     output_expectations:
       - 分列 fixed_equipment_conditions、process_parameters、strategy_parameters 和 derived_metrics。
       - 每个推荐参数包含 name、value、unit、role、source_type、source_refs、authority_level、uncertainty、allowed_for_trial、allowed_for_formal_process。
@@ -144,7 +144,7 @@ skills:
       - 检测可行性、成功判据、设备报警和材料损伤停止条件。
       - 只分析当前任务相关的失效现象及其调整方向，不套用其他加工类型的缺陷清单。
       - 数据是否具备进入 BO 的合格性。
-    recommended_tools: [manage_trial, recommend_parameters_bo, recommend_parameters_rag, propose_exploratory_parameters, record_process_result, get_equipment_context]
+    recommended_tools: [manage_trial, recommend_process_parameters, record_process_result, get_equipment_context]
     output_expectations:
       - TrialPlan 以开放结构表达 objective、hypothesis、setup、strategy 和 parameter_candidates。
       - evaluation_plan、success_criteria、stop_conditions、adaptation_guidance、provenance、warnings 必须与当前任务相关。
@@ -174,7 +174,7 @@ skills:
       - 必需测量是否完整，缺陷描述是否有严重度和位置。
       - 当前结果是否与本轮唯一变化变量一致。
       - 是否存在设备报警、材料失效或应立即停止的安全信号。
-    recommended_tools: [record_process_result, manage_trial, manage_process, recommend_parameters_bo, search_knowledge]
+    recommended_tools: [record_process_result, manage_trial, manage_process, recommend_process_parameters, search_knowledge]
     output_expectations:
       - 返回事实 Observation、质量判断依据、缺失测量和建议下一动作。
       - 明确 BO eligibility、知识候选状态和不能外推的范围。

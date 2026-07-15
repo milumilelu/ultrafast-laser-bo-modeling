@@ -25,7 +25,7 @@ def test_rectangular_groove_commits_all_facts_once_then_asks_depth(isolated_root
     assert "目标深度" in response.assistant_message
     assert response.assistant_message.count("？") == 1
     spec = response.workflow_state["task_spec"]
-    assert spec["material"] == {"name": "铝基碳化硅板材"}
+    assert spec["material"]["name"] == "铝基碳化硅板材"
     assert spec["process_intent"] == "groove_machining"
     assert spec["geometry"] == {
         "feature_type": "rectangular_groove",
@@ -34,10 +34,8 @@ def test_rectangular_groove_commits_all_facts_once_then_asks_depth(isolated_root
     }
     assert response.workflow_state["missing_slots"] == ["geometry.depth_mm"]
     assert response.tool_calls == []
-    assert response.workflow_state["runtime_metrics"] == {
-        "decision_count": 1,
-        "tool_call_count": 0,
-    }
+    assert response.workflow_state["runtime_metrics"]["model_call_count"] == 0
+    assert response.workflow_state["runtime_metrics"]["tool_call_count"] == 0
 
     completed = handle_chat(ChatRequest(session_id=response.session_id, message="1mm"))
     assert completed.current_stage_code == "final_answer"
@@ -134,71 +132,6 @@ def test_stream_publishes_live_status_and_heartbeat_while_llm_is_blocked(
     assert heartbeat["wait_name"] == "test/blocking"
     assert heartbeat["wait_component"] == "main_agent_planner"
     assert heartbeat["summary"] == "等待模型 test/blocking（主 Agent 规划，第 1 次调用）返回。"
-    release.set()
-    assert any(item["type"] == "delta" and item["content"] == "done" for item in stream)
-
-
-def test_stream_heartbeat_names_the_blocking_router_model(isolated_root, monkeypatch) -> None:
-    init_database()
-    release = Event()
-
-    class BlockingRouterLLM:
-        provider = "test-router"
-        model = "route-model"
-
-        def chat(self, messages, **kwargs):
-            assert release.wait(timeout=5)
-            return {
-                "provider": self.provider,
-                "model": self.model,
-                "content": json.dumps({
-                    "primary_skill": "task_understanding",
-                    "secondary_skills": [],
-                    "intent": "skill_hint",
-                    "workflow_stage": "agent_planning",
-                    "confidence": 0.6,
-                    "reason": "route complete",
-                }),
-            }
-
-    class AnswerLLM:
-        provider = "test"
-        model = "answer"
-
-        def chat(self, messages, **kwargs):
-            return {
-                "provider": self.provider,
-                "model": self.model,
-                "content": json.dumps({
-                    "action": "final_answer",
-                    "decision_summary": "complete",
-                    "message": "done",
-                }),
-            }
-
-    monkeypatch.setattr(
-        "ultrafast_memory.chat.router.llm_router.create_llm_client",
-        lambda config: BlockingRouterLLM(),
-    )
-    monkeypatch.setattr("ultrafast_memory.chat.service.create_llm_client", lambda config: AnswerLLM())
-    monkeypatch.setattr("ultrafast_memory.chat.service.STREAM_HEARTBEAT_SECONDS", 0.01)
-    stream = handle_chat_stream_ndjson(ChatRequest(message="分析这个普通任务", stream=True))
-
-    assert next(stream)["type"] == "meta"
-    assert next(stream)["type"] == "progress"
-    heartbeat = None
-    for _ in range(300):
-        item = next(stream)
-        if item["type"] == "heartbeat" and item["wait_kind"] == "model":
-            heartbeat = item
-            break
-
-    assert heartbeat is not None
-    assert heartbeat["wait_name"] == "test-router/route-model"
-    assert heartbeat["wait_component"] == "llm_router"
-    assert heartbeat["summary"] == (
-        "等待模型 test-router/route-model（Skill 路由，第 1 次调用）返回。"
-    )
     release.set()
     assert any(item["type"] == "delta" and item["content"] == "done" for item in stream)
 

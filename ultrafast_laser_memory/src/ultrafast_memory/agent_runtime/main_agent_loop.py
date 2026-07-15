@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from copy import deepcopy
+from time import monotonic
 from typing import Any
 
 from ultrafast_agent.runtime import ToolExecutor
@@ -10,6 +11,7 @@ from ultrafast_memory.agent_runtime.actions import AgentAction
 from ultrafast_memory.agent_runtime.capability_discovery import exposed_tool_names
 from ultrafast_memory.agent_runtime.planner import MainAgentPlanner
 from ultrafast_memory.agent_runtime.skill_registry import build_skill_registry
+from ultrafast_memory.agent_runtime.task_intake import prepare_task_context
 from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.agent_runtime.working_context import (
@@ -39,16 +41,13 @@ def run_main_agent_turn(
     planner = MainAgentPlanner(client)
     state = get_session_state(session_id)
     working = load_working_context(state)
-    if active_skills is not None:
-        working.active_skills = list(dict.fromkeys(active_skills))
-    loaded = [skills.get(name).name for name in working.active_skills]
-    working.active_skills = list(dict.fromkeys(loaded))
     observations = working.observations
     turn_observation_offset = len(observations)
     tool_calls: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     warnings: list[str] = []
     final_action: AgentAction | None = None
+    model_call_count = 0
     total_decisions = int(state.get("agent_decision_count") or 0)
     repeated_no_progress: dict[str, int] = {}
     recent_actions: list[dict[str, Any]] = []
@@ -88,8 +87,41 @@ def run_main_agent_turn(
         "已读取当前 Working Context，开始推进任务。", "running", {}, warnings,
     ))
 
+    preparation = prepare_task_context(message, working.model_dump(mode="json"))
+    prepared_paths = working.apply(preparation.context_updates)
+    loaded = _select_skill_names(
+        skills,
+        explicit=active_skills or [],
+        suggested=suggested_skills or [],
+        prepared=preparation.skill_hints,
+        task=working.task,
+        observations=observations,
+    )
+    working.active_skills = loaded
+    if prepared_paths or loaded:
+        _persist_context_nonblocking(
+            session_id, message_id, working,
+            [*prepared_paths, "active_skills"], events, event_sink, warnings,
+        )
+    _publish(events, event_sink, _safe_trace(
+        session_id, message_id, "task_context_prepared", "request_intake", "任务上下文已准备",
+        preparation.summary, "completed",
+        {
+            "changed_paths": prepared_paths,
+            "task_fields": preparation.changed_fields,
+            "conflicts": preparation.conflicts,
+            "ambiguities": preparation.ambiguities,
+            "blocking_fields": preparation.blocking_fields,
+            "injected_skills": loaded,
+        }, warnings,
+    ))
+    if preparation.blocking_fields and (
+        client is None or getattr(client, "provider", None) == "mock"
+    ):
+        final_action = _fallback_blocking_action(preparation.blocking_fields)
+
     turn_step = 0
-    while True:
+    while final_action is None:
         turn_step += 1
         if turn_step > ABSOLUTE_EMERGENCY_DECISION_LIMIT:
             final_action = AgentAction(
@@ -114,24 +146,62 @@ def run_main_agent_turn(
         _publish(events, event_sink, planning)
 
         def publish_planner_model_call(call: dict[str, Any]) -> None:
+            nonlocal model_call_count
+            event_type = str(call.get("event_type") or "model_call_started")
+            if event_type == "model_call_started":
+                model_call_count += 1
             provider = str(call.get("provider") or "unknown-provider")
             model = str(call.get("model") or "unknown-model")
             attempt = int(call.get("attempt") or 1)
             model_name = f"{provider}/{model}"
+            titles = {
+                "model_call_started": f"调用模型 {model_name}",
+                "model_provider_response_received": f"模型 {model_name} 已返回",
+                "model_parse_completed": "模型输出解析完成",
+                "model_validation_completed": "模型行动校验完成",
+                "model_call_completed": f"模型调用完成：{model_name}",
+                "model_call_failed": f"模型调用失败：{model_name}",
+            }
+            summaries = {
+                "model_call_started": (
+                    f"等待模型 {model_name} 返回主 Agent 下一动作；"
+                    f"调用序号 {call.get('call_sequence') or model_call_count}，第 {attempt}/2 次尝试，"
+                    f"输入 {call.get('prompt_chars') or 0} 字符。"
+                ),
+                "model_provider_response_received": (
+                    f"模型完整响应已返回：{call.get('response_chars') or 0} 字符，"
+                    f"耗时 {call.get('duration_ms') or 0} ms。"
+                ),
+                "model_parse_completed": (
+                    f"结构化输出解析成功，耗时 {call.get('duration_ms') or 0} ms。"
+                ),
+                "model_validation_completed": (
+                    f"行动校验通过：{call.get('action') or 'unknown'}"
+                    + (f" → {call.get('tool_name')}" if call.get("tool_name") else "")
+                    + f"，耗时 {call.get('duration_ms') or 0} ms。"
+                ),
+                "model_call_completed": (
+                    f"主 Agent 模型调用完成，总耗时 {call.get('duration_ms') or 0} ms。"
+                ),
+                "model_call_failed": (
+                    f"模型调用在 {call.get('failure_stage') or 'unknown'} 阶段失败；"
+                    + ("将按结构化修复提示重试。" if call.get("will_retry") else "已停止重试。")
+                ),
+            }
             _publish(events, event_sink, _safe_trace(
-                session_id, message_id, "model_call_started", "agent_planning",
-                f"调用模型 {model_name}",
-                f"正在等待模型 {model_name} 完成主 Agent 规划（第 {attempt} 次调用）。",
-                "running", call, warnings,
+                session_id, message_id, event_type, "agent_planning",
+                titles.get(event_type, "模型调用状态"),
+                summaries.get(event_type, "模型调用状态已更新。"),
+                "running" if event_type == "model_call_started" else "completed", call, warnings,
             ))
 
         action = planner.decide(
             message=message,
-            working_context=working.model_dump(mode="json"),
+            working_context=_planner_context(working),
             available_tools=tool_schemas,
             active_skills=loaded,
-            recent_tool_results=observations,
-            skill_catalog=skills.catalog_for_agent(),
+            recent_tool_results=_planner_observations(observations, turn_observation_offset),
+            skill_guidance=_skill_guidance(skills, loaded),
             runtime_hints={"suggested_skills": suggested_skills or [], "router_is_hint_only": True},
             model_call_sink=publish_planner_model_call,
         )
@@ -142,8 +212,9 @@ def run_main_agent_turn(
             session_id, message_id, "agent_decision", "main_agent", "主 Agent 决策",
             action.decision_summary, "completed",
             {"action": action.action, "sequence": turn_step,
+             "skills_used": action.skills_used,
              **({"validation_errors": action.error_details} if action.error_details else {})}, warnings,
-            skill=action.skill_name, tool=action.tool_name,
+            skill=action.skills_used[0] if action.skills_used else None, tool=action.tool_name,
         ))
 
         changed = working.apply(action.context_updates)
@@ -152,35 +223,9 @@ def run_main_agent_turn(
                 session_id, message_id, working, changed, events, event_sink, warnings,
             )
 
-        if action.action == "load_skill":
-            descriptor = skills.load(str(action.skill_name))
-            if descriptor["name"] not in loaded:
-                loaded.append(descriptor["name"])
-                working.active_skills = loaded
-                changed.append("active_skills")
-            observations.append({"action": "load_skill", "status": "success", "data": descriptor})
-            _publish(events, event_sink, _safe_trace(
-                session_id, message_id, "skill_loaded", "main_agent", f"Skill 已加载：{descriptor['name']}",
-                "专业指导已加入规划上下文；Tool 可见性没有改变。", "completed", {}, warnings,
-                skill=descriptor["name"],
-            ))
-            _persist_context_nonblocking(session_id, message_id, working, changed or ["observations"], events, event_sink, warnings)
-            continue
-
-        if action.action == "unload_skill":
-            resolved = skills.get(str(action.skill_name)).name
-            loaded = [name for name in loaded if name != resolved]
-            working.active_skills = loaded
-            observations.append({"action": "unload_skill", "status": "success", "data": {"name": resolved}})
-            _publish(events, event_sink, _safe_trace(
-                session_id, message_id, "skill_unloaded", "main_agent", f"Skill 已卸载：{resolved}",
-                "专业指导已移除；Tool 可见性没有改变。", "completed", {}, warnings, skill=resolved,
-            ))
-            _persist_context_nonblocking(session_id, message_id, working, ["active_skills", "observations"], events, event_sink, warnings)
-            continue
-
         if action.action != "call_tool":
             break
+        final_action = None
 
         tool_name = str(action.tool_name)
         contract = registry.get(tool_name)
@@ -201,7 +246,8 @@ def run_main_agent_turn(
             _publish(events, event_sink, _safe_trace(
                 session_id, message_id, "tool_cache_hit", "main_agent", f"复用 {tool_name} 已有观察",
                 "相同 Tool 与参数已有等价结果，未重复执行；该观察已返回 Planner。", "completed",
-                {"arguments": action.arguments, "observation": cached}, warnings, tool=tool_name,
+                {"arguments": _public_tool_arguments(action.arguments),
+                 "observation": _public_tool_observation(tool_name, cached)}, warnings, tool=tool_name,
             ))
             if repeated_no_progress[duplicate_key] >= 3:
                 final_action = AgentAction(
@@ -221,11 +267,13 @@ def run_main_agent_turn(
 
         _publish(events, event_sink, _safe_trace(
             session_id, message_id, "tool_call_started", "main_agent", f"调用 {tool_name}",
-            contract.purpose, "running", {"arguments": action.arguments}, warnings, tool=tool_name,
+            f"等待工具 {tool_name} 返回：{contract.purpose}", "running",
+            {"arguments": _public_tool_arguments(action.arguments)}, warnings, tool=tool_name,
         ))
         approved, approval_observation = _scoped_user_approval(message, message_id, tool_name, action.arguments)
         if approval_observation:
             observations.append(approval_observation)
+        tool_started = monotonic()
         execution = executor.execute(
             tool_name, action.arguments,
             {
@@ -235,8 +283,10 @@ def run_main_agent_turn(
             },
         )
         envelope = execution.to_tool_result(tool_name)
+        tool_duration_ms = round((monotonic() - tool_started) * 1000, 3)
         envelope.setdefault("meta", {}).update({
-            "arguments": deepcopy(action.arguments), "cache_policy": contract.cache_policy, "cache_hit": False,
+            "arguments": deepcopy(action.arguments), "cache_policy": contract.cache_policy,
+            "cache_hit": False, "wall_duration_ms": tool_duration_ms,
         })
         tool_calls.append({
             "step": turn_step, "tool_name": tool_name, "arguments": action.arguments,
@@ -251,7 +301,11 @@ def run_main_agent_turn(
             "tool_completed" if envelope["status"] not in {"failed", "blocked", "validation_error"} else "tool_failed",
             "main_agent", f"{tool_name} 执行结果",
             envelope.get("summary") or ("工具执行完成。" if envelope["status"] != "failed" else "工具执行失败。"),
-            "completed", {"tool_result": envelope}, warnings, tool=tool_name,
+            "completed", {
+                "arguments": _public_tool_arguments(action.arguments),
+                "observation": _public_tool_observation(tool_name, envelope),
+                "duration_ms": tool_duration_ms,
+            }, warnings, tool=tool_name,
         ))
         if tool_name == "record_process_result":
             try:
@@ -286,7 +340,11 @@ def run_main_agent_turn(
         "missing_slots": critical_missing,
         "missing_fields": critical_missing,
         "current_stage_code": final_action.action,
-        "runtime_metrics": {"decision_count": turn_step, "tool_call_count": len(tool_calls)},
+        "runtime_metrics": {
+            "decision_count": turn_step,
+            "model_call_count": model_call_count,
+            "tool_call_count": len(tool_calls),
+        },
         "warnings": warnings,
     }
     return {
@@ -296,6 +354,188 @@ def run_main_agent_turn(
         "discoverable_tools": sorted(exposed), "warnings": warnings,
         "final_action": final_action.model_dump(mode="json"),
     }
+
+
+def _select_skill_names(
+    registry: Any,
+    *,
+    explicit: list[str],
+    suggested: list[str],
+    prepared: list[str],
+    task: dict[str, Any],
+    observations: list[dict[str, Any]],
+) -> list[str]:
+    available = {item.name for item in registry.list()}
+    selected: list[str] = []
+
+    def add(name: str) -> None:
+        if name in available and name not in selected:
+            selected.append(name)
+
+    add("task_understanding")
+    for name in [*explicit, *suggested, *prepared]:
+        add(str(name))
+    if task.get("material") and task.get("process_intent"):
+        add("evidence_research")
+        add("process_planning")
+        add("parameter_recommendation")
+        add("experiment_optimization")
+    recent_tools = {str(item.get("tool_name") or "") for item in observations[-4:]}
+    if "search_knowledge" in recent_tools:
+        add("evidence_research")
+        add("process_planning")
+    if "recommend_process_parameters" in recent_tools:
+        add("parameter_recommendation")
+        add("experiment_optimization")
+    return selected
+
+
+def _fallback_blocking_action(fields: list[str]) -> AgentAction:
+    questions = {
+        "geometry.depth_mm": "矩形槽的目标深度（槽深）是多少，还是要求贯穿？",
+    }
+    selected = [questions[field] for field in fields if field in questions][:5]
+    return AgentAction(
+        action="ask_user",
+        decision_summary="主模型不可用；仅追问任务抽取已确认的阻塞字段。",
+        skills_used=["task_understanding"],
+        message="\n".join(selected) or "请补充当前加工路线所必需的缺失信息。",
+    )
+
+
+def _skill_guidance(registry: Any, selected: list[str]) -> list[dict[str, Any]]:
+    guidance: list[dict[str, Any]] = []
+    for name in selected:
+        item = registry.get(name)
+        guidance.append({
+            "name": item.name,
+            "purpose": item.purpose,
+            "method": list(item.method),
+            "required_considerations": list(item.required_considerations),
+            "recommended_tools": list(item.recommended_tools),
+            "output_expectations": list(item.output_expectations),
+            "prohibitions": list(item.prohibitions),
+            "failure_handling": list(item.failure_handling),
+        })
+    return guidance
+
+
+def _planner_context(working: WorkingContext) -> dict[str, Any]:
+    value = working.model_dump(mode="json")
+    value.pop("observations", None)
+    value["documents"] = [
+        {
+            key: item.get(key)
+            for key in ("document_id", "file_name", "path", "status", "content_type", "char_count")
+            if item.get(key) is not None
+        }
+        for item in value.get("documents") or []
+    ]
+    return _compact_public_value(value, max_string=1600, max_list=8, max_depth=7)
+
+
+def _planner_observations(
+    observations: list[dict[str, Any]], turn_offset: int,
+) -> list[dict[str, Any]]:
+    prior = observations[max(0, turn_offset - 2):turn_offset]
+    current = observations[turn_offset:]
+    selected = [*prior, *current[-5:]]
+    return [
+        _compact_public_value(item, max_string=1200, max_list=6, max_depth=7)
+        for item in selected
+    ]
+
+
+def _public_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    return _compact_public_value(arguments, max_string=500, max_list=8, max_depth=6)
+
+
+def _public_tool_observation(tool_name: str, envelope: dict[str, Any]) -> dict[str, Any]:
+    data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+    base: dict[str, Any] = {
+        "status": envelope.get("status"),
+        "summary": envelope.get("summary"),
+        "warnings": envelope.get("warnings") or [],
+        "error": envelope.get("error"),
+        "meta": envelope.get("meta") or {},
+    }
+    if tool_name == "search_knowledge":
+        result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        hits = list(data.get("hits") or result.get("hits") or [])
+        base.update({
+            "query": data.get("query"),
+            "purpose": data.get("purpose"),
+            "hit_count": len(hits),
+            "evidence_status": result.get("evidence_status"),
+            "retrieval_metadata": _compact_public_value(
+                result.get("retrieval_metadata") or {}, max_string=300, max_list=5, max_depth=4,
+            ),
+            "hits": [
+                _compact_public_value({
+                    key: hit.get(key)
+                    for key in (
+                        "chunk_id", "paper_id", "title", "section_type", "authority_level",
+                        "score", "rerank_score", "text", "content",
+                    )
+                    if hit.get(key) is not None
+                }, max_string=360, max_list=3, max_depth=3)
+                for hit in hits[:3]
+                if isinstance(hit, dict)
+            ],
+        })
+        return base
+    if tool_name == "recommend_process_parameters":
+        base.update({
+            "source_type": data.get("source_type"),
+            "authority_level": data.get("authority_level"),
+            "evidence_level": data.get("evidence_level"),
+            "process_parameters": data.get("process_parameters") or {},
+            "strategy_parameters": data.get("strategy_parameters") or {},
+            "limitations": data.get("limitations") or [],
+        })
+        return _compact_public_value(base, max_string=500, max_list=8, max_depth=6)
+    if tool_name == "get_equipment_context":
+        base.update({
+            "equipment_profile_id": data.get("equipment_profile_id"),
+            "profile_name": data.get("profile_name"),
+            "revision_id": data.get("revision_id"),
+            "fixed_conditions": data.get("fixed_conditions") or {},
+            "tunable_capabilities": data.get("tunable_capabilities") or {},
+            "missing_equipment_fields": data.get("missing_equipment_fields") or [],
+        })
+        return _compact_public_value(base, max_string=500, max_list=8, max_depth=6)
+    base["data"] = data
+    return _compact_public_value(base, max_string=600, max_list=8, max_depth=6)
+
+
+def _compact_public_value(
+    value: Any, *, max_string: int, max_list: int, max_depth: int,
+    _depth: int = 0,
+) -> Any:
+    if _depth >= max_depth:
+        return "<truncated>"
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_public_value(
+                item, max_string=max_string, max_list=max_list,
+                max_depth=max_depth, _depth=_depth + 1,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        result = [
+            _compact_public_value(
+                item, max_string=max_string, max_list=max_list,
+                max_depth=max_depth, _depth=_depth + 1,
+            )
+            for item in value[:max_list]
+        ]
+        if len(value) > max_list:
+            result.append(f"<truncated {len(value) - max_list} items>")
+        return result
+    if isinstance(value, str) and len(value) > max_string:
+        return value[:max_string] + f"…<truncated {len(value) - max_string} chars>"
+    return value
 
 
 def _rank_tool_schemas(items: list[dict[str, Any]], skills: Any, loaded: list[str]) -> list[dict[str, Any]]:
@@ -350,6 +590,11 @@ def _safe_trace(
         return record_agent_trace_event(
             session_id=session_id, message_id=message_id, event_type=event_type, stage=stage,
             title=title, summary=summary, status=status, payload=payload, skill=skill, tool=tool,
+            duration_ms=(float(payload["duration_ms"]) if isinstance(payload.get("duration_ms"), (int, float)) else None),
+            cache_hit=(bool(payload.get("cache_hit")) if "cache_hit" in payload else None),
+            attempt=(int(payload["attempt"]) if isinstance(payload.get("attempt"), int) else None),
+            input_summary=payload.get("arguments"),
+            output_summary=payload.get("observation"),
         )
     except Exception as exc:  # noqa: BLE001 - trace is observability only
         warning = f"Trace 写入失败：{type(exc).__name__}"

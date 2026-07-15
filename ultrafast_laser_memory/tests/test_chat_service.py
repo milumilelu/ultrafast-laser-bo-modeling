@@ -16,7 +16,7 @@ def test_chat_service_persists_messages_and_skill_trace(isolated_root, monkeypat
     assert "现有任务状态未被修改" in response.assistant_message
     assert "严格字段格式" not in response.assistant_message
     assert response.selected_skill == "task_understanding"
-    assert [step["step"] for step in response.audit_trace] == ["hybrid_router", "main_agent_loop"]
+    assert [step["step"] for step in response.audit_trace] == ["rule_skill_hints", "main_agent_loop"]
     assert response.evidence_gap is None
 
     with get_connection() as conn:

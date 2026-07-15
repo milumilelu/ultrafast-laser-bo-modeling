@@ -9,6 +9,7 @@ from ultrafast_domain.process import ProcessPlan
 from ultrafast_domain.trial import TrialPlan
 from ultrafast_memory.agent_runtime.main_agent_loop import run_main_agent_turn
 from ultrafast_memory.agent_runtime.planner import MainAgentPlanner
+from ultrafast_memory.agent_runtime.task_intake import prepare_task_context
 from ultrafast_memory.apps.api.main import app
 
 
@@ -128,7 +129,7 @@ class CompletePlanLLM:
             action = {
                 "action": "call_tool",
                 "decision_summary": "验证 Main Agent 选择的第一轮探索参数",
-                "tool_name": "propose_exploratory_parameters",
+                "tool_name": "recommend_process_parameters",
                 "arguments": {
                     "task_context": {"material": "氧化锆陶瓷"},
                     "process_plan": process_plan,
@@ -140,7 +141,7 @@ class CompletePlanLLM:
                         },
                     },
                     "evidence_summary": "测试探索假设",
-                    "intended_use": "trial",
+                    "allow_llm_fallback": True,
                     "candidate": {"laser_power_W": 1.1, "layer_step_um": 10},
                 },
             }
@@ -165,14 +166,12 @@ class CompletePlanLLM:
 
 
 def test_task_understanding_single_pass() -> None:
-    action = MainAgentPlanner(None).decide(
-        message="在3mm厚的氧化锆陶瓷上加工一个直径1mm的通孔",
-        working_context={"task": {}},
+    preparation = prepare_task_context(
+        "在3mm厚的氧化锆陶瓷上加工一个直径1mm的通孔",
+        {"task": {}},
     )
 
-    assert action.action == "load_skill"
-    assert action.skill_name == "task_understanding"
-    task = action.context_updates["task"]
+    task = preparation.context_updates["task"]
     assert task["material"]["name"] == "氧化锆陶瓷"
     assert task["workpiece"]["thickness_mm"] == 3
     assert task["process_intent"] == "through_hole_drilling"
@@ -190,24 +189,23 @@ def test_no_repeated_question() -> None:
         }
     }
 
-    action = MainAgentPlanner(None).decide(message="通孔直径改成1mm", working_context=context)
+    preparation = prepare_task_context("通孔直径改成1mm", context)
 
-    assert action.action == "load_skill"
-    assert action.context_updates == {"task": {"geometry": {
-        "dimensions": {"diameter_mm": 1.0}, "description": "直径 1 mm 通孔",
-    }}}
-    assert "厚度" not in (action.message or "")
+    assert preparation.context_updates["task"] == {"geometry": {
+        "dimensions": {"diameter_mm": 1.0},
+        "description": "直径 1 mm 通孔",
+        "through": True,
+    }}
+    assert not preparation.blocking_fields
 
 
 def test_blocking_question_only() -> None:
-    action = MainAgentPlanner(None).decide(
-        message="在铝基碳化硅板材上加工5×5mm矩形槽",
-        working_context={"task": {}},
+    preparation = prepare_task_context(
+        "在铝基碳化硅板材上加工5×5mm矩形槽",
+        {"task": {}},
     )
 
-    assert action.action == "ask_user"
-    assert action.message == "矩形槽的目标深度是多少，还是要求贯穿？"
-    assert action.message.count("？") == 1
+    assert preparation.blocking_fields == ["geometry.depth_mm"]
 
 
 def test_reminder_is_not_question(isolated_root) -> None:

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from typing import Any
 
 from ultrafast_memory.chat.router.debug_commands import handle_debug_command
-from ultrafast_memory.chat.router.llm_router import llm_route
 from ultrafast_memory.chat.router.manual_override import parse_manual_override
 from ultrafast_memory.chat.router.rule_router import rule_route
 from ultrafast_memory.chat.router.schemas import RoutePlan, fallback_route
@@ -19,9 +16,8 @@ def route_message(
     message: str,
     session_id: str,
     message_id: str | None = None,
-    use_llm_router: bool = True,
-    model_call_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> RoutePlan:
+    """Return deterministic, non-binding capability hints without an LLM call."""
     create_or_get_session_state(session_id)
     debug_result = handle_debug_command(message, session_id)
     if debug_result and message.strip() != "/no_skill":
@@ -54,21 +50,11 @@ def route_message(
         return plan
 
     state = create_or_get_session_state(session_id)
-    candidate = rule_route(message, state)
-    if candidate and candidate.route_source == "session_state":
-        plan = candidate
-    elif candidate and candidate.confidence >= 0.9:
-        plan = candidate
-    elif use_llm_router:
-        plan = llm_route(message, state, candidate, model_call_sink=model_call_sink)
-    else:
-        plan = candidate or fallback_route()
+    plan = rule_route(message, state) or fallback_route()
     if not plan:
         plan = fallback_route()
     if plan.route_source == "unknown":
-        plan.route_source = "hybrid_router"
-    elif plan.route_source == "rule_router" and (not candidate or candidate.confidence < 0.9):
-        plan.route_source = "hybrid_router"
+        plan.route_source = "rule_router"
     _save_and_apply(session_id, message_id, plan)
     return plan
 

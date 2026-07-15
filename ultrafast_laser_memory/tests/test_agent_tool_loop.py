@@ -16,20 +16,23 @@ class LoopLLM:
     def chat(self, messages, **kwargs):
         self.index += 1
         actions = [
-            {"action": "load_skill", "decision_summary": "需要参数能力", "skill_name": "parameter_recommendation",
-             "tool_name": None, "arguments": {}, "message": None},
-            {"action": "call_tool", "decision_summary": "先读取设备", "skill_name": None,
+            {"action": "call_tool", "decision_summary": "先读取设备",
              "tool_name": "get_equipment_context", "arguments": {}, "message": None},
-            {"action": "final_answer", "decision_summary": "已获得观察", "skill_name": None,
+            {"action": "final_answer", "decision_summary": "已获得观察",
              "tool_name": None, "arguments": {}, "message": "完成"},
         ]
         return {"content": json.dumps(actions[self.index - 1], ensure_ascii=False)}
 
 
-def test_agent_runs_load_tool_observation_answer_loop(isolated_root):
+def test_agent_activates_skill_without_extra_model_round(isolated_root):
     session_id = TestClient(app).post("/chat/sessions", json={}).json()["session_id"]
-    result = run_main_agent_turn(session_id=session_id, message="读取设备后建议参数", message_id="m", client=LoopLLM())
-    assert result["active_skills"] == ["parameter_recommendation"]
+    llm = LoopLLM()
+    result = run_main_agent_turn(
+        session_id=session_id, message="读取设备后建议参数", message_id="m", client=llm,
+        suggested_skills=["parameter_recommendation"],
+    )
+    assert "parameter_recommendation" in result["active_skills"]
+    assert llm.index == 2
     assert result["tool_calls"][0]["result"]["tool_name"] == "get_equipment_context"
     assert result["content"] == "完成"
 

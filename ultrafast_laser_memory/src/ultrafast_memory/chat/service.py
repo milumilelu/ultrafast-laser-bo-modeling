@@ -142,20 +142,10 @@ def handle_chat(
             trace_mode=_public_trace_mode(session_id),
         )
 
-    def publish_router_model_call(call: dict[str, Any]) -> None:
-        _emit_live(event_sink, _model_call_trace(
-            session_id=session_id,
-            message_id=user_message["message_id"],
-            call=call,
-            stage="routing",
-            component_label="Skill 路由",
-        ))
-
     route_plan = route_message(
         routing_message,
         session_id,
         user_message["message_id"],
-        model_call_sink=publish_router_model_call,
     )
     selected_skill = route_plan.primary_skill
     route_event = _record_route_decision_trace(
@@ -171,7 +161,7 @@ def handle_chat(
     except Exception:  # noqa: BLE001 - audit persistence cannot block foreground
         pass
     audit_trace = [{
-        "step": "hybrid_router",
+        "step": "rule_skill_hints",
         "status": "success",
         "selected_skill": selected_skill,
         "route_source": route_plan.route_source,
@@ -228,7 +218,7 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
         "stage": "request_intake",
         "progress_percent": None,
         "status": "running",
-        "message": "正在解析输入并确定执行路由。",
+        "message": "正在解析输入并准备主 Agent。",
     }
 
     queue: Queue[tuple[str, Any]] = Queue()
@@ -249,7 +239,7 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     wait_target = {
         "wait_kind": "stage",
         "wait_name": "request_intake",
-        "wait_component": "请求解析与路由选择",
+        "wait_component": "请求解析与主 Agent 上下文准备",
     }
     while response is None:
         try:
@@ -307,7 +297,7 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
             "secondary_skills": route.get("secondary_skills") or [],
             "confidence": route.get("confidence"), "route_source": route.get("route_source"),
         }
-        yield {"type": "trace", "step": "hybrid_router", "status": "success", "selected_skill": route.get("primary_skill")}
+        yield {"type": "trace", "step": "rule_skill_hints", "status": "success", "selected_skill": route.get("primary_skill")}
     for item in response.audit_trace:
         if item.get("status") == "fallback":
             yield {
@@ -336,38 +326,6 @@ def _emit_live(
         sink(event)
     except Exception:  # noqa: BLE001 - observability must not break domain execution
         return
-
-
-def _model_call_trace(
-    *, session_id: str, message_id: str | None, call: dict[str, Any],
-    stage: str, component_label: str,
-) -> dict[str, Any]:
-    provider = str(call.get("provider") or "unknown-provider")
-    model = str(call.get("model") or "unknown-model")
-    attempt = int(call.get("attempt") or 1)
-    model_name = f"{provider}/{model}"
-    summary = f"正在等待模型 {model_name} 完成{component_label}（第 {attempt} 次调用）。"
-    try:
-        return record_agent_trace_event(
-            session_id=session_id,
-            message_id=message_id,
-            event_type="model_call_started",
-            stage=stage,
-            title=f"调用模型 {model_name}",
-            summary=summary,
-            status="running",
-            payload=call,
-        )
-    except Exception:  # noqa: BLE001 - observability cannot block routing
-        return {
-            "event_id": stable_id("model-call", session_id, message_id or "", stage, utc_now_iso()),
-            "event_type": "model_call_started",
-            "stage": stage,
-            "title": f"调用模型 {model_name}",
-            "summary": summary,
-            "status": "running",
-            "payload": call,
-        }
 
 
 def _wait_target_from_event(event: dict[str, Any], current: dict[str, str]) -> dict[str, str]:
@@ -421,7 +379,6 @@ def _wait_summary(target: dict[str, str]) -> str:
     if kind == "model":
         attempt = target.get("wait_attempt") or "1"
         labels = {
-            "llm_router": "Skill 路由",
             "main_agent_planner": "主 Agent 规划",
         }
         label = labels.get(component, component)
@@ -465,11 +422,10 @@ def _record_route_decision_trace(
             message_id=message_id,
             event_type="decision",
             stage=route_plan.workflow_stage,
-            title="路由决策",
+            title="能力提示",
             summary=route_plan.reason,
             progress=progress,
             skill=route_plan.primary_skill,
-            tool="route_planner",
             input_summary=message[:240],
             output_summary=f"primary_skill={route_plan.primary_skill}; route_source={route_plan.route_source}",
             status="completed",
@@ -478,8 +434,8 @@ def _record_route_decision_trace(
         return {
             "event_id": stable_id("route-event", session_id, message_id or "", utc_now_iso()),
             "event_type": "decision", "stage": route_plan.workflow_stage,
-            "title": "路由决策", "summary": route_plan.reason,
-            "skill": route_plan.primary_skill, "tool": "route_planner", "status": "completed",
+            "title": "能力提示", "summary": route_plan.reason,
+            "skill": route_plan.primary_skill, "status": "completed",
         }
 
 

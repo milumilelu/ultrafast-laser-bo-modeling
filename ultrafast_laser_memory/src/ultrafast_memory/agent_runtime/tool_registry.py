@@ -28,9 +28,7 @@ from ultrafast_memory.trial.service import TrialApplicationService
 FOREGROUND_SAFE_TOOL_NAMES = {
     "get_equipment_context",
     "search_knowledge",
-    "recommend_parameters_bo",
-    "recommend_parameters_rag",
-    "propose_exploratory_parameters",
+    "recommend_process_parameters",
     "manage_trial",
     "manage_process",
     "record_process_result",
@@ -49,6 +47,15 @@ def build_main_agent_tool_registry() -> ToolRegistry:
             "Search purpose-governed internal evidence with review authority and citations.",
             _search,
             cache="turn",
+        ),
+        _contract(
+            "recommend_process_parameters",
+            "Apply the governed BO, reviewed-RAG, then controlled-exploration policy.",
+            _recommend_process_parameters,
+            timeout=90_000,
+            input_schema={"type": "object", "required": [
+                "task_context", "process_plan", "variables", "equipment_context",
+            ]},
         ),
         _contract("recommend_parameters_bo", "Compute provenance-bearing process setpoints from validated matching BO samples.", _recommend_bo, timeout=60_000, required=("equipment_snapshot.tunable_capabilities",)),
         _contract(
@@ -247,6 +254,40 @@ def _parameter_result(*, status: str, parameters: dict[str, Any], source_type: s
     }
 
 
+class RecommendationAuthorityPolicy:
+    """Translate BO evidence into trial/formal authority without status inflation."""
+
+    @staticmethod
+    def assess(raw: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        mode = str(raw.get("model_status") or "blocked")
+        readiness = raw.get("readiness_report") or {}
+        metrics = readiness.get("validation_metrics") or {}
+        matched = int(raw.get("sample_count") or 0)
+        effective = int(readiness.get("complete_feature_count") or 0)
+        uncertainty_calibrated = bool(readiness.get("uncertainty_calibrated"))
+        model_validated = bool(metrics) and uncertainty_calibrated
+        if mode == "data_driven_bo" and raw.get("bo_invoked") and model_validated:
+            support = "supported"
+        elif mode in {"data_driven_bo", "hybrid_rule_bo", "rule_based_cold_start"}:
+            support = "partially_supported"
+        else:
+            support = "insufficient"
+        formal = support == "supported" and _verified_trial_unlocked(context)
+        return {
+            "support_status": support,
+            "model_mode": mode,
+            "matched_sample_count": matched,
+            "effective_sample_count": effective,
+            "context_match_score": 1.0 if matched else 0.0,
+            "fidelity_level": "not_reported",
+            "model_validation": metrics,
+            "uncertainty_calibrated": uncertainty_calibrated,
+            "validated": support == "supported",
+            "allowed_for_trial": support != "insufficient",
+            "allowed_for_formal_process": formal,
+        }
+
+
 def _recommend_bo(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     equipment = _equipment_snapshot(context)
     safety_bounds = safety_bounds_from_equipment(equipment)
@@ -255,18 +296,113 @@ def _recommend_bo(payload: dict[str, Any], context: dict[str, Any]) -> dict[str,
         {**equipment, "machine_bounds": safety_bounds},
         payload.get("approved_priors") or [],
     )
-    status = str(raw.get("status") or "success")
+    authority = RecommendationAuthorityPolicy.assess(raw, context)
     parameters = raw.get("parameters") or raw.get("candidate") or raw.get("recommended_parameters") or {}
+    status = (
+        "success" if authority["support_status"] == "supported"
+        else "partial_support" if parameters and authority["support_status"] == "partially_supported"
+        else "insufficient_data"
+    )
     return _parameter_result(
-        status="insufficient_data" if status == "insufficient_data" else "success",
+        status=status,
         parameters=parameters, source_type="bo",
         source_refs=list(raw.get("source_refs") or raw.get("sample_ids") or []),
-        data_support={"raw_status": status, "sample_count": raw.get("sample_count")},
+        data_support=authority,
         uncertainty=raw.get("uncertainty") or {}, limitations=list(raw.get("limitations") or []),
-        evidence_level="validated_samples", authority_level="bo_validated_samples",
+        evidence_level=authority["support_status"],
+        authority_level=f"bo_{authority['model_mode']}",
         equipment=equipment, variables=list(payload.get("variables") or parameters),
-        validated=status != "insufficient_data", allowed_for_formal_process=status != "insufficient_data",
+        validated=authority["validated"],
+        allowed_for_trial=authority["allowed_for_trial"],
+        allowed_for_formal_process=authority["allowed_for_formal_process"],
     ) | {"raw_result": raw}
+
+
+def _recommend_process_parameters(
+    payload: dict[str, Any], context: dict[str, Any],
+) -> dict[str, Any]:
+    """The sole foreground parameter entrypoint; ordering is not model-selectable."""
+    trace: list[dict[str, Any]] = []
+    bo = _recommend_bo(payload, context)
+    bo_support = str((bo.get("data_support") or {}).get("support_status") or "insufficient")
+    bo_mode = str((bo.get("data_support") or {}).get("model_mode") or "blocked")
+    trace.append({
+        "step": "bo_parameter_recommendation",
+        "status": bo_support,
+        "model_mode": bo_mode,
+    })
+    if bo_support == "supported":
+        return _with_policy_trace(bo, trace, "bo")
+
+    rag = _recommend_rag(payload, context)
+    rag_usable = rag.get("status") == "success" and bool(rag.get("process_parameters"))
+    trace.append({
+        "step": "rag_parameter_recommendation",
+        "status": "supported" if rag_usable else str(rag.get("status") or "insufficient_data"),
+    })
+    if bo_mode == "hybrid_rule_bo" and bo.get("process_parameters"):
+        result = dict(bo)
+        if rag_usable:
+            result.setdefault("limitations", []).append(
+                "RAG 证据已检查，但未作为 BO 先验注入：只有经治理批准的 prior 才能改变 BO 搜索域。"
+            )
+            result["rag_prior_evidence"] = {
+                "source_refs": rag.get("source_refs") or [],
+                "authority_level": rag.get("authority_level"),
+            }
+        return _with_policy_trace(result, trace, "bo")
+    if rag_usable:
+        return _with_policy_trace(rag, trace, "reviewed_rag")
+    if bo.get("process_parameters") and bo.get("allowed_for_trial"):
+        return _with_policy_trace(bo, trace, "bo_cold_start")
+
+    allow_fallback = bool(payload.get("allow_llm_fallback"))
+    candidate = payload.get("candidate")
+    if allow_fallback and isinstance(candidate, dict) and candidate:
+        exploratory = _exploratory({**payload, "intended_use": "trial"}, context)
+        trace.append({
+            "step": "llm_fallback_parameter",
+            "status": str(exploratory.get("status") or "validation_error"),
+        })
+        return _with_policy_trace(exploratory, trace, "llm_exploration")
+    trace.append({
+        "step": "llm_fallback_parameter",
+        "status": "not_called",
+        "reason": "fallback_not_enabled_or_candidate_missing",
+    })
+    return {
+        "status": "insufficient_data",
+        "summary": "BO 与审核 RAG 均未提供可用候选；未满足受控探索条件。",
+        "process_parameters": {},
+        "strategy_parameters": {},
+        "allowed_for_trial": False,
+        "allowed_for_formal_process": False,
+        "internal_trace": trace,
+        "policy_version": "bo-rag-exploration-v1",
+    }
+
+
+def _with_policy_trace(
+    result: dict[str, Any], trace: list[dict[str, Any]], selected_source: str,
+) -> dict[str, Any]:
+    return {
+        **result,
+        "selected_source": selected_source,
+        "internal_trace": trace,
+        "policy_version": "bo-rag-exploration-v1",
+    }
+
+
+def _verified_trial_unlocked(context: dict[str, Any]) -> bool:
+    working = context.get("working_context") or {}
+    for item in reversed(list(working.get("observations") or [])):
+        data = item.get("data") if isinstance(item, dict) else None
+        if not isinstance(data, dict):
+            continue
+        decision = data.get("formal_process_decision") or {}
+        if decision.get("unlocked") is True or data.get("formal_process_unlocked") is True:
+            return True
+    return False
 
 
 def _recommend_rag(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

@@ -100,7 +100,7 @@ class SkillRegistry:
         return [self._descriptors[name] for name in sorted(self._descriptors)]
 
     def catalog_for_agent(self) -> list[dict[str, Any]]:
-        """Small discovery catalog; full guidance is returned only by load_skill."""
+        """Small discovery catalog; runtime activation injects full guidance directly."""
         return [
             {
                 "name": item.name,

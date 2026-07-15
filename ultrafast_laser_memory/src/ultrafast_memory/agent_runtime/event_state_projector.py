@@ -46,7 +46,7 @@ class EventStateProjector:
         final_action = dict(agent_result.get("final_action") or {})
         action = str(final_action.get("action") or "unknown")
         waiting_user = action == "ask_user"
-        nonterminal = action in {"call_tool", "load_skill", "unload_skill"}
+        nonterminal = action == "call_tool"
         status = "waiting_user" if waiting_user else "execution_error" if nonterminal else "completed"
         progress = {
             "workflow_type": "main_agent",
