@@ -135,6 +135,7 @@ class MainAgentPlanner:
             trial = TrialPlan.model_validate(
                 updates.get("trial_plan") or (working_context or {}).get("trial_plan")
             )
+            MainAgentPlanner._validate_self_contained_plan_message(action.message or "")
             if updates.get("trial_plan") is not None:
                 parameter_truth = MainAgentPlanner._latest_parameter_truth(recent_tool_results or [])
                 if not parameter_truth:
@@ -170,6 +171,28 @@ class MainAgentPlanner:
                 expected = parameter_truth[name]
                 if any(actual.get(field) != expected.get(field) for field in compared_fields):
                     raise ValueError(f"trial_parameter_provenance_mismatch:{name}")
+
+    @staticmethod
+    def _validate_self_contained_plan_message(message: str) -> None:
+        lowered = message.lower()
+        if len(message.strip()) < 80 or any(
+            marker in message for marker in ("详见上下文", "见上下文中的", "见 Context", "见context")
+        ):
+            raise ValueError("final_answer_must_be_self_contained")
+        required_concepts = {
+            "strategy": ("策略", "路线", "strategy"),
+            "trial": ("试切", "trial"),
+            "evaluation": ("检测", "评价", "测量", "判据"),
+            "adaptation": ("调整", "迭代", "下一轮"),
+            "provenance": ("来源", "可信", "未经验证", "provenance"),
+            "risk": ("风险", "警告", "提醒"),
+        }
+        missing = [
+            name for name, markers in required_concepts.items()
+            if not any(marker.lower() in lowered for marker in markers)
+        ]
+        if missing:
+            raise ValueError(f"final_answer_missing_concepts:{','.join(missing)}")
 
     @staticmethod
     def _complete_plan_required(working_context: dict[str, Any]) -> bool:
@@ -307,6 +330,8 @@ class MainAgentPlanner:
             "final_answer 必须综合任务、设备、策略、参数、检测、判据、调整逻辑、来源和风险；"
             "同时把可验证的结构分别写入 context_updates.process_plan 和 context_updates.trial_plan。"
             "形成有用 TrialPlan 后必须 final_answer，不得自动追加是否接受、是否开始或是否还有要求。"
+            "最终用户回复必须自包含任务、策略、试切参数、检测与判据、调整逻辑、来源、风险；"
+            "不得让用户去看内部 context_updates、process_plan 或 trial_plan。"
             "新生成的 TrialPlan 候选参数必须逐字段复制本轮成功参数 Tool 的 process_parameters，"
             "不得改写 value、source_type、authority_level、uncertainty 或权限。"
             "只在设备硬安全、明确 unsafe 或不可逆动作未获本次确认时阻断。"
@@ -533,7 +558,8 @@ class MainAgentPlanner:
         return (
             f"previous_output_errors={json.dumps(cls._safe_error_details(exc), ensure_ascii=False)}\n"
             "修复要求：只返回一个行动 JSON；context_updates 必须是对象；不要调用未注册的状态写入工具；"
-            "ask_user 只允许真正阻断任务的最少问题；final_answer 加工方案必须同时提供完整 process_plan 和 trial_plan。"
+            "ask_user 只允许真正阻断任务的最少问题；final_answer 加工方案必须同时提供完整 process_plan 和 trial_plan，"
+            "且用户文本必须自包含策略、参数、检测判据、调整、来源和风险，不得引用内部上下文代替正文。"
         )
 
     @staticmethod

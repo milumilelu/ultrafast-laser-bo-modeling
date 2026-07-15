@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ultrafast_domain.process import ProcessPlan
@@ -335,3 +336,19 @@ def test_planning_cannot_overwrite_established_task_facts_without_user_correctio
         "assumptions": ["new explicit assumption"],
     }
     assert corrected["context_updates"]["task"]["material"]["name"] == "rewritten-material"
+
+
+def test_final_plan_message_must_be_self_contained() -> None:
+    incomplete = (
+        "任务和策略已形成。第一轮试切参数仅供验证，未经审核。"
+        "详细方案见上下文中的 process_plan 和 trial_plan。"
+    )
+    complete = (
+        "任务采用任务相关的加工策略与路线。第一轮试切参数均未经验证，来源为探索假设。"
+        "检测与评价包括目标指标和成功判据；出现异常时按停止条件处理。"
+        "下一轮根据测量结果调整选定变量并继续迭代。风险与警告已列出，正式加工前必须验证。"
+    )
+
+    with pytest.raises(ValueError, match="self_contained"):
+        MainAgentPlanner._validate_self_contained_plan_message(incomplete)
+    MainAgentPlanner._validate_self_contained_plan_message(complete)
