@@ -82,7 +82,8 @@ class EventStateProjector:
         if equipment_call:
             equipment = dict((equipment_call.get("result") or {}).get("data") or {})
             workflow_state["equipment_profile_used"] = equipment
-            workflow_state["machine_bounds"] = dict(equipment.get("machine_bounds") or {})
+            workflow_state["fixed_equipment_conditions"] = dict(equipment.get("fixed_conditions") or {})
+            workflow_state["tunable_equipment_capabilities"] = dict(equipment.get("tunable_capabilities") or {})
         next_action = {
             "action_type": "provide_clarification" if waiting_user else "execution_aborted" if nonterminal else "answer_complete",
             "required_fields": list(workflow_state.get("missing_slots") or []),

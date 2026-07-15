@@ -4,7 +4,7 @@ from ultrafast_memory.agent_runtime.planner import MainAgentPlanner
 from ultrafast_memory.agent_runtime.tool_registry import build_main_agent_tool_registry
 
 
-def test_invalid_structured_action_retries_once_without_schema_mode():
+def test_planner_retry_actually_runs():
     class RetryLLM:
         provider = "test"
         model = "retry"
@@ -39,7 +39,7 @@ def test_provider_actions_array_is_normalized_to_one_action():
     assert normalized["context_updates"]["task"]["material"]["name"] == "diamond"
 
 
-def test_single_question_is_retried_as_three_to_five_question_batch():
+def test_single_blocking_question_is_accepted_without_retry():
     class QuestionRetryLLM:
         provider = "test"
         model = "question-retry"
@@ -49,13 +49,8 @@ def test_single_question_is_retried_as_three_to_five_question_batch():
 
         def chat(self, messages, **kwargs):
             self.calls += 1
-            message = (
-                "槽深是多少？"
-                if self.calls == 1 else
-                "1. 槽深是多少？\n2. 工件总厚度是多少？\n3. 尺寸公差是多少？"
-            )
             return {"content": json.dumps({
-                "action": "ask_user", "decision_summary": "确认关键歧义", "message": message,
+                "action": "ask_user", "decision_summary": "确认关键歧义", "message": "槽深是多少？",
             }, ensure_ascii=False)}
 
     llm = QuestionRetryLLM()
@@ -63,6 +58,6 @@ def test_single_question_is_retried_as_three_to_five_question_batch():
         message="加工矩形槽", working_context={"task": {}},
         available_tools=build_main_agent_tool_registry().schemas_for_agent(),
     )
-    assert llm.calls == 2
+    assert llm.calls == 1
     assert action.action == "ask_user"
-    assert 3 <= action.message.count("？") <= 5
+    assert action.message == "槽深是多少？"

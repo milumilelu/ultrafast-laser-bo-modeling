@@ -1,3 +1,3 @@
-from ultrafast_domain.process.models import ProcessPlan
+from ultrafast_domain.process.models import ParameterValue, ProcessPlan
 
-__all__ = ["ProcessPlan"]
+__all__ = ["ParameterValue", "ProcessPlan"]

@@ -45,9 +45,10 @@ def test_cfrp_task_updates_context_without_state_tool(isolated_root):
 
     assert result["task_spec"] == {
         "material": {"name": "CFRP", "description": "碳纤维复合板"},
+        "workpiece": {"thickness_mm": 2.0},
         "process_intent": "cutting",
-        "geometry": {"feature_type": "sheet_cut", "workpiece_thickness_mm": 2.0},
+        "geometry": {"feature_type": "sheet_cut"},
     }
     assert result["final_action"]["action"] == "final_answer"
     assert result["tool_calls"] == []
-    assert "激光功率" in result["content"]
+    assert "模型当前不可用" in result["content"]

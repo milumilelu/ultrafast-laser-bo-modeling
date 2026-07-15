@@ -18,8 +18,8 @@ def test_task_intake_progress_after_chat(isolated_root):
     response = handle_chat(ChatRequest(message="我想加工金刚石CRL，Ra小于460nm"))
 
     assert response.progress["progress_percent"] is None
-    assert response.current_stage == "ask_user"
-    assert response.next_required_action["action_type"] == "provide_clarification"
+    assert response.current_stage == "final_answer"
+    assert response.next_required_action["action_type"] == "answer_complete"
     assert response.workflow_state["clarification_round"] <= 3
 
 
@@ -28,9 +28,9 @@ def test_clarification_round_one_progress_percent(isolated_root):
 
     response = handle_chat(ChatRequest(message="我想加工普通任务"))
 
-    assert response.progress["current_stage"] == "ask_user"
+    assert response.progress["current_stage"] == "final_answer"
     assert response.progress["progress_percent"] is None
-    assert response.next_required_action["action_type"] == "provide_clarification"
+    assert response.next_required_action["action_type"] == "answer_complete"
 
 
 def test_single_agent_chain_reuses_canonical_session_task_spec(isolated_root):
@@ -51,7 +51,7 @@ def test_llm_failure_keeps_state_without_parser_stall(isolated_root):
     third = handle_chat(ChatRequest(session_id=first.session_id, message="还是金刚石，暂时没有设备参数"))
 
     assert third.workflow_state["clarification_round"] <= 3
-    assert third.workflow_state["current_stage_code"] == "ask_user"
+    assert third.workflow_state["current_stage_code"] == "final_answer"
     assert third.workflow_state["task_spec"]["material"]["name"] == "diamond"
     assert "现有任务状态未被修改" in third.assistant_message
     assert "严格字段格式" not in third.assistant_message

@@ -1,4 +1,11 @@
-from ultrafast_domain.trial.models import TrialAssessment, TrialDecision, TrialMode, TrialPlanDraft
+from ultrafast_domain.trial.models import (
+    ParameterCandidate,
+    TrialAssessment,
+    TrialDecision,
+    TrialMode,
+    TrialPlan,
+    TrialPlanDraft,
+)
 from ultrafast_domain.trial.policy import (
     assess_trial_need,
     design_trial_plan,
@@ -10,6 +17,8 @@ __all__ = [
     "TrialAssessment",
     "TrialDecision",
     "TrialMode",
+    "ParameterCandidate",
+    "TrialPlan",
     "TrialPlanDraft",
     "assess_trial_need",
     "design_trial_plan",

@@ -20,7 +20,7 @@ def test_bo_tool_reports_missing_action_context_without_active_profile(isolated_
     )
 
     assert execution.status == "insufficient_data"
-    assert "equipment_snapshot.machine_bounds" in execution.output["missing"]
+    assert "equipment_snapshot.tunable_capabilities" in execution.output["missing"]
 
 
 def test_bo_reads_active_machine_bounds(isolated_root):

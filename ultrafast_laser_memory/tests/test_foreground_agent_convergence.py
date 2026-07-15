@@ -65,10 +65,92 @@ def test_repeated_tool_observation_is_reused_then_loop_is_stopped(isolated_root)
                                             "tool_name": "get_equipment_context", "arguments": {}})}
 
     result = run_main_agent_turn(session_id=_session(), message="读取设备", message_id="repeat", client=RepeatingLLM())
-    assert result["final_action"]["action"] == "ask_user"
+    assert result["final_action"]["action"] == "final_answer"
     assert len(result["tool_calls"]) == 1
     assert any(event["event_type"] == "tool_cache_hit" for event in result["events"])
     assert any(event["event_type"] == "probable_agent_loop" for event in result["events"])
+
+
+def test_existing_context_reuse(isolated_root, monkeypatch):
+    from ultrafast_memory.agent_runtime import tool_registry as tool_module
+
+    calls = 0
+    original = tool_module._equipment
+
+    def counted_equipment(payload, context):
+        nonlocal calls
+        calls += 1
+        return original(payload, context)
+
+    class ReadThenAnswerLLM:
+        provider = "test"
+        model = "cache"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            action = (
+                {"action": "call_tool", "decision_summary": "读取设备",
+                 "tool_name": "get_equipment_context", "arguments": {}}
+                if self.calls == 1 else
+                {"action": "final_answer", "decision_summary": "完成", "message": "设备上下文可用。"}
+            )
+            return {"content": json.dumps(action, ensure_ascii=False)}
+
+    monkeypatch.setattr(tool_module, "_equipment", counted_equipment)
+    session_id = _session()
+    first = run_main_agent_turn(
+        session_id=session_id, message="读取设备", message_id="cache-1", client=ReadThenAnswerLLM(),
+    )
+    second = run_main_agent_turn(
+        session_id=session_id, message="再次读取设备", message_id="cache-2", client=ReadThenAnswerLLM(),
+    )
+
+    assert len(first["tool_calls"]) == 1
+    assert second["tool_calls"] == []
+    assert calls == 1
+    assert any(event["event_type"] == "tool_cache_hit" for event in second["events"])
+
+
+def test_background_failure_does_not_block(isolated_root, monkeypatch):
+    class ResultThenAnswerLLM:
+        provider = "test"
+        model = "sidecar-failure"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            action = (
+                {"action": "call_tool", "decision_summary": "记录测量",
+                 "tool_name": "record_process_result",
+                 "arguments": {"measurements": {"quality": "pass"}}}
+                if self.calls == 1 else
+                {"action": "final_answer", "decision_summary": "结果已分析", "message": "前台结果正常返回。"}
+            )
+            return {"content": json.dumps(action, ensure_ascii=False)}
+
+    monkeypatch.setattr(
+        "ultrafast_memory.agent_runtime.working_context.ContextPersistenceService.persist",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("persistence failed")),
+    )
+    monkeypatch.setattr(
+        "ultrafast_memory.agent_runtime.main_agent_loop._run_result_postprocess_hooks",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("candidate/report sidecar failed")),
+    )
+
+    result = run_main_agent_turn(
+        session_id=_session(), message="记录当前测量并给出结论",
+        message_id="sidecar", client=ResultThenAnswerLLM(),
+    )
+
+    assert result["content"] == "前台结果正常返回。"
+    assert result["final_action"]["action"] == "final_answer"
+    assert any("持久化失败" in warning for warning in result["warnings"])
+    assert any("后处理失败" in warning for warning in result["warnings"])
 
 
 def test_trial_evaluation_needs_no_approval(isolated_root, monkeypatch):

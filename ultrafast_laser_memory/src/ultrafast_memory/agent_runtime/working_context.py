@@ -22,7 +22,19 @@ class WorkingContext(BaseModel):
 
     def apply(self, updates: dict[str, Any]) -> list[str]:
         changed: list[str] = []
-        _deep_merge(self.__dict__, deepcopy(updates), changed)
+        for key, value in deepcopy(updates).items():
+            current = getattr(self, key, None)
+            if isinstance(current, dict) and isinstance(value, dict):
+                merged = deepcopy(current)
+                _deep_merge(merged, value, changed, key)
+                setattr(self, key, merged)
+            elif isinstance(current, (dict, list)) and not isinstance(value, type(current)):
+                # Terse LLM projections must not destroy richer established facts.
+                # A correction can still replace them by submitting the same structured type.
+                continue
+            elif current != value:
+                setattr(self, key, value)
+                changed.append(key)
         return changed
 
 
@@ -90,6 +102,8 @@ def _deep_merge(target: dict[str, Any], updates: dict[str, Any], changed: list[s
         current = target.get(key)
         if isinstance(current, dict) and isinstance(value, dict):
             _deep_merge(current, value, changed, path)
+        elif isinstance(current, (dict, list)) and not isinstance(value, type(current)):
+            continue
         elif current != value:
             target[key] = value
             changed.append(path)

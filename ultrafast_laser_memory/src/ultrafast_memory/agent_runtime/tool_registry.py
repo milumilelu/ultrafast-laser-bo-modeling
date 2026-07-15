@@ -5,11 +5,16 @@ from typing import Any
 
 from ultrafast_agent.runtime import ToolContract, ToolRegistry
 from ultrafast_bo.application.compatibility import LegacyBOCompatibilityAdapter
+from ultrafast_domain.process import ParameterValue
 from ultrafast_integrations.storage.read_models import list_bo_training_samples
 from ultrafast_memory.chat.session_state import get_session_state, update_session_state
 from ultrafast_memory.core.ids import stable_id
 from ultrafast_memory.core.time_utils import utc_now_iso
-from ultrafast_memory.equipment.bounds import build_machine_bounds
+from ultrafast_memory.equipment.bounds import (
+    PARAMETER_UNITS,
+    build_machine_bounds,
+    safety_bounds_from_equipment,
+)
 from ultrafast_memory.ingestion.pipeline import ingest_file
 from ultrafast_memory.knowledge_bootstrap.service import bootstrap_external_knowledge as bootstrap_service
 from ultrafast_memory.process_workflow.closure import bo_sample_eligibility, quality_decision
@@ -37,11 +42,19 @@ BASE_TOOL_NAMES = set(FOREGROUND_SAFE_TOOL_NAMES)
 def build_main_agent_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     contracts = (
-        _contract("get_equipment_context", "Read authoritative equipment revision and physical bounds.", _equipment, default=True, cache="equipment_revision"),
+        _contract("get_equipment_context", "Read authoritative fixed equipment conditions and tunable capabilities.", _equipment, default=True, cache="equipment_revision"),
         _contract("search_knowledge", "Search reviewed internal knowledge with traceable evidence.", _search, cache="turn"),
-        _contract("recommend_parameters_bo", "Compute a bounded BO recommendation from validated matching samples.", _recommend_bo, timeout=60_000, required=("equipment_snapshot.machine_bounds",)),
+        _contract("recommend_parameters_bo", "Compute provenance-bearing process setpoints from validated matching BO samples.", _recommend_bo, timeout=60_000, required=("equipment_snapshot.tunable_capabilities",)),
         _contract("recommend_parameters_rag", "Retrieve reviewed evidence for a conservative parameter candidate.", _recommend_rag),
-        _contract("propose_exploratory_parameters", "Create an explicitly exploratory trial-only candidate inside equipment bounds.", _exploratory),
+        _contract(
+            "propose_exploratory_parameters",
+            "Safety-check a Main-Agent exploratory hypothesis for selected ProcessPlan variables.",
+            _exploratory,
+            input_schema={"type": "object", "required": [
+                "task_context", "process_plan", "variables", "equipment_context",
+                "evidence_summary", "intended_use", "candidate",
+            ]},
+        ),
         _contract("manage_trial", "Create, read, start, record, evaluate, or close the single trial lifecycle.", _manage_trial, side="domain_write"),
         _contract("manage_process", "Prepare, start, checkpoint, record, complete, or abort formal processing.", _manage_process, side="domain_write"),
         _contract("record_process_result", "Record supplied observations without inventing missing measurements.", _record_result, side="session_state_write"),
@@ -56,11 +69,13 @@ def build_main_agent_tool_registry() -> ToolRegistry:
 
 def _contract(name: str, purpose: str, handler: Any, *, timeout: int = 30_000,
               side: str = "none", approval: bool = False, default: bool = False,
-              cache: str = "none", required: tuple[str, ...] = ()) -> ToolContract:
+              cache: str = "none", required: tuple[str, ...] = (),
+              input_schema: dict[str, Any] | None = None) -> ToolContract:
     return ToolContract(
         name=name, purpose=purpose, handler=handler, timeout_ms=timeout,
         side_effect_level=side, requires_human_approval=approval,
         exposed_by_default=default, cache_policy=cache, requires_context=required,
+        input_schema=input_schema or {},
     )
 
 
@@ -73,17 +88,32 @@ def _legacy_task(context: dict[str, Any]) -> dict[str, Any]:
     task = _task(context)
     material = task.get("material")
     geometry = task.get("geometry") or {}
+    workpiece = task.get("workpiece") or {}
     return {
         **task,
         "material": material.get("name") if isinstance(material, dict) else material,
         "process_type": task.get("process_type") or task.get("process_intent"),
         "objective": task.get("objective") or task.get("targets") or "process_quality",
-        "thickness_mm": task.get("thickness_mm") or geometry.get("workpiece_thickness_mm"),
+        "thickness_mm": task.get("thickness_mm") or workpiece.get("thickness_mm")
+        or geometry.get("workpiece_thickness_mm"),
     }
 
 
 def _equipment(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    return {"status": "success", "summary": "已读取当前设备版本与物理边界。", **build_machine_bounds()}
+    equipment = build_machine_bounds()
+    return {
+        "status": "success",
+        "summary": "已分层读取设备固定条件与可调能力；可调范围只作为安全约束。",
+        "active": equipment.get("active", False),
+        "equipment_id": equipment.get("equipment_profile_id"),
+        "equipment_profile_id": equipment.get("equipment_profile_id"),
+        "profile_name": equipment.get("profile_name"),
+        "revision": equipment.get("revision_id"),
+        "revision_id": equipment.get("revision_id"),
+        "fixed_conditions": dict(equipment.get("fixed_conditions") or {}),
+        "tunable_capabilities": dict(equipment.get("tunable_capabilities") or {}),
+        "missing_equipment_fields": list(equipment.get("missing_equipment_fields") or []),
+    }
 
 
 def _search(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -108,20 +138,64 @@ def _bootstrap(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, An
 def _parameter_result(*, status: str, parameters: dict[str, Any], source_type: str,
                       source_refs: list[Any] | None = None, data_support: dict[str, Any] | None = None,
                       uncertainty: dict[str, Any] | None = None, limitations: list[str] | None = None,
-                      evidence_level: str = "unknown") -> dict[str, Any]:
+                      evidence_level: str = "unknown", equipment: dict[str, Any] | None = None,
+                      variables: list[str] | None = None, authority_level: str | None = None,
+                      validated: bool = False, allowed_for_trial: bool = True,
+                      allowed_for_formal_process: bool = False,
+                      allowed_for_bo_training: bool = False) -> dict[str, Any]:
+    equipment = equipment or {}
+    fixed = dict(equipment.get("fixed_conditions") or {})
+    selected = list(dict.fromkeys(variables or list(parameters)))
+    refs = [str(item) for item in (source_refs or [])]
+    process_parameters: dict[str, dict[str, Any]] = {}
+    for name in selected:
+        if name in fixed or name not in parameters:
+            continue
+        value = parameters[name]
+        if not isinstance(value, (int, float, str)):
+            continue
+        parameter = ParameterValue(
+            name=name,
+            value=value,
+            unit=PARAMETER_UNITS.get(name),
+            role="process_setpoint",
+            source_type=source_type,
+            source_refs=refs,
+            authority_level=authority_level or evidence_level,
+            uncertainty=dict(uncertainty or {}),
+            validated=validated,
+            allowed_for_trial=allowed_for_trial,
+            allowed_for_formal_process=allowed_for_formal_process,
+            allowed_for_bo_training=allowed_for_bo_training,
+        )
+        process_parameters[name] = parameter.model_dump(mode="json")
     return {
-        "status": status, "parameters": parameters, "source_type": source_type,
-        "source_refs": source_refs or [], "data_support": data_support or {},
+        "status": status,
+        "fixed_equipment_conditions": fixed,
+        "process_parameters": process_parameters,
+        "strategy_parameters": {},
+        "derived_metrics": {},
+        "source_type": source_type,
+        "source_refs": refs, "data_support": data_support or {},
         "evidence_level": evidence_level, "uncertainty": uncertainty or {},
-        "limitations": limitations or [], "recommended_use": ["trial"],
-        "provenance": [{"source_type": source_type, "source_refs": source_refs or []}],
+        "authority_level": authority_level or evidence_level,
+        "validated": validated,
+        "allowed_for_trial": allowed_for_trial,
+        "allowed_for_formal_process": allowed_for_formal_process,
+        "allowed_for_bo_training": allowed_for_bo_training,
+        "limitations": limitations or [],
+        "recommended_use": (["trial"] if allowed_for_trial else [])
+        + (["formal_process"] if allowed_for_formal_process else []),
+        "provenance": [{"source_type": source_type, "source_refs": refs}],
     }
 
 
 def _recommend_bo(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    equipment = _equipment_snapshot(context)
+    safety_bounds = safety_bounds_from_equipment(equipment)
     raw = LegacyBOCompatibilityAdapter().recommend(
         _legacy_task(context), list_bo_training_samples(),
-        context.get("equipment_snapshot") or build_machine_bounds(),
+        {**equipment, "machine_bounds": safety_bounds},
         payload.get("approved_priors") or [],
     )
     status = str(raw.get("status") or "success")
@@ -132,32 +206,150 @@ def _recommend_bo(payload: dict[str, Any], context: dict[str, Any]) -> dict[str,
         source_refs=list(raw.get("source_refs") or raw.get("sample_ids") or []),
         data_support={"raw_status": status, "sample_count": raw.get("sample_count")},
         uncertainty=raw.get("uncertainty") or {}, limitations=list(raw.get("limitations") or []),
-        evidence_level="validated_samples",
+        evidence_level="validated_samples", authority_level="bo_validated_samples",
+        equipment=equipment, variables=list(payload.get("variables") or parameters),
+        validated=status != "insufficient_data", allowed_for_formal_process=status != "insufficient_data",
     ) | {"raw_result": raw}
 
 
 def _recommend_rag(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    equipment = _equipment_snapshot(context)
     evidence = _search(payload, context)
     if evidence.get("status") == "insufficient_data":
         return _parameter_result(status="insufficient_data", parameters={}, source_type="reviewed_rag",
-                                 limitations=["缺少检索上下文"], evidence_level="none")
+                                 limitations=["缺少检索上下文"], evidence_level="none",
+                                 equipment=equipment)
     return _parameter_result(status="success", parameters=payload.get("parameters") or {},
                              source_type="reviewed_rag", data_support={"evidence": evidence},
                              limitations=["检索证据需由主 Agent 结合任务解释，不代表全局最优。"],
-                             evidence_level="reviewed_evidence")
+                             evidence_level="reviewed_evidence", authority_level="reviewed_evidence",
+                             equipment=equipment, variables=list(payload.get("variables") or []))
 
 
 def _exploratory(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    bounds = (context.get("equipment_snapshot") or build_machine_bounds()).get("machine_bounds") or {}
-    variables = payload.get("variables") or list(bounds)
-    candidate: dict[str, Any] = {}
-    for name in variables:
-        value = bounds.get(name)
-        if isinstance(value, (list, tuple)) and len(value) == 2:
-            candidate[name] = (float(value[0]) + float(value[1])) / 2
-    return _parameter_result(status="exploratory", parameters=candidate, source_type="llm_exploration",
-                             data_support={"machine_bounds": bounds}, evidence_level="hypothesis",
-                             limitations=["仅用于试切冷启动；未经验证，不得直接晋升为正式参数。"])
+    if payload.get("intended_use") != "trial":
+        return {"status": "validation_error", "summary": "探索参数只允许 intended_use=trial。"}
+    process_plan = payload.get("process_plan") or {}
+    selected = list(dict.fromkeys(map(str, payload.get("variables") or [])))
+    plan_variables = _declared_process_variables(process_plan)
+    if not selected or any(name not in plan_variables for name in selected):
+        return {
+            "status": "validation_error",
+            "summary": "variables 必须由当前 ProcessPlan 明确选择。",
+            "invalid_variables": [name for name in selected if name not in plan_variables],
+        }
+    equipment = _normalize_equipment(payload.get("equipment_context") or _equipment_snapshot(context))
+    fixed = set((equipment.get("fixed_conditions") or {}).keys())
+    if any(name in fixed for name in selected):
+        return {
+            "status": "validation_error",
+            "summary": "设备固定条件不能作为探索性工艺变量。",
+            "invalid_variables": [name for name in selected if name in fixed],
+        }
+    raw_candidate = payload.get("candidate") or {}
+    if not isinstance(raw_candidate, dict):
+        return {
+            "status": "validation_error",
+            "summary": "candidate 必须是参数名到数值的 JSON 对象。",
+            "received_type": type(raw_candidate).__name__,
+        }
+    bounds = safety_bounds_from_equipment(equipment)
+    candidate: dict[str, float | int] = {}
+    adjustments: list[dict[str, Any]] = []
+    for name in selected:
+        raw_value = raw_candidate.get(name)
+        value = raw_value.get("value") if isinstance(raw_value, dict) else raw_value
+        if not isinstance(value, (int, float)):
+            return {"status": "validation_error", "summary": f"探索候选缺少数值参数：{name}"}
+        if name not in bounds:
+            return {"status": "validation_error", "summary": f"设备没有可调能力：{name}"}
+        lower, upper = float(bounds[name][0]), float(bounds[name][1])
+        clipped = min(max(float(value), lower), upper)
+        candidate[name] = int(round(clipped)) if name == "passes" else clipped
+        if clipped != float(value):
+            adjustments.append({"name": name, "original": value, "clipped": clipped, "bounds": [lower, upper]})
+    result = _parameter_result(
+        status="exploratory", parameters=candidate, source_type="llm_exploration",
+        data_support={
+            "task_context": payload.get("task_context") or {},
+            "process_plan": process_plan,
+            "evidence_summary": payload.get("evidence_summary") or {},
+            "safety_bounds_used": {name: bounds[name] for name in selected},
+        },
+        evidence_level="hypothesis", authority_level="exploratory",
+        equipment=equipment, variables=selected, validated=False,
+        allowed_for_trial=True, allowed_for_formal_process=False,
+        allowed_for_bo_training=False,
+        limitations=["仅用于第一轮试切；未经验证，不得直接用于正式加工或 BO 训练。"],
+    )
+    result["summary"] = "Main Agent 探索假设已通过设备边界安全检查。"
+    result["safety_adjustments"] = adjustments
+    return result
+
+
+def _declared_process_variables(process_plan: dict[str, Any]) -> set[str]:
+    """Read explicit declarations without requiring one fixed ProcessPlan layout."""
+    found: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"controllable_variables", "selected_exploratory_variables"}:
+                    items = child if isinstance(child, list) else [child]
+                    for item in items:
+                        name = item.get("name") if isinstance(item, dict) else item
+                        if isinstance(name, str) and name:
+                            found.add(name)
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(process_plan)
+    return found
+
+
+def _equipment_snapshot(context: dict[str, Any]) -> dict[str, Any]:
+    return _normalize_equipment(context.get("equipment_snapshot") or build_machine_bounds())
+
+
+def _normalize_equipment(equipment: dict[str, Any]) -> dict[str, Any]:
+    provided_tunable = equipment.get("tunable_capabilities")
+    if isinstance(provided_tunable, dict):
+        fixed = dict(equipment.get("fixed_conditions") or {})
+        normalized_tunable: dict[str, dict[str, Any]] = {}
+        for name, capability in provided_tunable.items():
+            if not isinstance(capability, dict):
+                continue
+            normalized_tunable[name] = {
+                **capability,
+                "unit": capability.get("unit") or PARAMETER_UNITS.get(name),
+                "role": capability.get("role") or "equipment_tunable",
+            }
+        for name in ("wavelength_nm", "spot_diameter_um", "pulse_width_fs"):
+            value = equipment.get(name)
+            if name not in normalized_tunable and isinstance(value, (int, float)):
+                fixed.setdefault(name, value)
+        return {
+            **equipment,
+            "fixed_conditions": fixed,
+            "tunable_capabilities": normalized_tunable,
+        }
+    raw = equipment.get("machine_bounds") or {}
+    fixed: dict[str, Any] = {}
+    tunable: dict[str, dict[str, Any]] = {}
+    for name, value in raw.items():
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            continue
+        if value[0] == value[1]:
+            fixed[name] = value[0]
+        else:
+            tunable[name] = {
+                "min": value[0], "max": value[1],
+                "unit": PARAMETER_UNITS.get(name), "role": "equipment_tunable",
+            }
+    return {**equipment, "fixed_conditions": fixed, "tunable_capabilities": tunable}
 
 
 def _manage_trial(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -165,10 +357,11 @@ def _manage_trial(payload: dict[str, Any], context: dict[str, Any]) -> dict[str,
     operation = str(payload.get("operation") or "get")
     task_id = str(payload.get("task_id") or context.get("session_id") or "task")
     if operation == "create":
+        equipment = _equipment_snapshot(context)
         result = service.create_plan(task_id, {
             **payload, "trial_mode": payload.get("trial_mode") or "simple_trial_cut",
             "task_spec": _legacy_task(context),
-            "machine_bounds": (context.get("equipment_snapshot") or build_machine_bounds()).get("machine_bounds") or {},
+            "machine_bounds": safety_bounds_from_equipment(equipment),
         })
     elif operation == "get":
         result = service.get_plan(str(payload["trial_plan_id"]))

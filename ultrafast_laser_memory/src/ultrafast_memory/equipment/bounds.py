@@ -9,18 +9,42 @@ from ultrafast_memory.equipment.validation import validate_override_within_bound
 
 REQUIRED_ACTIVE_BOUNDS = ("pulse_width_fs", "laser_power_W", "frequency_kHz", "scan_speed_mm_s", "spot_diameter_um")
 
+PARAMETER_UNITS = {
+    "wavelength_nm": "nm",
+    "pulse_width_fs": "fs",
+    "laser_power_W": "W",
+    "frequency_kHz": "kHz",
+    "spot_diameter_um": "um",
+    "focus_offset_um": "um",
+    "scan_speed_mm_s": "mm/s",
+    "hatch_spacing_um": "um",
+    "layer_step_um": "um",
+    "passes": None,
+}
+
 
 def build_machine_bounds(equipment_profile_id: str | None = None) -> dict[str, Any]:
     profile = get_equipment_profile(equipment_profile_id) if equipment_profile_id else get_active_equipment_profile()
     if not profile:
-        return {"active": False, "machine_bounds": {}, "missing_equipment_fields": list(REQUIRED_ACTIVE_BOUNDS)}
+        return {
+            "active": False,
+            "fixed_conditions": {},
+            "tunable_capabilities": {},
+            "machine_bounds": {},
+            "missing_equipment_fields": list(REQUIRED_ACTIVE_BOUNDS),
+        }
     bounds = _bounds_from_profile(profile)
+    fixed, tunable = _semantic_parameters(profile)
     missing = _missing_equipment_fields(bounds)
     return {
         "active": True,
         "equipment_profile_id": profile["equipment_profile_id"],
         "profile_name": profile["profile_name"],
         "revision_id": profile.get("revision_id"),
+        "fixed_conditions": fixed,
+        "tunable_capabilities": tunable,
+        # Legacy internal projection for BO and older APIs. The foreground equipment
+        # Tool deliberately does not expose this mixed representation.
         "machine_bounds": bounds,
         "missing_equipment_fields": missing,
     }
@@ -62,6 +86,26 @@ def validate_candidate_within_bounds(candidate: dict[str, float | int], machine_
     return {"valid": True, "violations": [], "audit_trace": []}
 
 
+def safety_bounds_from_equipment(equipment: dict[str, Any]) -> dict[str, list[float | int]]:
+    """Return numeric safety bounds without treating fixed conditions as variables."""
+    capabilities = equipment.get("tunable_capabilities") or {}
+    semantic: dict[str, list[float | int]] = {}
+    for name, value in capabilities.items():
+        if not isinstance(value, dict):
+            continue
+        lower, upper = value.get("min"), value.get("max")
+        if isinstance(lower, (int, float)) and isinstance(upper, (int, float)):
+            semantic[name] = [lower, upper]
+    if semantic:
+        return semantic
+    raw = equipment.get("machine_bounds") or {}
+    return {
+        name: list(value)
+        for name, value in raw.items()
+        if isinstance(value, (list, tuple)) and len(value) == 2 and value[0] != value[1]
+    }
+
+
 def _bounds_from_profile(profile: dict[str, Any]) -> dict[str, list[float | int]]:
     laser = profile.get("laser_source") or {}
     optical = profile.get("optical_setup") or {}
@@ -85,6 +129,47 @@ def _bounds_from_profile(profile: dict[str, Any]) -> dict[str, list[float | int]
     _add_range(bounds, "layer_step_um", process.get("layer_step_min_um"), process.get("layer_step_max_um"))
     _add_range(bounds, "passes", process.get("passes_min"), process.get("passes_max"))
     return bounds
+
+
+def _semantic_parameters(profile: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    laser = profile.get("laser_source") or {}
+    optical = profile.get("optical_setup") or {}
+    motion = profile.get("motion_system") or {}
+    process = profile.get("process_capability") or {}
+    fixed: dict[str, Any] = {}
+    tunable: dict[str, dict[str, Any]] = {}
+    _semantic_fixed(fixed, "wavelength_nm", laser.get("wavelength_nm"))
+    if laser.get("pulse_width_fixed_fs") is not None:
+        _semantic_fixed(fixed, "pulse_width_fs", laser.get("pulse_width_fixed_fs"))
+    else:
+        _semantic_range(tunable, "pulse_width_fs", laser.get("pulse_width_min_fs"), laser.get("pulse_width_max_fs"))
+    if laser.get("actual_max_power_W") is not None:
+        _semantic_range(tunable, "laser_power_W", 0, laser.get("actual_max_power_W"))
+    else:
+        _semantic_range(tunable, "laser_power_W", laser.get("average_power_min_W"), laser.get("average_power_max_W"))
+    _semantic_range(tunable, "frequency_kHz", laser.get("frequency_min_kHz"), laser.get("frequency_max_kHz"))
+    _semantic_fixed(fixed, "spot_diameter_um", optical.get("spot_diameter_um"))
+    _semantic_range(tunable, "focus_offset_um", optical.get("focus_offset_min_um"), optical.get("focus_offset_max_um"))
+    _semantic_range(tunable, "scan_speed_mm_s", motion.get("scan_speed_min_mm_s"), motion.get("scan_speed_max_mm_s"))
+    _semantic_range(tunable, "hatch_spacing_um", process.get("hatch_spacing_min_um"), process.get("hatch_spacing_max_um"))
+    _semantic_range(tunable, "layer_step_um", process.get("layer_step_min_um"), process.get("layer_step_max_um"))
+    _semantic_range(tunable, "passes", process.get("passes_min"), process.get("passes_max"))
+    return fixed, tunable
+
+
+def _semantic_fixed(target: dict[str, Any], name: str, value: Any) -> None:
+    if value is not None:
+        target[name] = value
+
+
+def _semantic_range(target: dict[str, dict[str, Any]], name: str, lower: Any, upper: Any) -> None:
+    if lower is not None and upper is not None:
+        target[name] = {
+            "min": lower,
+            "max": upper,
+            "unit": PARAMETER_UNITS.get(name),
+            "role": "equipment_tunable",
+        }
 
 
 def _missing_equipment_fields(bounds: dict[str, Any]) -> list[str]:

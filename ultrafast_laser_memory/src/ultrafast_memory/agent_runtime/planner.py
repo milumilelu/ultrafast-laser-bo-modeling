@@ -8,6 +8,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from ultrafast_memory.agent_runtime.actions import AgentAction
+from ultrafast_domain.process import ProcessPlan
+from ultrafast_domain.trial import TrialPlan
 
 
 class MainAgentPlanner:
@@ -33,13 +35,11 @@ class MainAgentPlanner:
             return deterministic
         if self.client is None or getattr(self.client, "provider", None) == "mock":
             return AgentAction(
-                action="ask_user",
+                action="final_answer",
                 decision_summary="主 Agent LLM 当前不可用，无法可靠解释该自由文本。",
                 message=(
-                    "当前无法可靠解释这条自由文本，现有任务状态未被修改。请一次回答：\n"
-                    "1. 加工材料及工件厚度是什么？\n"
-                    "2. 加工特征、关键尺寸和是否贯穿是什么？\n"
-                    "3. 目标质量、允许缺陷和本次希望得到方案还是真实加工准备？"
+                    "主 Agent 模型当前不可用，无法可靠生成专业加工方案。"
+                    "现有任务状态未被修改，已识别的事实和 Observation 均已保留；请稍后重试。"
                 ),
                 provider=getattr(self.client, "provider", None),
                 model=getattr(self.client, "model", None),
@@ -64,10 +64,13 @@ class MainAgentPlanner:
                     {"role": "user", "content": prompt + repair},
                 ], **options)
                 raw = self._normalize_provider_action(self._json(result.get("content") or ""), message)
+                raw = self._protect_established_task_facts(raw, working_context, message)
                 action = self._validate_action(
                     raw,
                     [item["name"] for item in tools],
                     [item["name"] for item in catalog],
+                    working_context,
+                    recent_tool_results or [],
                 )
                 return action.model_copy(update={
                     "provider": result.get("provider") or getattr(self.client, "provider", None),
@@ -77,13 +80,11 @@ class MainAgentPlanner:
                 last_error = exc
 
         return AgentAction(
-            action="ask_user",
+            action="final_answer",
             decision_summary=f"主 Agent 行动规划失败：{type(last_error).__name__ if last_error else 'unknown'}。",
             message=(
-                "我暂时无法安全规划下一步，现有状态未被修改，已有上下文和观察均已保留。请一次确认：\n"
-                "1. 是否立即重试当前任务？\n"
-                "2. 是否先返回已识别的任务事实供您核对？\n"
-                "3. 是否有新的材料、几何或质量要求需要同时补充？"
+                "主 Agent 连续两次未能产生有效的结构化行动。"
+                "现有状态未被修改，已有上下文和观察均已保留；这是可恢复的模型规划错误，请稍后重试。"
             ),
             provider=getattr(self.client, "provider", None),
             model=getattr(self.client, "model", None),
@@ -110,7 +111,13 @@ class MainAgentPlanner:
             return
 
     @staticmethod
-    def _validate_action(raw: dict[str, Any], available_tool_names: list[str], skill_names: list[str]) -> AgentAction:
+    def _validate_action(
+        raw: dict[str, Any],
+        available_tool_names: list[str],
+        skill_names: list[str],
+        working_context: dict[str, Any] | None = None,
+        recent_tool_results: list[dict[str, Any]] | None = None,
+    ) -> AgentAction:
         action = AgentAction.model_validate(raw)
         if action.action == "call_tool":
             if not action.tool_name:
@@ -122,11 +129,58 @@ class MainAgentPlanner:
                 raise ValueError(f"skill_not_registered:{action.skill_name}")
         elif not action.message:
             raise ValueError("message_required")
-        if action.action == "ask_user":
-            question_count = len(re.findall(r"[?？]", action.message or ""))
-            if not 3 <= question_count <= 5:
-                raise ValueError(f"ask_user_requires_3_to_5_questions:{question_count}")
+        if action.action == "final_answer" and MainAgentPlanner._complete_plan_required(working_context or {}):
+            updates = action.context_updates or {}
+            ProcessPlan.model_validate(updates.get("process_plan") or (working_context or {}).get("process_plan"))
+            trial = TrialPlan.model_validate(
+                updates.get("trial_plan") or (working_context or {}).get("trial_plan")
+            )
+            if updates.get("trial_plan") is not None:
+                parameter_truth = MainAgentPlanner._latest_parameter_truth(recent_tool_results or [])
+                if not parameter_truth:
+                    raise ValueError("new_trial_plan_requires_successful_parameter_tool_result")
+                MainAgentPlanner._validate_trial_parameter_truth(trial, parameter_truth)
         return action
+
+    @staticmethod
+    def _latest_parameter_truth(observations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        for observation in reversed(observations):
+            data = observation.get("data") or {}
+            parameters = data.get("process_parameters") if isinstance(data, dict) else None
+            if isinstance(parameters, dict) and parameters:
+                return parameters
+        return {}
+
+    @staticmethod
+    def _validate_trial_parameter_truth(
+        trial: TrialPlan,
+        parameter_truth: dict[str, dict[str, Any]],
+    ) -> None:
+        truth_names = set(parameter_truth)
+        compared_fields = {
+            "name", "value", "unit", "role", "source_type", "source_refs",
+            "authority_level", "uncertainty", "validated", "allowed_for_trial",
+            "allowed_for_formal_process", "allowed_for_bo_training",
+        }
+        for candidate in trial.parameter_candidates:
+            if set(candidate.parameters) != truth_names:
+                raise ValueError("trial_parameter_names_must_match_latest_tool_result")
+            for name, parameter in candidate.parameters.items():
+                actual = parameter.model_dump(mode="json")
+                expected = parameter_truth[name]
+                if any(actual.get(field) != expected.get(field) for field in compared_fields):
+                    raise ValueError(f"trial_parameter_provenance_mismatch:{name}")
+
+    @staticmethod
+    def _complete_plan_required(working_context: dict[str, Any]) -> bool:
+        task = working_context.get("task") or {}
+        geometry = task.get("geometry") or {}
+        if not (task.get("material") and task.get("process_intent") and geometry.get("feature_type")):
+            return False
+        if geometry.get("feature_type") == "rectangular_groove" \
+                and geometry.get("depth_mm") is None and not geometry.get("through"):
+            return False
+        return True
 
     @staticmethod
     def _normalize_provider_action(raw: dict[str, Any], user_message: str) -> dict[str, Any]:
@@ -148,7 +202,64 @@ class MainAgentPlanner:
         raw.setdefault("context_updates", {})
         raw.setdefault("message", raw.get("answer") or raw.get("content"))
         raw.setdefault("decision_summary", str(raw.get("reason") or "执行主 Agent 选择的下一动作。"))
+        if raw.get("action") == "final_answer" and isinstance(raw.get("message"), str):
+            raw["message"] = MainAgentPlanner._strip_terminal_confirmation(raw["message"])
         return raw
+
+    @staticmethod
+    def _strip_terminal_confirmation(message: str) -> str:
+        """Remove non-blocking acceptance/start invitations from a completed answer."""
+        text = re.sub(r"(?:请)?确认后(?:即可|可以|可)?", "", message)
+        text = re.sub(
+            r"(?m)^.*(?:是否接受|是否开始|请确认是否|如无问题.*(?:确认|回复)).*(?:\n|$)",
+            "",
+            text,
+        )
+        return text.strip()
+
+    @staticmethod
+    def _protect_established_task_facts(
+        raw: dict[str, Any],
+        working_context: dict[str, Any],
+        user_message: str,
+    ) -> dict[str, Any]:
+        """Planning may add task facts; only explicit user corrections may overwrite them."""
+        updates = raw.get("context_updates")
+        if not isinstance(updates, dict) or not isinstance(updates.get("task"), dict):
+            return raw
+        if re.search(r"改为|改成|更正|修正|调整为|应为|换成|不是.+(?:而是|是)", user_message):
+            return raw
+
+        missing = object()
+
+        def additions(current: Any, proposed: Any) -> Any:
+            if isinstance(current, dict) and isinstance(proposed, dict):
+                result: dict[str, Any] = {}
+                for key, value in proposed.items():
+                    if key not in current:
+                        result[key] = value
+                        continue
+                    child = additions(current[key], value)
+                    if child is not missing:
+                        result[key] = child
+                return result if result else missing
+            if isinstance(current, list) and isinstance(proposed, list):
+                merged = list(current)
+                for item in proposed:
+                    if item not in merged:
+                        merged.append(item)
+                return merged if merged != current else missing
+            return missing
+
+        protected = additions(working_context.get("task") or {}, updates["task"])
+        normalized = dict(raw)
+        normalized_updates = dict(updates)
+        if protected is missing:
+            normalized_updates.pop("task", None)
+        else:
+            normalized_updates["task"] = protected
+        normalized["context_updates"] = normalized_updates
+        return normalized
 
     @staticmethod
     def _json(content: str) -> dict[str, Any]:
@@ -174,13 +285,30 @@ class MainAgentPlanner:
             "你是超快激光加工前台唯一主 Agent。每次只返回一个 JSON 行动，不输出 Markdown。"
             "字段：action,decision_summary,skill_name,tool_name,arguments,message,context_updates。"
             "action 仅限 load_skill、unload_skill、call_tool、ask_user、final_answer。"
-            "把用户明确事实直接写入 context_updates.task；Working Context 是开放结构，允许部分信息和自定义几何。"
+            "一次读取完整用户消息、文档、Working Context 和 Observations；把本轮全部明确事实一次写入 context_updates.task。"
+            "Working Context 是开放结构，允许部分信息和自定义几何；不得拆成逐字段 Tool Call，也不得重复询问已有事实。"
             "同一行动可同时更新上下文并追问、调用工具或回答；不存在独立的任务状态写入工具。"
-            "关键歧义（如槽深、通孔或盲孔）必须立即追问；功率、频率、速度等工艺参数应由系统推荐，不询问用户。"
-            "每次 ask_user 必须把当前最重要且文档中没有答案的问题合并为 3–5 个编号问题，"
-            "每题以问号结尾；不得重复询问用户或文档已经提供的事实。"
+            "你必须区分五类内容：Blocking Question 是没有答案就无法合理继续；Assumption 是可明确假设后继续；"
+            "Reminder、Warning 和 Optional Preference 都不要求用户回答。只有 Blocking Question 使用 ask_user，"
+            "且只问完成当前任务真正必要的最少问题，一个问题完全合法。其余四类放入 final_answer。"
+            "槽深等会改变路线且无法合理假设的信息才是 Blocking Question；未指定质量偏好、参数未经验证、"
+            "是否接受方案都不是 Blocking Question。功率、频率、速度等工艺参数由系统规划，不询问用户。"
             "所有前台安全 Tool 始终可见；Skill 只提供专业指导和排序提示。"
+            "已加载 Skill 是稳定专业执行协议，必须按其 method、required considerations、output expectations、"
+            "prohibitions 和 failure handling 执行，而不是把 Skill 当能力标签。"
+            "参数必须分为设备固定条件、设备可调能力、工艺设定值、策略参数和派生指标。"
+            "固定条件不得进入推荐工艺参数；设备范围只是安全约束，不得用边界中点生成推荐。"
             "Tool 结果是真实来源：不得改写 BO/RAG provenance，不得把 exploratory 参数冒充已验证参数。"
+            "探索候选必须由 ProcessPlan 选择变量，由你基于材料、几何、路线和风险提出少量有理由的 candidate，"
+            "再交给 propose_exploratory_parameters 做边界检查。"
+            "当加工任务信息足以继续时，应组合必要 Skill 和 Tool，形成完整 ProcessPlan 与第一轮 TrialPlan。"
+            "ProcessPlan 和 TrialPlan 是开放语义结构：只规定目标、策略、操作、相关变量、评价和迭代逻辑，"
+            "具体路径、分层、焦点、参数和检测指标必须按当前任务动态选择，不得套用其他加工类型模板。"
+            "final_answer 必须综合任务、设备、策略、参数、检测、判据、调整逻辑、来源和风险；"
+            "同时把可验证的结构分别写入 context_updates.process_plan 和 context_updates.trial_plan。"
+            "形成有用 TrialPlan 后必须 final_answer，不得自动追加是否接受、是否开始或是否还有要求。"
+            "新生成的 TrialPlan 候选参数必须逐字段复制本轮成功参数 Tool 的 process_parameters，"
+            "不得改写 value、source_type、authority_level、uncertainty 或权限。"
             "只在设备硬安全、明确 unsafe 或不可逆动作未获本次确认时阻断。"
         )
 
@@ -200,14 +328,35 @@ class MainAgentPlanner:
             "skill_name": None,
             "tool_name": None,
             "arguments": {},
-            "message": (
-                "请一次回答：\n1. 槽深或贯穿要求是什么？\n2. 工件总厚度是多少？\n"
-                "3. 关键尺寸公差是多少？\n4. 本次目标是方案、试切还是真实加工准备？"
-            ),
+            "message": "矩形槽的目标深度是多少，还是要求贯穿？",
             "context_updates": {"task": {"process_intent": "groove_machining"}},
+        }
+        professional_output_contract = {
+            "process_plan_shape": {
+                "objective": "string", "strategy": "object", "operations": "array<object>",
+                "fixed_conditions": "object", "controllable_variables": "array<object>",
+                "evaluation_plan": "array<object>", "risks": "array<object>",
+                "assumptions": "array<string>", "adaptation_guidance": "array<object>",
+            },
+            "trial_plan_shape": {
+                "objective": "string", "hypothesis": "string|null", "setup": "object",
+                "strategy": "object", "parameter_candidates": "array<ParameterCandidate>",
+                "evaluation_plan": "array<object>", "success_criteria": "array<object>",
+                "stop_conditions": "array<object>", "adaptation_guidance": "array<object>",
+                "provenance": "array<object>", "warnings": "array<string>",
+            },
+            "parameter_candidate_shape": {
+                "parameters": "object mapping parameter name to ParameterValue",
+            },
+            "parameter_value_required": [
+                "name", "value", "unit", "role", "source_type", "source_refs",
+                "authority_level", "uncertainty", "validated", "allowed_for_trial",
+                "allowed_for_formal_process", "allowed_for_bo_training",
+            ],
         }
         return "\n".join([
             f"wire_example={json.dumps(example, ensure_ascii=False)}",
+            f"professional_output_contract={json.dumps(professional_output_contract, ensure_ascii=False)}",
             f"user_message={json.dumps(message, ensure_ascii=False)}",
             f"working_context={json.dumps(working_context, ensure_ascii=False)}",
             f"recent_tool_results={json.dumps(recent_tool_results[-5:], ensure_ascii=False)}",
@@ -225,10 +374,13 @@ class MainAgentPlanner:
         if explicit_material:
             raw = explicit_material.group(1)
             normalized = "diamond" if raw in {"金刚石", "钻石"} else raw
+            updates = {"task": {"material": {"name": normalized, "description": raw}}}
+            if cls._updates_already_present(working_context, updates):
+                return None
             return AgentAction(
-                action="final_answer", decision_summary="已记录用户明确提供的材料事实。",
-                message="已记录材料；现有任务状态已更新，可继续补充加工目标。",
-                context_updates={"task": {"material": {"name": normalized, "description": raw}}},
+                action="load_skill", skill_name="task_understanding",
+                decision_summary="一次提交用户明确提供的材料事实，并继续理解当前任务。",
+                context_updates=updates,
                 provider="deterministic_task_intake", model="open-context-adapter",
             )
         groove = re.search(
@@ -257,67 +409,112 @@ class MainAgentPlanner:
                 "geometry": geometry,
             }}
             if depth is None and not geometry.get("through"):
-                size_text = f"{float(groove.group('length')) * factor:g}×{float(groove.group('width')) * factor:g} mm"
                 return AgentAction(
                     action="ask_user", decision_summary="槽深会显著改变加工路线和参数空间，必须先确认。",
-                    message=(
-                        f"已识别材料和 {size_text} 矩形槽。请一次回答以下关键问题：\n"
-                        "1. 矩形槽的目标深度是多少，还是要求贯穿？\n"
-                        "2. 工件的总厚度是多少？\n"
-                        "3. 材料牌号或 SiC 体积分数是否已知？\n"
-                        "4. 长宽和槽深允许的尺寸公差、边缘崩裂上限分别是多少？\n"
-                        "5. 本次希望获得工艺方案、试切计划，还是真实加工准备？"
-                    ),
+                    message="矩形槽的目标深度是多少，还是要求贯穿？",
                     context_updates=updates, provider="deterministic_task_intake", model="open-geometry-adapter",
                 )
+            if cls._updates_already_present(working_context, updates):
+                return None
             return AgentAction(
-                action="final_answer", decision_summary="已识别矩形槽任务的明确事实。",
-                message="已记录材料、矩形槽尺寸及深度要求，可继续进行工艺分析。",
+                action="load_skill", skill_name="task_understanding",
+                decision_summary="一次提交矩形槽任务的全部明确事实，并继续形成工艺方案。",
                 context_updates=updates, provider="deterministic_task_intake", model="open-geometry-adapter",
             )
 
         current_geometry = task.get("geometry")
         depth = cls._depth_from_message(text, allow_bare=isinstance(current_geometry, dict))
         if depth is not None and isinstance(current_geometry, dict) and current_geometry.get("feature_type") == "rectangular_groove":
+            updates = {"task": {"geometry": {"depth_mm": depth}}}
+            if cls._updates_already_present(working_context, updates):
+                return None
             return AgentAction(
-                action="final_answer", decision_summary="已记录用户补充的关键槽深。",
-                message="已记录矩形槽目标深度，可继续进行工艺路线与参数分析。",
-                context_updates={"task": {"geometry": {"depth_mm": depth}}},
+                action="load_skill", skill_name="process_planning",
+                decision_summary="记录用户补充的关键槽深，并继续形成工艺与试切方案。",
+                context_updates=updates,
                 provider="deterministic_task_intake", model="open-geometry-adapter",
             )
 
         cfrp = re.search(r"切割\s*(?P<thickness>\d+(?:\.\d+)?)\s*(?:mm|毫米)厚的?(?P<material>碳纤维(?:复合板|复合材料|板)?)", text)
         if cfrp:
             thickness = float(cfrp.group("thickness"))
+            updates = {"task": {
+                "material": {"name": "CFRP", "description": cfrp.group("material")},
+                "workpiece": {"thickness_mm": thickness},
+                "process_intent": "cutting",
+                "geometry": {"feature_type": "sheet_cut"},
+            }}
+            if cls._updates_already_present(working_context, updates):
+                return None
             return AgentAction(
-                action="final_answer", decision_summary="已识别 CFRP 切割任务事实；工艺参数应由系统计算。",
-                message=f"已识别为碳纤维复合板切割，板厚 {thickness:g} mm。后续将基于当前设备边界推荐工艺参数，不需要您提供激光功率。",
-                context_updates={"task": {
-                    "material": {"name": "CFRP", "description": cfrp.group("material")},
-                    "process_intent": "cutting",
-                    "geometry": {"feature_type": "sheet_cut", "workpiece_thickness_mm": thickness},
-                }},
+                action="load_skill", skill_name="task_understanding",
+                decision_summary="一次提交 CFRP 切割任务事实；工艺参数由系统继续规划。",
+                context_updates=updates,
                 provider="deterministic_task_intake", model="open-geometry-adapter",
             )
 
-        diamond = re.search(
-            r"(?:在)?(?P<thickness>\d+(?:\.\d+)?)\s*(?:mm|毫米)厚的?金刚石(?:上|中)?加工(?:一个)?"
-            r"直径\s*(?P<diameter>\d+(?:\.\d+)?)\s*(?:mm|毫米)的?通孔", text,
+        through_hole = re.search(
+            r"(?:在)?(?P<thickness>\d+(?:\.\d+)?)\s*(?:mm|毫米)厚的?"
+            r"(?P<material>.+?)(?:上|中)加工(?:一个)?直径\s*"
+            r"(?P<diameter>\d+(?:\.\d+)?)\s*(?:mm|毫米)的?通孔", text,
         )
-        if diamond:
-            thickness = float(diamond.group("thickness"))
-            diameter = float(diamond.group("diameter"))
+        if through_hole:
+            thickness = float(through_hole.group("thickness"))
+            diameter = float(through_hole.group("diameter"))
+            raw_material = through_hole.group("material").strip()
+            material = "diamond" if raw_material in {"金刚石", "钻石"} else raw_material
+            updates = {"task": {
+                "material": {"name": material, "description": raw_material},
+                "workpiece": {"thickness_mm": thickness},
+                "process_intent": "through_hole_drilling",
+                "geometry": {
+                    "feature_type": "through_hole",
+                    "dimensions": {"diameter_mm": diameter},
+                    "description": f"直径 {diameter:g} mm 通孔",
+                    "through": True,
+                },
+            }}
+            if cls._updates_already_present(working_context, updates):
+                return None
             return AgentAction(
-                action="final_answer", decision_summary="已识别金刚石通孔的完整开放几何。",
-                message=f"已记录 {thickness:g} mm 厚金刚石上的直径 {diameter:g} mm 通孔任务，可继续进行工艺分析。",
-                context_updates={"task": {
-                    "material": {"name": "diamond", "description": "金刚石", "thickness_mm": thickness},
-                    "process_intent": "hole_drilling",
-                    "geometry": {"feature_type": "through_hole", "dimensions": {"diameter_mm": diameter}, "through": True},
-                }},
+                action="load_skill", skill_name="task_understanding",
+                decision_summary="一次提交通孔任务的材料、工件和全部几何事实，并继续形成方案。",
+                context_updates=updates,
+                provider="deterministic_task_intake", model="open-geometry-adapter",
+            )
+
+        diameter_update = re.search(
+            r"(?:通孔)?直径\s*(?:改成|改为|调整为|=|：|:)?\s*"
+            r"(?P<diameter>\d+(?:\.\d+)?)\s*(?:mm|毫米)", text,
+        )
+        if diameter_update and isinstance(current_geometry, dict) \
+                and current_geometry.get("feature_type") == "through_hole":
+            diameter = float(diameter_update.group("diameter"))
+            updates = {"task": {"geometry": {
+                "dimensions": {"diameter_mm": diameter},
+                "description": f"直径 {diameter:g} mm 通孔",
+            }}}
+            if cls._updates_already_present(working_context, updates):
+                return None
+            return AgentAction(
+                action="load_skill", skill_name="process_planning",
+                decision_summary="只更新用户明确修正的通孔直径，保留已有材料与厚度并继续规划。",
+                context_updates=updates,
                 provider="deterministic_task_intake", model="open-geometry-adapter",
             )
         return None
+
+    @staticmethod
+    def _updates_already_present(context: dict[str, Any], updates: dict[str, Any]) -> bool:
+        def contains(current: Any, expected: Any) -> bool:
+            if isinstance(expected, dict):
+                return isinstance(current, dict) and all(
+                    key in current and contains(current[key], value)
+                    for key, value in expected.items()
+                )
+            return current == expected
+
+        return contains(context, updates)
 
     @staticmethod
     def _unit_factor(unit: str) -> float:
@@ -336,7 +533,7 @@ class MainAgentPlanner:
         return (
             f"previous_output_errors={json.dumps(cls._safe_error_details(exc), ensure_ascii=False)}\n"
             "修复要求：只返回一个行动 JSON；context_updates 必须是对象；不要调用未注册的状态写入工具；"
-            "ask_user 必须合并 3–5 个编号问题，每题以问号结尾。"
+            "ask_user 只允许真正阻断任务的最少问题；final_answer 加工方案必须同时提供完整 process_plan 和 trial_plan。"
         )
 
     @staticmethod

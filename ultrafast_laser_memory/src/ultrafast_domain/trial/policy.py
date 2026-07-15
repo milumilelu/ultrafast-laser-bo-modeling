@@ -203,34 +203,6 @@ def _representative_geometry(task_spec: dict[str, Any], mode: TrialMode) -> str:
     return "single_track_rectangle_step_or_small_pocket"
 
 
-def _parameter_matrix(bounds: dict[str, Any], *, full: bool) -> list[dict[str, float | int]]:
-    usable = []
-    for name, value in sorted(bounds.items()):
-        if not isinstance(value, (list, tuple)) or len(value) != 2:
-            continue
-        try:
-            lower, upper = float(value[0]), float(value[1])
-        except (TypeError, ValueError):
-            continue
-        if lower <= upper:
-            usable.append((name, lower, upper))
-    if not usable:
-        return []
-    fractions = (
-        (0.1, 0.3, 0.5, 0.7, 0.9)
-        if not full
-        else (0.05, 0.1625, 0.275, 0.3875, 0.5, 0.6125, 0.725, 0.8375, 0.95)
-    )
-    rows = []
-    for fraction in fractions:
-        row = {}
-        for name, lower, upper in usable:
-            value = lower + fraction * (upper - lower)
-            row[name] = max(1, int(round(value))) if name == "passes" else float(value)
-        rows.append(row)
-    return rows
-
-
 def _acceptance_criteria(targets: dict[str, Any], metrics: list[str]) -> list[dict[str, Any]]:
     criteria: list[dict[str, Any]] = [{"type": "critical_defects_absent", "required": True}]
     for key, raw in targets.items():

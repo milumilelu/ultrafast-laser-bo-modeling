@@ -93,12 +93,10 @@ def run_main_agent_turn(
         turn_step += 1
         if turn_step > ABSOLUTE_EMERGENCY_DECISION_LIMIT:
             final_action = AgentAction(
-                action="ask_user", decision_summary="检测到 probable planning loop，已触发内部失控保护。",
+                action="final_answer", decision_summary="检测到 probable planning loop，已触发内部失控保护。",
                 message=(
-                    "当前规划未能继续产生有效进展，请一次确认以下事项：\n"
-                    "1. 是否保持当前加工目标继续重试？\n"
-                    "2. 是否有新的测量、设备告警或加工现象需要补充？\n"
-                    "3. 是否允许切换参数来源或回退到试切方案？"
+                    "内部规划连续未产生有效进展，已由 emergency breaker 停止。"
+                    "当前上下文和 Observation 已保留；请稍后重试或补充新的加工事实。"
                 ),
             )
             _publish(events, event_sink, _safe_trace(
@@ -207,12 +205,10 @@ def run_main_agent_turn(
             ))
             if repeated_no_progress[duplicate_key] >= 3:
                 final_action = AgentAction(
-                    action="ask_user", decision_summary="同一 Tool 观察连续未产生上下文进展，判定 probable planning loop。",
+                    action="final_answer", decision_summary="同一 Tool 观察连续未产生上下文进展，判定 probable planning loop。",
                     message=(
-                        "现有工具结果重复且没有新进展，请一次回答：\n"
-                        "1. 当前加工目标是否保持不变？\n"
-                        "2. 是否有新的工件、测量或设备信息？\n"
-                        "3. 是否同意改用其他证据或参数来源继续？"
+                        "同一工具结果被连续复用且未带来新进展，已停止 probable planning loop。"
+                        "现有上下文和工具观察均已保留；可在下一轮补充新事实或要求改用其他证据来源。"
                     ),
                     provider=action.provider, model=action.model,
                 )

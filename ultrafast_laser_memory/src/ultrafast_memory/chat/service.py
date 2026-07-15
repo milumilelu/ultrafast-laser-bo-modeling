@@ -55,7 +55,7 @@ def handle_chat(
         document_context = {"status": "read_error", "path_input": request.message.strip(), "error": str(exc)}
         agent_message = (
             "用户提交了本地加工需求文档路径，但系统读取失败。"
-            f"错误：{exc}。请说明可执行修复，并一次提出 3–5 个必要问题。"
+            f"错误：{exc}。请说明可执行修复；如必须追问，只提出恢复读取所需的最少问题。"
         )
         routing_message = "用户提交加工需求文档路径，但文档读取失败。"
 

@@ -50,7 +50,8 @@ def test_chat_projects_active_equipment_only_after_real_tool_call(isolated_root,
     response = handle_chat(ChatRequest(message="读取当前设备配置"))
 
     assert response.workflow_state["equipment_profile_used"]["equipment_profile_id"] == created["equipment_profile_id"]
-    assert response.workflow_state["machine_bounds"]["laser_power_W"] == [0.1, 20]
+    assert response.workflow_state["fixed_equipment_conditions"]["wavelength_nm"] == 1030
+    assert response.workflow_state["tunable_equipment_capabilities"]["laser_power_W"]["max"] == 20
     assert any(item["event_type"] == "tool_completed" for item in response.execution_trace)
 
 

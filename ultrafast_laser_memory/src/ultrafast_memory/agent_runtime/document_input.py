@@ -156,7 +156,7 @@ def _agent_message(metadata: dict, text: str) -> str:
     return (
         "用户通过本地文件路径提交了加工需求文档。请直接阅读文档，"
         "把明确事实写入 context_updates.task，不要要求用户重复文档中已有内容；"
-        "若仍有关键歧义，一次合并提出 3–5 个高价值问题。\n"
+        "只有缺少答案就无法合理继续的 Blocking Question 才 ask_user，且只问必要的最少问题。\n"
         f"文件名：{metadata['file_name']}\n"
         f"文件路径：{metadata['path']}\n"
         f"SHA256：{metadata['sha256']}"

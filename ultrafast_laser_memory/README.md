@@ -400,7 +400,7 @@ ultrafast
 
 聊天提示符可直接粘贴本地加工需求文档路径，也可输入 `/file <路径>`。路径可带引号；当前支持 TXT、Markdown、JSON、YAML、CSV/TSV、日志、文本型 PDF 和 DOCX。系统提取正文后直接交给 Main LLM 解析，并在 Working Context 中保留文件路径、SHA256 和截断状态；不会要求用户重复文档中已经给出的加工事实。扫描版 PDF 需要先完成 OCR。
 
-当任务仍有关键歧义时，`ask_user` 每轮必须合并提出 3–5 个编号问题。激光功率、频率、扫描速度等应由系统推荐的工艺变量不会被转嫁给用户。
+只有缺少答案就无法合理继续的 Blocking Question 才使用 `ask_user`，并且只问必要的最少问题；一个问题完全合法。激光功率、频率、扫描速度等应由系统规划的工艺变量不会被转嫁给用户。Assumption、Reminder、Warning 和 Optional Preference 均进入最终方案，不伪装成追问。
 
 该脚本会：
 
