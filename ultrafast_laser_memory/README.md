@@ -267,12 +267,16 @@ Working Context 允许部分信息、未知字段和自定义几何；具体 Too
 流式 `/chat/stream_ndjson` 会在 `delta` 前输出：
 
 ```json
-{"type":"progress","workflow_type":"main_agent","stage":"agent_planning","progress_percent":null}
+{"type":"progress","stage":"request_intake","message":"正在解析输入并确定执行路由。","progress_percent":null}
 {"type":"thinking_status","event_type":"agent_planning_started","summary":"正在根据 Working Context 规划下一动作。"}
-{"type":"heartbeat","component":"main_agent_planner","elapsed_s":3.0}
+{"type":"heartbeat","wait_kind":"model","wait_name":"deepseek/deepseek-v4-flash","wait_component":"main_agent_planner","wait_attempt":"1","summary":"等待模型 deepseek/deepseek-v4-flash（主 Agent 规划，第 1 次调用）返回。","elapsed_s":3.0}
+{"type":"heartbeat","wait_kind":"tool","wait_name":"get_equipment_context","wait_component":"Read the authoritative equipment revision and machine bounds.","summary":"等待工具 get_equipment_context 返回：Read the authoritative equipment revision and machine bounds.","elapsed_s":6.0}
 {"type":"delta","content":"..."}
 {"type":"done"}
 ```
+
+心跳中的 `wait_kind` 明确区分 `model`、`tool` 和 `stage`；模型名使用
+`provider/model`，Tool 使用注册名，不再输出“等待模型或工具”这类不确定描述。
 
 查看当前会话进度：
 

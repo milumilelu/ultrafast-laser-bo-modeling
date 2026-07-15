@@ -142,7 +142,21 @@ def handle_chat(
             trace_mode=_public_trace_mode(session_id),
         )
 
-    route_plan = route_message(routing_message, session_id, user_message["message_id"])
+    def publish_router_model_call(call: dict[str, Any]) -> None:
+        _emit_live(event_sink, _model_call_trace(
+            session_id=session_id,
+            message_id=user_message["message_id"],
+            call=call,
+            stage="routing",
+            component_label="Skill 路由",
+        ))
+
+    route_plan = route_message(
+        routing_message,
+        session_id,
+        user_message["message_id"],
+        model_call_sink=publish_router_model_call,
+    )
     selected_skill = route_plan.primary_skill
     route_event = _record_route_decision_trace(
         session_id, user_message["message_id"], routing_message, route_plan
@@ -211,10 +225,10 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     }
     yield {
         "type": "progress",
-        "stage": "agent_planning",
+        "stage": "request_intake",
         "progress_percent": None,
         "status": "running",
-        "message": "正在理解任务并规划下一动作。",
+        "message": "正在解析输入并确定执行路由。",
     }
 
     queue: Queue[tuple[str, Any]] = Queue()
@@ -232,6 +246,11 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     Thread(target=produce, name=f"chat-stream-{session_id[:8]}", daemon=True).start()
     response: ChatResponse | None = None
     live_event_ids: set[str] = set()
+    wait_target = {
+        "wait_kind": "stage",
+        "wait_name": "request_intake",
+        "wait_component": "请求解析与路由选择",
+    }
     while response is None:
         try:
             item_type, item = queue.get(timeout=STREAM_HEARTBEAT_SECONDS)
@@ -239,15 +258,17 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
             yield {
                 "type": "heartbeat",
                 "event_type": "heartbeat",
-                "stage": "agent_planning",
+                "stage": wait_target["wait_name"],
                 "title": "Agent 执行中",
-                "summary": "仍在等待模型或工具返回。",
+                "summary": _wait_summary(wait_target),
                 "status": "running",
                 "elapsed_s": round(monotonic() - started_at, 1),
+                **wait_target,
             }
             continue
         if item_type == "event":
             event = dict(item)
+            wait_target = _wait_target_from_event(event, wait_target)
             if event.get("event_id"):
                 live_event_ids.add(str(event["event_id"]))
             if event.get("event_type") in {"decision", "agent_decision", "agent_planning_started"}:
@@ -315,6 +336,99 @@ def _emit_live(
         sink(event)
     except Exception:  # noqa: BLE001 - observability must not break domain execution
         return
+
+
+def _model_call_trace(
+    *, session_id: str, message_id: str | None, call: dict[str, Any],
+    stage: str, component_label: str,
+) -> dict[str, Any]:
+    provider = str(call.get("provider") or "unknown-provider")
+    model = str(call.get("model") or "unknown-model")
+    attempt = int(call.get("attempt") or 1)
+    model_name = f"{provider}/{model}"
+    summary = f"正在等待模型 {model_name} 完成{component_label}（第 {attempt} 次调用）。"
+    try:
+        return record_agent_trace_event(
+            session_id=session_id,
+            message_id=message_id,
+            event_type="model_call_started",
+            stage=stage,
+            title=f"调用模型 {model_name}",
+            summary=summary,
+            status="running",
+            payload=call,
+        )
+    except Exception:  # noqa: BLE001 - observability cannot block routing
+        return {
+            "event_id": stable_id("model-call", session_id, message_id or "", stage, utc_now_iso()),
+            "event_type": "model_call_started",
+            "stage": stage,
+            "title": f"调用模型 {model_name}",
+            "summary": summary,
+            "status": "running",
+            "payload": call,
+        }
+
+
+def _wait_target_from_event(event: dict[str, Any], current: dict[str, str]) -> dict[str, str]:
+    event_type = str(event.get("event_type") or "")
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    if event_type == "model_call_started":
+        provider = str(payload.get("provider") or "unknown-provider")
+        model = str(payload.get("model") or "unknown-model")
+        component = str(payload.get("component") or event.get("stage") or "model_call")
+        attempt = str(payload.get("attempt") or 1)
+        return {
+            "wait_kind": "model",
+            "wait_name": f"{provider}/{model}",
+            "wait_component": component,
+            "wait_attempt": attempt,
+        }
+    if event_type == "tool_call_started":
+        tool = str(event.get("tool") or event.get("tool_name") or "unknown-tool")
+        return {
+            "wait_kind": "tool",
+            "wait_name": tool,
+            "wait_component": str(event.get("summary") or event.get("title") or "Tool 执行"),
+        }
+    completed_stages = {
+        "decision": "启动主 Agent",
+        "agent_decision": "应用主 Agent 决策",
+        "tool_completed": "保存工具观察并规划下一动作",
+        "tool_failed": "保存工具失败观察并规划下一动作",
+        "tool_cache_hit": "复用工具观察并规划下一动作",
+        "document_loaded": "将文档内容写入 Working Context",
+    }
+    if event_type in completed_stages:
+        return {
+            "wait_kind": "stage",
+            "wait_name": str(event.get("stage") or event_type),
+            "wait_component": completed_stages[event_type],
+        }
+    if event_type == "agent_planning_started":
+        return {
+            "wait_kind": "stage",
+            "wait_name": "agent_planning",
+            "wait_component": "主 Agent 本地规划准备",
+        }
+    return current
+
+
+def _wait_summary(target: dict[str, str]) -> str:
+    kind = target.get("wait_kind")
+    name = target.get("wait_name") or "unknown"
+    component = target.get("wait_component") or ""
+    if kind == "model":
+        attempt = target.get("wait_attempt") or "1"
+        labels = {
+            "llm_router": "Skill 路由",
+            "main_agent_planner": "主 Agent 规划",
+        }
+        label = labels.get(component, component)
+        return f"等待模型 {name}（{label}，第 {attempt} 次调用）返回。"
+    if kind == "tool":
+        return f"等待工具 {name} 返回：{component}"
+    return f"等待内部阶段「{component or name}」完成。"
 
 
 def _title_from_message(message: str) -> str:

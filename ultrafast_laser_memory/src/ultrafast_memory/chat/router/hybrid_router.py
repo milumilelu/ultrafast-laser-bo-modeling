@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 from ultrafast_memory.chat.router.debug_commands import handle_debug_command
 from ultrafast_memory.chat.router.llm_router import llm_route
@@ -18,6 +20,7 @@ def route_message(
     session_id: str,
     message_id: str | None = None,
     use_llm_router: bool = True,
+    model_call_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> RoutePlan:
     create_or_get_session_state(session_id)
     debug_result = handle_debug_command(message, session_id)
@@ -57,7 +60,7 @@ def route_message(
     elif candidate and candidate.confidence >= 0.9:
         plan = candidate
     elif use_llm_router:
-        plan = llm_route(message, state, candidate)
+        plan = llm_route(message, state, candidate, model_call_sink=model_call_sink)
     else:
         plan = candidate or fallback_route()
     if not plan:

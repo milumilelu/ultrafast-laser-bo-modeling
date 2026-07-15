@@ -118,11 +118,157 @@ def test_stream_publishes_live_status_and_heartbeat_while_llm_is_blocked(
         live_events.append(next(stream))
         if (
             sum(item["type"] == "thinking_status" for item in live_events) >= 2
-            and any(item["type"] == "heartbeat" for item in live_events)
+            and any(
+                item["type"] == "heartbeat" and item["wait_kind"] == "model"
+                for item in live_events
+            )
         ):
             break
     assert sum(item["type"] == "thinking_status" for item in live_events) >= 2
-    heartbeat = next(item for item in live_events if item["type"] == "heartbeat")
+    heartbeat = next(
+        item for item in live_events
+        if item["type"] == "heartbeat" and item["wait_kind"] == "model"
+    )
     assert heartbeat["elapsed_s"] >= 0
+    assert heartbeat["wait_kind"] == "model"
+    assert heartbeat["wait_name"] == "test/blocking"
+    assert heartbeat["wait_component"] == "main_agent_planner"
+    assert heartbeat["summary"] == "等待模型 test/blocking（主 Agent 规划，第 1 次调用）返回。"
+    release.set()
+    assert any(item["type"] == "delta" and item["content"] == "done" for item in stream)
+
+
+def test_stream_heartbeat_names_the_blocking_router_model(isolated_root, monkeypatch) -> None:
+    init_database()
+    release = Event()
+
+    class BlockingRouterLLM:
+        provider = "test-router"
+        model = "route-model"
+
+        def chat(self, messages, **kwargs):
+            assert release.wait(timeout=5)
+            return {
+                "provider": self.provider,
+                "model": self.model,
+                "content": json.dumps({
+                    "primary_skill": "task_understanding",
+                    "secondary_skills": [],
+                    "intent": "skill_hint",
+                    "workflow_stage": "agent_planning",
+                    "confidence": 0.6,
+                    "reason": "route complete",
+                }),
+            }
+
+    class AnswerLLM:
+        provider = "test"
+        model = "answer"
+
+        def chat(self, messages, **kwargs):
+            return {
+                "provider": self.provider,
+                "model": self.model,
+                "content": json.dumps({
+                    "action": "final_answer",
+                    "decision_summary": "complete",
+                    "message": "done",
+                }),
+            }
+
+    monkeypatch.setattr(
+        "ultrafast_memory.chat.router.llm_router.create_llm_client",
+        lambda config: BlockingRouterLLM(),
+    )
+    monkeypatch.setattr("ultrafast_memory.chat.service.create_llm_client", lambda config: AnswerLLM())
+    monkeypatch.setattr("ultrafast_memory.chat.service.STREAM_HEARTBEAT_SECONDS", 0.01)
+    stream = handle_chat_stream_ndjson(ChatRequest(message="分析这个普通任务", stream=True))
+
+    assert next(stream)["type"] == "meta"
+    assert next(stream)["type"] == "progress"
+    heartbeat = None
+    for _ in range(300):
+        item = next(stream)
+        if item["type"] == "heartbeat" and item["wait_kind"] == "model":
+            heartbeat = item
+            break
+
+    assert heartbeat is not None
+    assert heartbeat["wait_name"] == "test-router/route-model"
+    assert heartbeat["wait_component"] == "llm_router"
+    assert heartbeat["summary"] == (
+        "等待模型 test-router/route-model（Skill 路由，第 1 次调用）返回。"
+    )
+    release.set()
+    assert any(item["type"] == "delta" and item["content"] == "done" for item in stream)
+
+
+def test_stream_heartbeat_names_the_blocking_tool(isolated_root, monkeypatch) -> None:
+    init_database()
+    release = Event()
+
+    class ToolThenAnswerLLM:
+        provider = "test"
+        model = "tool-planner"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                content = {
+                    "action": "call_tool",
+                    "decision_summary": "read equipment",
+                    "tool_name": "get_equipment_context",
+                    "arguments": {},
+                }
+            else:
+                content = {
+                    "action": "final_answer",
+                    "decision_summary": "complete",
+                    "message": "done",
+                }
+            return {"provider": self.provider, "model": self.model, "content": json.dumps(content)}
+
+    class BlockingExecution:
+        def to_tool_result(self, tool_name):
+            return {
+                "tool_name": tool_name,
+                "status": "success",
+                "summary": "equipment loaded",
+                "data": {},
+            }
+
+    class BlockingToolExecutor:
+        def __init__(self, registry) -> None:
+            self.registry = registry
+
+        def execute(self, tool_name, arguments, context):
+            assert tool_name == "get_equipment_context"
+            assert release.wait(timeout=5)
+            return BlockingExecution()
+
+    llm = ToolThenAnswerLLM()
+    monkeypatch.setattr("ultrafast_memory.chat.service.create_llm_client", lambda config: llm)
+    monkeypatch.setattr(
+        "ultrafast_memory.agent_runtime.main_agent_loop.ToolExecutor",
+        BlockingToolExecutor,
+    )
+    monkeypatch.setattr("ultrafast_memory.chat.service.STREAM_HEARTBEAT_SECONDS", 0.01)
+    stream = handle_chat_stream_ndjson(ChatRequest(message="分析并读取设备边界", stream=True))
+
+    assert next(stream)["type"] == "meta"
+    assert next(stream)["type"] == "progress"
+    heartbeat = None
+    for _ in range(300):
+        item = next(stream)
+        if item["type"] == "heartbeat" and item["wait_kind"] == "tool":
+            heartbeat = item
+            break
+
+    assert heartbeat is not None
+    assert heartbeat["wait_name"] == "get_equipment_context"
+    assert heartbeat["summary"].startswith("等待工具 get_equipment_context 返回：")
     release.set()
     assert any(item["type"] == "delta" and item["content"] == "done" for item in stream)

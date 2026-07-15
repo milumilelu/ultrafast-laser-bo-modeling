@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,6 +26,7 @@ class MainAgentPlanner:
         recent_tool_results: list[dict[str, Any]] | None = None,
         skill_catalog: list[dict[str, Any]] | None = None,
         runtime_hints: dict[str, Any] | None = None,
+        model_call_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentAction:
         deterministic = self._deterministic_task_action(message, working_context)
         if deterministic is not None:
@@ -56,6 +58,7 @@ class MainAgentPlanner:
                 if attempt == 0:
                     options["response_format"] = {"type": "json_object"}
                 repair = "" if attempt == 0 else "\n" + self._repair_note(last_error)
+                self._emit_model_call(model_call_sink, attempt + 1, int(options["timeout"]))
                 result = self.client.chat([
                     {"role": "system", "content": self._system_prompt()},
                     {"role": "user", "content": prompt + repair},
@@ -86,6 +89,25 @@ class MainAgentPlanner:
             model=getattr(self.client, "model", None),
             error_details=self._safe_error_details(last_error),
         )
+
+    def _emit_model_call(
+        self,
+        sink: Callable[[dict[str, Any]], None] | None,
+        attempt: int,
+        timeout_s: int,
+    ) -> None:
+        if sink is None:
+            return
+        try:
+            sink({
+                "provider": getattr(self.client, "provider", None),
+                "model": getattr(self.client, "model", None),
+                "component": "main_agent_planner",
+                "attempt": attempt,
+                "timeout_s": timeout_s,
+            })
+        except Exception:  # noqa: BLE001 - observability cannot block planning
+            return
 
     @staticmethod
     def _validate_action(raw: dict[str, Any], available_tool_names: list[str], skill_names: list[str]) -> AgentAction:

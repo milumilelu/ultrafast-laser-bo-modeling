@@ -114,6 +114,19 @@ def run_main_agent_turn(
             "正在根据 Working Context 和最新观察规划下一动作。", "running", {"sequence": turn_step}, warnings,
         )
         _publish(events, event_sink, planning)
+
+        def publish_planner_model_call(call: dict[str, Any]) -> None:
+            provider = str(call.get("provider") or "unknown-provider")
+            model = str(call.get("model") or "unknown-model")
+            attempt = int(call.get("attempt") or 1)
+            model_name = f"{provider}/{model}"
+            _publish(events, event_sink, _safe_trace(
+                session_id, message_id, "model_call_started", "agent_planning",
+                f"调用模型 {model_name}",
+                f"正在等待模型 {model_name} 完成主 Agent 规划（第 {attempt} 次调用）。",
+                "running", call, warnings,
+            ))
+
         action = planner.decide(
             message=message,
             working_context=working.model_dump(mode="json"),
@@ -122,6 +135,7 @@ def run_main_agent_turn(
             recent_tool_results=observations,
             skill_catalog=skills.catalog_for_agent(),
             runtime_hints={"suggested_skills": suggested_skills or [], "router_is_hint_only": True},
+            model_call_sink=publish_planner_model_call,
         )
         final_action = action
         total_decisions += 1

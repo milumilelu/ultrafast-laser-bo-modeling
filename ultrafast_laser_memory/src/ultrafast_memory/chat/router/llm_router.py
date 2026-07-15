@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -10,13 +12,19 @@ from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.llm.mock import MockLLMClient
 
 
-def llm_route(message: str, session_state: dict, candidate_route: RoutePlan | None = None) -> RoutePlan:
+def llm_route(
+    message: str,
+    session_state: dict,
+    candidate_route: RoutePlan | None = None,
+    model_call_sink: Callable[[dict[str, Any]], None] | None = None,
+) -> RoutePlan:
     cfg = get_llm_config()
     client = create_llm_client(cfg)
     if isinstance(client, MockLLMClient):
         return _candidate_or_fallback(candidate_route)
     prompt = _build_router_prompt(message, session_state, candidate_route)
     try:
+        _emit_model_call(model_call_sink, client)
         result = client.chat([{"role": "system", "content": prompt}], temperature=0)
         raw = result.get("content") or "{}"
         data = json.loads(raw)
@@ -25,6 +33,23 @@ def llm_route(message: str, session_state: dict, candidate_route: RoutePlan | No
         return route
     except (json.JSONDecodeError, ValidationError, Exception):
         return _candidate_or_fallback(candidate_route)
+
+
+def _emit_model_call(
+    sink: Callable[[dict[str, Any]], None] | None,
+    client: Any,
+) -> None:
+    if sink is None:
+        return
+    try:
+        sink({
+            "provider": getattr(client, "provider", None),
+            "model": getattr(client, "model", None),
+            "component": "llm_router",
+            "attempt": 1,
+        })
+    except Exception:  # noqa: BLE001 - observability cannot block routing
+        return
 
 
 def _candidate_or_fallback(candidate_route: RoutePlan | None) -> RoutePlan:
