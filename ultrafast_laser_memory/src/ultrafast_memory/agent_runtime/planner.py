@@ -52,7 +52,7 @@ class MainAgentPlanner:
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                options: dict[str, Any] = {"temperature": 0, "timeout": 25}
+                options: dict[str, Any] = {"temperature": 0, "timeout": 60}
                 if attempt == 0:
                     options["response_format"] = {"type": "json_object"}
                 repair = "" if attempt == 0 else "\n" + self._repair_note(last_error)

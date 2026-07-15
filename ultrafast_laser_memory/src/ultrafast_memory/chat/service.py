@@ -43,18 +43,21 @@ def handle_chat(
 ) -> ChatResponse:
     session_id = _ensure_session(request)
     agent_message = request.message
+    routing_message = request.message
     document_context: dict[str, Any] | None = None
     try:
         document = load_document_from_message(request.message)
         if document is not None:
             agent_message = str(document["agent_message"])
             document_context = public_document_metadata(document)
+            routing_message = f"用户提交加工需求文档 {document_context['file_name']}，需要解析加工任务。"
     except DocumentReadError as exc:
         document_context = {"status": "read_error", "path_input": request.message.strip(), "error": str(exc)}
         agent_message = (
             "用户提交了本地加工需求文档路径，但系统读取失败。"
             f"错误：{exc}。请说明可执行修复，并一次提出 3–5 个必要问题。"
         )
+        routing_message = "用户提交加工需求文档路径，但文档读取失败。"
 
     user_metadata: dict[str, Any] = {"mode": request.mode}
     if document_context is not None:
@@ -139,10 +142,10 @@ def handle_chat(
             trace_mode=_public_trace_mode(session_id),
         )
 
-    route_plan = route_message(agent_message, session_id, user_message["message_id"])
+    route_plan = route_message(routing_message, session_id, user_message["message_id"])
     selected_skill = route_plan.primary_skill
     route_event = _record_route_decision_trace(
-        session_id, user_message["message_id"], agent_message, route_plan
+        session_id, user_message["message_id"], routing_message, route_plan
     )
     _emit_live(event_sink, route_event)
     try:
