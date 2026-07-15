@@ -1067,6 +1067,8 @@ function Send-AgentChatStream {
                 Show-AgentProgressBar -Percent $event.progress_percent -Stage $event.stage -Message $event.message
             } elseif ($event.type -eq "thinking_status") {
                 Show-AgentThinkingStatus -Title $event.title -Summary $event.summary
+            } elseif ($event.type -eq "heartbeat") {
+                Write-Host ("[处理中] {0} {1}s" -f $event.summary, $event.elapsed_s) -ForegroundColor DarkGray
             } elseif ($event.type -eq "agent_trace") {
                 if ((Get-AgentDisplayMode) -ne "normal" -and -not $traceHeaderShown) {
                     Write-Host "▼ 执行轨迹" -ForegroundColor Cyan

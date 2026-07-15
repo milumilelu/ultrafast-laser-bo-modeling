@@ -24,13 +24,13 @@ STATE_DEFAULTS = {
     "pending_bootstrap_permission": False,
     "active_skills_json": [],
     "agent_observations_json": [],
-    "agent_step_count": 0,
+    "agent_decision_count": 0,
     "last_agent_action_json": {},
     "suggested_skill_hint": {},
 }
 
 AGENT_RUNTIME_KEYS = {
-    "active_skills_json", "agent_observations_json", "agent_step_count",
+    "active_skills_json", "agent_observations_json", "agent_decision_count",
     "last_agent_action_json", "suggested_skill_hint",
 }
 

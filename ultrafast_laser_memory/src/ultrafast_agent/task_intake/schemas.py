@@ -20,6 +20,9 @@ ALLOWED_TASK_FIELDS = frozenset(
         "auxiliary",
         "component_type",
         "focus_tracking",
+        # Generic feature geometry. New feature types belong inside this
+        # object instead of creating scenario-specific top-level fields.
+        "geometry",
         # Cutting geometry.
         "cut_length_mm",
         "contour_type",
@@ -51,6 +54,8 @@ EXPECTED_ANSWER_TYPES = {
     "taper_requirement": "quality_requirement",
     "entrance_quality": "quality_requirement",
     "exit_quality": "quality_requirement",
+    "geometry": "geometry_object",
+    "geometry.depth_mm": "length",
 }
 
 

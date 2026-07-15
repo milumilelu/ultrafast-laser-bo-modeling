@@ -31,6 +31,9 @@ class MainAgentPlanner:
         recent_tool_results: list[dict[str, Any]] | None = None,
         skill_catalog: list[dict[str, Any]] | None = None,
     ) -> AgentAction:
+        deterministic = self._deterministic_task_action(message, task_spec, context)
+        if deterministic is not None:
+            return deterministic
         explicit = StrictKeyValueParser().parse(message, context)
         if explicit is not None:
             return AgentAction(
@@ -185,9 +188,18 @@ class MainAgentPlanner:
             match = re.search(rf"{number}\s*(?:mm|毫米|cm|厘米|um|μm|µm)", user_message, re.I)
             return match.group(0) if match else (text if text and text in user_message else "")
         if field == "process_type":
-            return next((marker for marker in ("切割", "通孔", "钻孔", "打孔", "刻蚀") if marker in user_message), "")
+            return next((marker for marker in ("矩形槽", "开槽", "槽加工", "切割", "通孔", "钻孔", "打孔", "刻蚀") if marker in user_message), "")
         if field == "material":
+            if text and text in user_message:
+                return text
             return next((marker for marker in ("碳纤维复合板", "碳纤维复合材料", "碳纤维", "金刚石") if marker in user_message), "")
+        if field == "geometry":
+            match = re.search(
+                r"\d+(?:\.\d+)?\s*[*xX×]\s*\d+(?:\.\d+)?\s*(?:mm|毫米|cm|厘米|um|μm|µm)?\s*的?矩形槽",
+                user_message,
+                re.I,
+            )
+            return match.group(0) if match else ""
         return text if text and text in user_message else ""
 
     @staticmethod
@@ -200,19 +212,20 @@ class MainAgentPlanner:
             "process_type": "process_type",
             "objective": "objective",
             "quality": "quality_requirement",
+            "geometry": "geometry",
         }
         result = []
         for source, value in updates.items():
             field = field_aliases.get(str(source))
             if not field:
                 continue
-            evidence = str(value)
+            evidence = MainAgentPlanner._literal_evidence(field, value, user_message)
             if evidence not in user_message and field == "process_type":
-                evidence = next((marker for marker in ("切割", "通孔", "钻孔", "打孔", "刻蚀") if marker in user_message), "")
+                evidence = next((marker for marker in ("矩形槽", "开槽", "槽加工", "切割", "通孔", "钻孔", "打孔", "刻蚀") if marker in user_message), "")
             unit = "mm" if field.endswith("_mm") and re.search(r"(?:mm|毫米)", str(value), re.I) else None
             result.append({"field_name": field, "value": value, "unit": unit, "evidence": evidence})
         if not any(item["field_name"] == "process_type" for item in result):
-            marker = next((item for item in ("切割", "通孔", "钻孔", "打孔", "刻蚀") if item in user_message), None)
+            marker = next((item for item in ("矩形槽", "开槽", "槽加工", "切割", "通孔", "钻孔", "打孔", "刻蚀") if item in user_message), None)
             if marker:
                 result.append({"field_name": "process_type", "value": marker, "unit": None, "evidence": marker})
         return result
@@ -242,11 +255,16 @@ class MainAgentPlanner:
             "只返回一个 JSON 对象，禁止返回 actions 数组、Markdown 或多个动作。"
             "唯一字段协议：action, decision_summary, skill_name, tool_name, arguments, message。"
             "action 只能是 load_skill、unload_skill、call_tool、ask_user、final_answer。"
-            "用户明确提供或修正任务事实时，先调用 update_task_context；updates 必须是数组，"
+            "用户明确提供或修正任务事实时，必须在一次 update_task_context 中提交该消息的全部明确事实，"
+            "不得拆成每个字段一次调用。updates 必须是数组，"
             "每项使用 field_name、value、unit、evidence。自然语言中的加工动词也应写入 process_type。"
+            "几何统一写入 geometry 对象：feature_type、dimensions（*_mm）、depth_mm、description；"
+            "不得创建新的场景专用顶层字段。"
             "不得直接声称状态已修改。Skill 只是可选专业指导，不是流程状态机。"
             "初始只暴露基础工具；需要专业能力时先 load_skill。TaskSpec 渐进补充，"
-            "只在下一工具确实需要时询问缺失字段。不得生成无证据的参数，不得绕过设备边界、"
+            "如果关键歧义会显著改变加工路线、参数空间或工具输入，必须优先 ask_user，"
+            "不得为了继续执行而调用低价值工具。例如矩形槽缺少槽深必须先追问；激光功率等工艺决策变量不应询问用户。"
+            "不得生成无证据的参数，不得绕过设备边界、"
             "数据准入、知识审核或人工批准。不得因为用户未使用固定格式而拒绝理解自然语言。"
         )
 
@@ -274,12 +292,170 @@ class MainAgentPlanner:
             f"missing_fields={json.dumps(context.pending_fields, ensure_ascii=False)}\n"
             f"previous_questions={json.dumps(context.previous_questions, ensure_ascii=False)}\n"
             f"expected_answer_types={json.dumps(context.expected_answer_types, ensure_ascii=False)}\n"
+            f"critical_ambiguities={json.dumps(MainAgentPlanner._critical_ambiguities(task_spec), ensure_ascii=False)}\n"
             f"trial_campaign={json.dumps(campaign, ensure_ascii=False)}\n"
             f"recent_tool_results={json.dumps(recent_tool_results[-3:], ensure_ascii=False)}\n"
             f"active_skills={json.dumps(active_skills, ensure_ascii=False)}\n"
             f"skill_catalog={json.dumps(skill_catalog, ensure_ascii=False)}\n"
             f"available_tools={json.dumps(available_tools, ensure_ascii=False)}"
         )
+
+    @classmethod
+    def _deterministic_task_action(
+        cls,
+        message: str,
+        task_spec: dict[str, Any],
+        context: ClarificationContext,
+    ) -> AgentAction | None:
+        groove = re.search(
+            r"^(?:在)?(?P<material>.+?)(?:上|中)加工\s*"
+            r"(?P<length>\d+(?:\.\d+)?)\s*[*xX×]\s*(?P<width>\d+(?:\.\d+)?)\s*"
+            r"(?P<unit>mm|毫米|cm|厘米|um|μm|µm)?\s*的?矩形槽",
+            message.strip(),
+            re.I,
+        )
+        if groove:
+            factor = {"cm": 10.0, "厘米": 10.0, "um": 0.001, "μm": 0.001, "µm": 0.001}.get(
+                (groove.group("unit") or "mm").lower(), 1.0
+            )
+            geometry: dict[str, Any] = {
+                "feature_type": "rectangular_groove",
+                "dimensions": {
+                    "length_mm": float(groove.group("length")) * factor,
+                    "width_mm": float(groove.group("width")) * factor,
+                },
+            }
+            depth = cls._depth_from_message(
+                message, allow_bare="geometry.depth_mm" in context.pending_fields,
+            )
+            if depth is not None:
+                geometry["depth_mm"] = depth
+            if re.search(r"(?:贯穿|通槽)", message):
+                geometry["through"] = True
+            normalized = {
+                "material": groove.group("material").strip(),
+                "process_type": "groove_machining",
+                "geometry": geometry,
+            }
+            if not all(task_spec.get(key) == value for key, value in normalized.items()):
+                geometry_evidence = groove.group(0)[groove.group(0).find(groove.group("length")):]
+                return AgentAction(
+                    action="call_tool",
+                    decision_summary="一次性保存用户明确提供的材料、加工意图和通用几何。",
+                    tool_name="update_task_context",
+                    arguments={"updates": [
+                        {"field_name": "material", "value": normalized["material"], "unit": None, "evidence": groove.group("material")},
+                        {"field_name": "process_type", "value": "groove_machining", "unit": None, "evidence": "矩形槽"},
+                        {"field_name": "geometry", "value": geometry, "unit": None, "evidence": geometry_evidence},
+                    ]},
+                    provider="deterministic_geometry_intake",
+                    model="generic-geometry-adapter",
+                )
+
+        depth = cls._depth_from_message(
+            message, allow_bare="geometry.depth_mm" in context.pending_fields,
+        )
+        current_geometry = task_spec.get("geometry")
+        if depth is not None and isinstance(current_geometry, dict) and current_geometry.get("depth_mm") is None:
+            evidence = re.search(r"(?:槽深|深度)\s*(?:为|是|=|：|:)?\s*\d+(?:\.\d+)?\s*(?:mm|毫米|cm|厘米|um|μm|µm)", message, re.I)
+            return AgentAction(
+                action="call_tool",
+                decision_summary="保存用户补充的槽深。",
+                tool_name="update_task_context",
+                arguments={"updates": [{
+                    "field_name": "geometry",
+                    "value": {"feature_type": current_geometry.get("feature_type", "custom"), "depth_mm": depth},
+                    "unit": None,
+                    "evidence": evidence.group(0) if evidence else message.strip(),
+                }]},
+                provider="deterministic_geometry_intake",
+                model="generic-geometry-adapter",
+            )
+        through_reply = bool(re.search(r"(?:贯穿|通槽)", message))
+        if (
+            through_reply
+            and isinstance(current_geometry, dict)
+            and not current_geometry.get("through")
+            and current_geometry.get("depth_mm") is None
+        ):
+            return AgentAction(
+                action="call_tool",
+                decision_summary="保存用户补充的贯穿要求。",
+                tool_name="update_task_context",
+                arguments={"updates": [{
+                    "field_name": "geometry",
+                    "value": {"feature_type": current_geometry.get("feature_type", "custom"), "through": True},
+                    "unit": None,
+                    "evidence": "贯穿" if "贯穿" in message else "通槽",
+                }]},
+                provider="deterministic_geometry_intake",
+                model="generic-geometry-adapter",
+            )
+        if (
+            depth is not None
+            and isinstance(current_geometry, dict)
+            and current_geometry.get("depth_mm") is not None
+            and abs(float(current_geometry["depth_mm"]) - depth) < 1e-9
+        ):
+            return AgentAction(
+                action="final_answer",
+                decision_summary="用户提供的槽深已完成校验和保存。",
+                message="已记录矩形槽的平面尺寸和目标深度。",
+                provider="deterministic_geometry_intake",
+                model="generic-geometry-adapter",
+            )
+        if through_reply and isinstance(current_geometry, dict) and current_geometry.get("through"):
+            return AgentAction(
+                action="final_answer",
+                decision_summary="用户提供的贯穿要求已完成校验和保存。",
+                message="已记录矩形槽的平面尺寸和贯穿要求。",
+                provider="deterministic_geometry_intake",
+                model="generic-geometry-adapter",
+            )
+
+        ambiguities = cls._critical_ambiguities(task_spec)
+        if "geometry.depth_mm" in ambiguities:
+            return AgentAction(
+                action="ask_user",
+                decision_summary="槽深会显著改变加工路线和参数空间，必须先确认。",
+                message="已识别为矩形槽加工任务。请提供矩形槽的目标深度（或说明是否贯穿）。",
+                provider="deterministic_critical_ambiguity",
+                model="generic-geometry-adapter",
+            )
+        return None
+
+    @staticmethod
+    def _depth_from_message(message: str, *, allow_bare: bool = False) -> float | None:
+        match = re.search(
+            r"(?:槽深|深度)\s*(?:为|是|=|：|:)?\s*(?P<value>\d+(?:\.\d+)?)\s*"
+            r"(?P<unit>mm|毫米|cm|厘米|um|μm|µm)",
+            message,
+            re.I,
+        )
+        if not match and allow_bare:
+            match = re.fullmatch(
+                r"\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>mm|毫米|cm|厘米|um|μm|µm)\s*[.。]?\s*",
+                message,
+                re.I,
+            )
+        if not match:
+            return None
+        factor = {"cm": 10.0, "厘米": 10.0, "um": 0.001, "μm": 0.001, "µm": 0.001}.get(
+            match.group("unit").lower(), 1.0
+        )
+        return float(match.group("value")) * factor
+
+    @staticmethod
+    def _critical_ambiguities(task_spec: dict[str, Any]) -> list[str]:
+        geometry = task_spec.get("geometry")
+        if (
+            isinstance(geometry, dict)
+            and geometry.get("feature_type") in {"groove", "rectangular_groove"}
+            and geometry.get("depth_mm") is None
+            and not geometry.get("through")
+        ):
+            return ["geometry.depth_mm"]
+        return []
 
     @classmethod
     def _repair_note(cls, exc: Exception) -> str:

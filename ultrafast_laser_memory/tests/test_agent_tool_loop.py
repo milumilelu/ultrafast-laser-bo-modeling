@@ -68,5 +68,5 @@ def test_semantically_repeated_task_update_stops_with_success(isolated_root):
         "material": "CFRP", "thickness_mm": 2.0, "process_type": "cutting",
     }
     assert result["final_action"]["action"] == "final_answer"
-    assert len(result["tool_calls"]) == 2
+    assert len(result["tool_calls"]) == 1
     assert "未经验证的工艺参数" in result["content"]

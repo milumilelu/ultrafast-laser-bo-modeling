@@ -61,7 +61,12 @@ class TaskFieldNormalizer:
                 "打孔": "drilling",
                 "切割": "cutting",
                 "刻蚀": "engraving",
+                "开槽": "groove_machining",
+                "槽加工": "groove_machining",
+                "矩形槽": "groove_machining",
             })
+        elif field == "geometry":
+            value = cls._geometry(raw)
         elif field == "material":
             value = cls._enum(raw, {
                 "碳纤维复合板": "CFRP",
@@ -77,6 +82,34 @@ class TaskFieldNormalizer:
                 "无明显热损伤": "no_thermal_damage",
             })
         return candidate.model_copy(update={"normalized_value": value, "unit": unit})
+
+    @classmethod
+    def _geometry(cls, raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            raise TypeError("geometry must be an object")
+        geometry = dict(raw)
+        feature_type = geometry.get("feature_type")
+        description = geometry.get("description")
+        if not isinstance(feature_type, str) or not feature_type.strip():
+            if isinstance(description, str) and description.strip():
+                geometry["feature_type"] = "custom"
+            else:
+                raise ValueError("geometry requires feature_type or description")
+        dimensions = geometry.get("dimensions")
+        if dimensions is not None:
+            if not isinstance(dimensions, dict):
+                raise TypeError("geometry dimensions must be an object")
+            normalized_dimensions: dict[str, float] = {}
+            for name, raw_value in dimensions.items():
+                if not str(name).endswith("_mm"):
+                    raise ValueError("geometry dimension keys must end with _mm")
+                number, unit = cls._length(raw_value, None)
+                normalized_dimensions[str(name)] = number * _LENGTH_FACTORS[unit]
+            geometry["dimensions"] = normalized_dimensions
+        if geometry.get("depth_mm") is not None:
+            number, unit = cls._length(geometry["depth_mm"], None)
+            geometry["depth_mm"] = number * _LENGTH_FACTORS[unit]
+        return geometry
 
     @staticmethod
     def _length(raw: Any, unit: str | None) -> tuple[float, str]:

@@ -45,8 +45,8 @@ class EventStateProjector:
         final_action = dict(agent_result.get("final_action") or {})
         action = str(final_action.get("action") or "unknown")
         waiting_user = action == "ask_user"
-        bounded = action in {"call_tool", "load_skill", "unload_skill"}
-        status = "waiting_user" if waiting_user else "step_limit" if bounded else "completed"
+        nonterminal = action in {"call_tool", "load_skill", "unload_skill"}
+        status = "waiting_user" if waiting_user else "execution_error" if nonterminal else "completed"
         progress = {
             "workflow_type": "main_agent",
             "current_stage": action,
@@ -83,7 +83,7 @@ class EventStateProjector:
             workflow_state["equipment_profile_used"] = equipment
             workflow_state["machine_bounds"] = dict(equipment.get("machine_bounds") or {})
         next_action = {
-            "action_type": "provide_clarification" if waiting_user else "continue_agent" if bounded else "answer_complete",
+            "action_type": "provide_clarification" if waiting_user else "execution_aborted" if nonterminal else "answer_complete",
             "required_fields": list(workflow_state.get("missing_slots") or []),
             "blocking": waiting_user,
         }

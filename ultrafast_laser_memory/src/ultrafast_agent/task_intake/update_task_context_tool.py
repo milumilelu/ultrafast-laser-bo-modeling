@@ -103,7 +103,29 @@ def update_task_context_contract() -> ToolContract:
         purpose="Validate and commit progressive structured task facts with provenance.",
         handler=update_task_context,
         version=TOOL_VERSION,
-        input_schema={"type": "object", "required": ["updates"]},
+        input_schema={
+            "type": "object",
+            "required": ["updates"],
+            "properties": {
+                "updates": {
+                    "type": "array",
+                    "description": "All explicit facts from the current user message in one call.",
+                    "items": {
+                        "type": "object",
+                        "required": ["field_name", "value", "evidence"],
+                        "properties": {
+                            "field_name": {"type": "string"},
+                            "value": {
+                                "description": "For geometry use {feature_type, dimensions: {*_mm}, depth_mm, description}."
+                            },
+                            "unit": {"type": ["string", "null"]},
+                            "evidence": {"type": "string"},
+                            "operation": {"type": "string", "enum": ["fill", "correct"]},
+                        },
+                    },
+                }
+            },
+        },
         output_schema={
             "type": "object",
             "required": ["status", "applied", "rejected", "conflicts", "remaining_missing"],
@@ -117,15 +139,20 @@ def update_task_context_contract() -> ToolContract:
 
 
 def _with_geometry_projection(task_spec: dict[str, Any]) -> dict[str, Any]:
+    """Project older hole fields into the generic geometry object at the boundary."""
     result = dict(task_spec)
     geometry = dict(result.get("geometry") or {})
-    for source, target in (
-        ("hole_diameter_mm", "hole_diameter_mm"),
-        ("hole_depth_mm", "hole_depth_mm"),
-        ("through_hole", "through_hole"),
-    ):
-        if source in result:
-            geometry[target] = result[source]
+    if any(name in result for name in ("hole_diameter_mm", "hole_depth_mm", "through_hole")):
+        geometry.setdefault("feature_type", "hole")
+        dimensions = dict(geometry.get("dimensions") or {})
+        if "hole_diameter_mm" in result:
+            dimensions.setdefault("diameter_mm", result["hole_diameter_mm"])
+        if dimensions:
+            geometry["dimensions"] = dimensions
+        if "hole_depth_mm" in result:
+            geometry.setdefault("depth_mm", result["hole_depth_mm"])
+        if "through_hole" in result:
+            geometry.setdefault("through", result["through_hole"])
     if geometry:
         result["geometry"] = geometry
     return result

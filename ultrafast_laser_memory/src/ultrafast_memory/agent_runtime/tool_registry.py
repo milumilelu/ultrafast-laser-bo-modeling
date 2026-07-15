@@ -44,8 +44,8 @@ def build_main_agent_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(update_task_context_contract())
     contracts = (
-        _contract("get_equipment_context", "Read the authoritative equipment revision and machine bounds.", _equipment, default=True),
-        _contract("search_knowledge", "Search reviewed internal knowledge with traceable evidence.", _search),
+        _contract("get_equipment_context", "Read the authoritative equipment revision and machine bounds.", _equipment, default=True, cache="equipment_revision"),
+        _contract("search_knowledge", "Search reviewed internal knowledge with traceable evidence.", _search, cache="turn"),
         _contract("bootstrap_external_knowledge", "Create review candidates from external evidence after explicit user approval.", _bootstrap, approval=True),
         _contract("recommend_parameters_bo", "Recommend bounded parameters from context-matched validated BO samples.", _recommend_bo, required=("task_spec.material", "task_spec.process_type", "task_spec.objective", "equipment_snapshot.machine_bounds"), timeout=60_000),
         _contract("recommend_parameters_rag", "Retrieve reviewed evidence for a conservative parameter recommendation.", _recommend_rag, required=("task_spec.material", "task_spec.process_type")),
@@ -65,11 +65,11 @@ def build_main_agent_tool_registry() -> ToolRegistry:
 
 def _contract(name: str, purpose: str, handler: Any, *, required: tuple[str, ...] = (),
               timeout: int = 30_000, side: str = "none", approval: bool = False,
-              default: bool = False) -> ToolContract:
+              default: bool = False, cache: str = "none") -> ToolContract:
     return ToolContract(
         name=name, purpose=purpose, handler=handler, requires_context=required,
         timeout_ms=timeout, side_effect_level=side, requires_human_approval=approval,
-        exposed_by_default=default,
+        exposed_by_default=default, cache_policy=cache,
     )
 
 

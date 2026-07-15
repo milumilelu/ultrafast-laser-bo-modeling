@@ -70,8 +70,9 @@ def test_diamond_through_hole_survives_provider_compatible_partial_action(isolat
     assert spec["hole_diameter_mm"] == 2
     assert spec["through_hole"] is True
     assert "cut_length_mm" not in spec
-    assert spec["geometry"]["hole_diameter_mm"] == 2
-    assert spec["geometry"]["through_hole"] is True
+    assert spec["geometry"]["feature_type"] == "hole"
+    assert spec["geometry"]["dimensions"]["diameter_mm"] == 2
+    assert spec["geometry"]["through"] is True
     assert result["tool_calls"][0]["tool_name"] == "update_task_context"
     assert llm.calls[0]["response_format"] == {"type": "json_object"}
     assert "材料" not in result["content"]

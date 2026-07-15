@@ -59,6 +59,7 @@ class ToolRegistry:
                 "input_schema": contract.input_schema,
                 "requires_context": list(contract.requires_context),
                 "side_effect_level": contract.side_effect_level,
+                "cache_policy": contract.cache_policy,
                 "requires_human_approval": contract.requires_human_approval,
             }
             for contract in self.list_contracts()

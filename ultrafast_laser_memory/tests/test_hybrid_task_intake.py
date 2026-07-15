@@ -203,7 +203,7 @@ def test_llm_primary_real_log_with_comma_and_contextual_short_answers(isolated_r
     assert task["auxiliary"] == "compressed_air"
     assert task["layer_cut_allowed"] is True
     assert result["workflow_state"]["missing_slots"] == []
-    assert llm.calls == 4  # one planning call plus one post-tool decision per turn
+    assert llm.calls == 2  # one complete extraction call per user turn; no redundant post-write planning
 
 
 def test_exact_reported_two_turn_chat_uses_llm_context(isolated_root, monkeypatch):

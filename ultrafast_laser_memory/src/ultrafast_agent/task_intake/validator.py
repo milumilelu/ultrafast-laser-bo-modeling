@@ -13,7 +13,7 @@ from ultrafast_agent.task_intake.schemas import (
 
 _PROCESS_TYPES = {
     "cutting", "drilling", "hole_drilling", "engraving", "ablation",
-    "femtosecond_laser_micromachining",
+    "femtosecond_laser_micromachining", "groove_machining",
 }
 _CONTOUR_TYPES = {"straight", "curve", "arc", "circle"}
 _AUXILIARY_TYPES = {"compressed_air", "nitrogen", "oxygen", "argon", "none"}
@@ -88,6 +88,10 @@ class TaskSpecPatchValidator:
             return "contour_type_not_allowed"
         if candidate.field_name == "auxiliary" and value not in _AUXILIARY_TYPES:
             return "auxiliary_not_allowed"
+        if candidate.field_name == "geometry":
+            reason = TaskSpecPatchValidator._geometry_rejection_reason(value)
+            if reason:
+                return reason
         if candidate.field_name in {
             "material", "quality_requirement", "efficiency_requirement", "objective",
             "taper_requirement", "entrance_quality", "exit_quality",
@@ -112,6 +116,30 @@ class TaskSpecPatchValidator:
             marker in candidate.evidence for marker in _CORRECTION_MARKERS
         ):
             return "correction_evidence_required"
+        return None
+
+    @staticmethod
+    def _geometry_rejection_reason(value: Any) -> str | None:
+        if not isinstance(value, dict):
+            return "geometry_object_required"
+        if not isinstance(value.get("feature_type"), str) or not value["feature_type"].strip():
+            return "geometry_feature_type_required"
+        dimensions = value.get("dimensions")
+        if dimensions is not None:
+            if not isinstance(dimensions, dict):
+                return "geometry_dimensions_object_required"
+            for name, number in dimensions.items():
+                if not str(name).endswith("_mm"):
+                    return "geometry_dimension_unit_required"
+                if isinstance(number, bool) or not isinstance(number, (int, float)) or number <= 0:
+                    return "geometry_dimension_must_be_positive"
+        depth = value.get("depth_mm")
+        if depth is not None and (
+            isinstance(depth, bool) or not isinstance(depth, (int, float)) or depth <= 0
+        ):
+            return "geometry_depth_must_be_positive"
+        if "through" in value and not isinstance(value["through"], bool):
+            return "geometry_through_boolean_required"
         return None
 
     @staticmethod

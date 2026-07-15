@@ -21,7 +21,13 @@ flowchart LR
 
 ## Persistence
 
-Session persistence exposes `active_skills_json`, `agent_observations_json`, `agent_step_count`, and `last_agent_action_json`. These are stored inside the existing session JSON column to avoid a parallel state database. The renderer also exposes `discoverable_tools` and recent public observations.
+Session persistence exposes `active_skills_json`, `agent_observations_json`, `agent_decision_count`, and `last_agent_action_json`. These are stored inside the existing session JSON column to avoid a parallel state database. The renderer also exposes `discoverable_tools` and recent public observations.
+
+## Termination and streaming
+
+The Agent loop has no fixed per-turn step limit. It terminates on `ask_user`, `final_answer`, a system error, or a repeated action with unchanged task/Skill state. Exact equipment observations are reused while the equipment revision is unchanged; knowledge-search observations are reusable only within the current turn.
+
+Chat streaming publishes route, planning, Skill, Tool, and completion events as execution happens. A heartbeat is emitted every three seconds while a model or Tool call is still pending.
 
 ## Remaining true guards
 

@@ -37,6 +37,27 @@ class TaskSpecMergeService:
             field = candidate.field_name
             old = task.get(field)
             new = candidate.normalized_value
+            if field == "geometry" and isinstance(old, dict) and isinstance(new, dict):
+                merged_geometry, changed, conflict_paths = cls._merge_geometry(old, new)
+                if conflict_paths and candidate.operation != "correct":
+                    conflicts.append({
+                        "field_name": field,
+                        "existing_value": old,
+                        "candidate_value": new,
+                        "evidence": candidate.evidence,
+                        "operation": candidate.operation,
+                        "reason": "confirmed_geometry_values_require_explicit_correction",
+                        "conflict_paths": conflict_paths,
+                    })
+                    continue
+                if changed:
+                    task[field] = merged_geometry
+                    applied.append(candidate)
+                    provenance[field] = cls._metadata(candidate, message_id, context, patch.extraction_version)
+                else:
+                    unchanged.append(candidate)
+                    cls._append_evidence(provenance, field, candidate, message_id)
+                continue
             if old is None:
                 task[field] = new
                 applied.append(candidate)
@@ -83,6 +104,36 @@ class TaskSpecMergeService:
             unchanged=unchanged,
             conflicts=conflicts,
         )
+
+    @classmethod
+    def _merge_geometry(
+        cls,
+        current: dict[str, Any],
+        update: dict[str, Any],
+        prefix: str = "geometry",
+    ) -> tuple[dict[str, Any], bool, list[str]]:
+        merged = deepcopy(current)
+        changed = False
+        conflicts: list[str] = []
+        for key, value in update.items():
+            path = f"{prefix}.{key}"
+            old = merged.get(key)
+            if isinstance(old, dict) and isinstance(value, dict):
+                nested, nested_changed, nested_conflicts = cls._merge_geometry(old, value, path)
+                merged[key] = nested
+                changed = changed or nested_changed
+                conflicts.extend(nested_conflicts)
+            elif old is None:
+                if value is not None:
+                    merged[key] = deepcopy(value)
+                    changed = True
+            elif value is None or cls._same(old, value):
+                continue
+            else:
+                merged[key] = deepcopy(value)
+                changed = True
+                conflicts.append(path)
+        return merged, changed, conflicts
 
     @staticmethod
     def _same(old: Any, new: Any) -> bool:

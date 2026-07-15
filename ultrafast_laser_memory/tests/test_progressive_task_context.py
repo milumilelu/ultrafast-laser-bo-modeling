@@ -18,4 +18,8 @@ def test_progressive_context_projects_nested_geometry(isolated_root):
         {"session_id": session_id, "message_id": "m", "user_message": "金刚石直径2mm通孔",
          "clarification_context": context.model_dump(mode="json")},
     )
-    assert result["task_spec"]["geometry"] == {"hole_diameter_mm": 2.0, "through_hole": True}
+    assert result["task_spec"]["geometry"] == {
+        "feature_type": "hole",
+        "dimensions": {"diameter_mm": 2.0},
+        "through": True,
+    }

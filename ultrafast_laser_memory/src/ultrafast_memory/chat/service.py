@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from queue import Empty, Queue
+from threading import Thread
+from time import monotonic
+from typing import Any
 
 from ultrafast_agent.observability import DebugTraceRenderer, TUIRenderer
 from ultrafast_memory.agent_runtime.event_state_projector import EventStateProjector
@@ -23,7 +27,13 @@ from ultrafast_memory.llm.factory import create_llm_client
 from ultrafast_memory.agent_runtime.main_agent_loop import run_main_agent_turn
 
 
-def handle_chat(request: ChatRequest) -> ChatResponse:
+STREAM_HEARTBEAT_SECONDS = 3.0
+
+
+def handle_chat(
+    request: ChatRequest,
+    event_sink: Callable[[dict[str, Any]], None] | None = None,
+) -> ChatResponse:
     session_id = _ensure_session(request)
 
     user_message = save_message(session_id, "user", request.message, {"mode": request.mode})
@@ -111,6 +121,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
     route_event = _record_route_decision_trace(
         session_id, user_message["message_id"], request.message, route_plan
     )
+    _emit_live(event_sink, route_event)
     save_skill_trace(session_id, user_message["message_id"], {
         "selected_skill": selected_skill,
         "confidence": route_plan.confidence,
@@ -132,6 +143,7 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
         message_id=user_message["message_id"],
         client=create_llm_client(get_llm_config()),
         suggested_skills=suggested_skills,
+        event_sink=event_sink,
     )
     audit_trace.append({
         "step": "main_agent_loop",
@@ -159,21 +171,81 @@ def handle_chat(request: ChatRequest) -> ChatResponse:
 
 
 def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
-    # One application execution path: streaming is only a renderer over the
-    # same ChatResponse produced by the non-streaming workflow.
-    response = handle_chat(request.model_copy(update={"stream": False}))
-    route = response.route_plan or {}
+    # Keep one execution path, but publish its events while it is running.
+    session_id = _ensure_session(request)
+    stream_request = request.model_copy(update={"session_id": session_id, "stream": False})
     yield {
-        "type": "meta", "session_id": response.session_id,
+        "type": "meta", "session_id": session_id,
         "provider": "workflow",
-        "model": "main-agent-loop-v1" if route else "shared-chat-workflow-v1",
+        "model": "main-agent-loop-v1",
     }
-    if response.progress:
-        yield _progress_event(response.progress)
+    yield {
+        "type": "progress",
+        "stage": "agent_planning",
+        "progress_percent": None,
+        "status": "running",
+        "message": "正在理解任务并规划下一动作。",
+    }
+
+    queue: Queue[tuple[str, Any]] = Queue()
+    started_at = monotonic()
+
+    def produce() -> None:
+        try:
+            response = handle_chat(stream_request, event_sink=lambda event: queue.put(("event", event)))
+            queue.put(("response", response))
+        except Exception as exc:  # noqa: BLE001 - rendered as a safe public stream error
+            queue.put(("error", exc))
+        finally:
+            queue.put(("done", None))
+
+    Thread(target=produce, name=f"chat-stream-{session_id[:8]}", daemon=True).start()
+    response: ChatResponse | None = None
+    live_event_ids: set[str] = set()
+    while response is None:
+        try:
+            item_type, item = queue.get(timeout=STREAM_HEARTBEAT_SECONDS)
+        except Empty:
+            yield {
+                "type": "heartbeat",
+                "event_type": "heartbeat",
+                "stage": "agent_planning",
+                "title": "Agent 执行中",
+                "summary": "仍在等待模型或工具返回。",
+                "status": "running",
+                "elapsed_s": round(monotonic() - started_at, 1),
+            }
+            continue
+        if item_type == "event":
+            event = dict(item)
+            if event.get("event_id"):
+                live_event_ids.add(str(event["event_id"]))
+            if event.get("event_type") in {"decision", "agent_decision", "agent_planning_started"}:
+                yield _thinking_event(event)
+            else:
+                yield _agent_trace_event(event)
+            continue
+        if item_type == "error":
+            yield {
+                "type": "error",
+                "event_type": "error",
+                "stage": "chat",
+                "title": "Agent 执行失败",
+                "summary": f"Agent 执行失败：{type(item).__name__}",
+                "status": "completed",
+            }
+            yield {"type": "done"}
+            return
+        if item_type == "response":
+            response = item
+
+    route = response.route_plan or {}
     thinking_event_ids = {
         item["event_id"] for item in response.thinking_status if item.get("event_id")
     }
     for item in response.execution_trace:
+        if item.get("event_id") and str(item["event_id"]) in live_event_ids:
+            continue
         if item.get("event_id") in thinking_event_ids:
             yield _thinking_event(item)
         else:
@@ -201,6 +273,18 @@ def handle_chat_stream_ndjson(request: ChatRequest) -> Iterator[dict]:
     yield {"type": "delta", "content": response.assistant_message}
     yield {"type": "done"}
     return
+
+
+def _emit_live(
+    sink: Callable[[dict[str, Any]], None] | None,
+    event: dict[str, Any],
+) -> None:
+    if sink is None:
+        return
+    try:
+        sink(event)
+    except Exception:  # noqa: BLE001 - observability must not break domain execution
+        return
 
 
 def _title_from_message(message: str) -> str:
