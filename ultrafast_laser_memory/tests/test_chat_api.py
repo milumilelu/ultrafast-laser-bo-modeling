@@ -34,7 +34,8 @@ def test_chat_api_end_to_end(isolated_root, monkeypatch):
     )
     assert chat_resp.status_code == 200
     data = chat_resp.json()
-    assert "现有任务状态未被修改" in data["assistant_message"]
+    assert "NextAction" in data["assistant_message"]
+    assert data["workflow_state"]["agent_action"]["action"] == "respond"
     assert "严格字段格式" not in data["assistant_message"]
     assert any(item.get("event_type") == "agent_decision" for item in data["execution_trace"])
     assert data["selected_skill"] == "task_understanding"

@@ -52,6 +52,10 @@ def test_cfrp_task_updates_context_without_state_tool(isolated_root):
         "process_intent": "cutting",
         "geometry": {"feature_type": "sheet_cut"},
     }
-    assert result["final_action"]["action"] == "final_answer"
-    assert result["tool_calls"] == []
-    assert "模型当前不可用" in result["content"]
+    assert result["final_action"]["action"] == "respond"
+    assert [call["tool_name"] for call in result["tool_calls"]] == [
+        "get_equipment_context",
+        "recommend_process_parameters",
+    ]
+    assert "不表示任务完成" in result["content"]
+    assert "NextAction" in result["content"]

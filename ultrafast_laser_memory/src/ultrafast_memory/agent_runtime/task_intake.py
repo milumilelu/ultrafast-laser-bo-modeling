@@ -224,6 +224,11 @@ class HybridTaskFieldExtractionService:
             rf"(?:通孔)?直径\s*(?:改为|改成|更正为|修正为|是|为|=|:|：)?\s*{_LENGTH}",
             text, re.I,
         )
+        if diameter is None:
+            diameter = re.search(
+                rf"(?:开|加工|打|钻)(?:一个|一处)?\s*{_LENGTH}\s*(?:的)?通孔",
+                text, re.I,
+            )
         if diameter:
             diameter_mm = _millimetres(diameter.group("value"), diameter.group("unit"))
             values.extend([

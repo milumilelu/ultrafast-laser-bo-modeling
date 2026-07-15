@@ -216,7 +216,7 @@ def test_reminder_is_not_question(isolated_root) -> None:
         client=CompletePlanLLM(),
     )
 
-    assert result["final_action"]["action"] == "final_answer"
+    assert result["final_action"]["action"] == "respond"
     assert "参数未经验证" in result["content"]
     assert "是否接受" not in result["content"]
     assert "？" not in result["content"]

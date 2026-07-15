@@ -65,7 +65,7 @@ def test_repeated_tool_observation_is_reused_then_loop_is_stopped(isolated_root)
                                             "tool_name": "get_equipment_context", "arguments": {}})}
 
     result = run_main_agent_turn(session_id=_session(), message="读取设备", message_id="repeat", client=RepeatingLLM())
-    assert result["final_action"]["action"] == "final_answer"
+    assert result["final_action"]["action"] == "respond"
     assert len(result["tool_calls"]) == 1
     assert any(event["event_type"] == "tool_cache_hit" for event in result["events"])
     assert any(event["event_type"] == "probable_agent_loop" for event in result["events"])
@@ -148,7 +148,7 @@ def test_background_failure_does_not_block(isolated_root, monkeypatch):
     )
 
     assert result["content"] == "前台结果正常返回。"
-    assert result["final_action"]["action"] == "final_answer"
+    assert result["final_action"]["action"] == "respond"
     assert any("持久化失败" in warning for warning in result["warnings"])
     assert any("后处理失败" in warning for warning in result["warnings"])
 

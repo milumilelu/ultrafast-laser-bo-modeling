@@ -38,13 +38,16 @@ def test_rectangular_groove_commits_all_facts_once_then_asks_depth(isolated_root
     assert response.workflow_state["runtime_metrics"]["tool_call_count"] == 0
 
     completed = handle_chat(ChatRequest(session_id=response.session_id, message="1mm"))
-    assert completed.current_stage_code == "final_answer"
+    assert completed.current_stage_code == "respond"
     assert completed.workflow_state["task_spec"]["geometry"]["depth_mm"] == 1.0
     assert completed.workflow_state["missing_slots"] == []
-    assert completed.tool_calls == []
+    assert [call["tool_name"] for call in completed.tool_calls] == [
+        "get_equipment_context",
+        "recommend_process_parameters",
+    ]
 
 
-def test_no_normal_step_limit(isolated_root) -> None:
+def test_single_turn_has_six_decision_hard_limit(isolated_root) -> None:
     init_database()
 
     class TenDecisionLLM:
@@ -78,9 +81,11 @@ def test_no_normal_step_limit(isolated_root) -> None:
         client=TenDecisionLLM(),
     )
 
-    assert result["content"] == "done"
-    assert result["workflow_state"]["runtime_metrics"]["decision_count"] == 10
-    assert len(result["tool_calls"]) == 9
+    assert "规划调用上限" in result["content"]
+    assert result["final_action"]["action"] == "respond"
+    assert result["workflow_state"]["runtime_metrics"]["decision_count"] == 7
+    assert result["workflow_state"]["runtime_metrics"]["planner_call_count"] == 6
+    assert len(result["tool_calls"]) == 6
 
 
 def test_stream_publishes_live_status_and_heartbeat_while_llm_is_blocked(

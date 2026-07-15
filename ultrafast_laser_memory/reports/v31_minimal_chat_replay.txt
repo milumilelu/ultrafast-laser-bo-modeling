@@ -1,0 +1,91 @@
+V3.1 最小 T300 主链回放
+========================
+
+运行方式
+--------
+真实 run_main_agent_turn() 主链；使用当前本地数据库中的激活设备配置；client=None，
+因此 Planner 采用确定性安全推进，未调用生产 LLM。
+
+用户
+----
+我想加工 3 mm 厚的 T300 碳纤维板，开一个 4 mm 通孔。
+
+Task Intake
+-----------
+material.name = CFRP
+material.grade = T300
+workpiece.thickness_mm = 3.0
+process_intent = through_hole_drilling
+geometry.feature_type = through_hole
+geometry.dimensions.diameter_mm = 4.0
+geometry.through = true
+
+解析结果先更新 WorkingContext，没有直接结束任务。
+
+自动激活 Skill
+--------------
+task_understanding
+evidence_research
+process_planning
+parameter_recommendation
+experiment_optimization
+
+Tool 1
+------
+name = get_equipment_context
+status = success
+equipment_profile = 飞秒激光
+equipment_active = true
+fixed_conditions = wavelength_nm 1030.0; spot_diameter_um 5.0
+missing_equipment_fields = []
+
+Tool 2
+------
+name = recommend_process_parameters
+status = success / partial_support
+selected_source = bo_cold_start
+
+内部顺序：
+1. BO：partially_supported；model_mode=rule_based_cold_start
+2. RAG：insufficient_data
+3. LLM fallback：未调用
+
+BO 支持信息：
+support_status = partially_supported
+model_mode = rule_based_cold_start
+matched_sample_count = 0
+effective_sample_count = 0
+context_match_score = 0.0
+uncertainty = {}
+fidelity = not_reported
+
+权限：
+allowed_for_trial = true
+allowed_for_formal_process = false
+allowed_for_bo_training = false
+
+候选参数（未经验证，仅限试切）：
+pulse_width_fs = 3125.0 fs
+laser_power_W = 1.8655 W
+frequency_kHz = 71.3 kHz
+scan_speed_mm_s = 70.64999999999999 mm/s
+
+系统回复
+--------
+参数策略检查已完成，当前来源：bo_cold_start；试切权限：允许。这些结果不表示任务完成。NextAction：选择简化试切或完整试切。
+
+最终动作与指标
+--------------
+action = respond
+planner_call_count = 3
+model_call_count = 0
+tool_call_count = 2
+repair_count = 0
+first_event_latency_ms = 32.0
+total_latency_ms = 297.0
+
+结论
+----
+最小对话已连续运行到试切模式选择。当前候选来自规则冷启动，不是已验证 BO 模型，
+不得用于正式加工。
+

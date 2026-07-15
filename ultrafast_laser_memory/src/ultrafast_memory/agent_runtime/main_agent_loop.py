@@ -25,7 +25,8 @@ from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.equipment.bounds import build_machine_bounds
 
 
-ABSOLUTE_EMERGENCY_DECISION_LIMIT = 30
+MAX_PLANNER_DECISIONS_PER_TURN = 6
+MAX_MODEL_CALLS_PER_TURN = 6
 
 
 def run_main_agent_turn(
@@ -35,6 +36,7 @@ def run_main_agent_turn(
     document_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the single foreground control loop until a semantic terminal action."""
+    turn_started = monotonic()
     registry = build_main_agent_tool_registry()
     executor = ToolExecutor(registry)
     skills = build_skill_registry()
@@ -48,9 +50,14 @@ def run_main_agent_turn(
     warnings: list[str] = []
     final_action: AgentAction | None = None
     model_call_count = 0
+    planner_call_count = 0
+    repair_count = 0
+    max_prompt_chars = 0
+    first_event_latency_ms: float | None = None
     total_decisions = int(state.get("agent_decision_count") or 0)
     repeated_no_progress: dict[str, int] = {}
     recent_actions: list[dict[str, Any]] = []
+    deterministic_only = False
 
     if document_context is not None:
         document_observation = {
@@ -86,6 +93,7 @@ def run_main_agent_turn(
         session_id, message_id, "agent_started", "main_agent", "主 Agent 已启动",
         "已读取当前 Working Context，开始推进任务。", "running", {}, warnings,
     ))
+    first_event_latency_ms = round((monotonic() - turn_started) * 1000, 3)
 
     preparation = prepare_task_context(message, working.model_dump(mode="json"))
     prepared_paths = working.apply(preparation.context_updates)
@@ -123,12 +131,12 @@ def run_main_agent_turn(
     turn_step = 0
     while final_action is None:
         turn_step += 1
-        if turn_step > ABSOLUTE_EMERGENCY_DECISION_LIMIT:
+        if turn_step > MAX_PLANNER_DECISIONS_PER_TURN:
             final_action = AgentAction(
-                action="final_answer", decision_summary="检测到 probable planning loop，已触发内部失控保护。",
+                action="respond", decision_summary="达到单轮 Planner 硬上限，已触发安全 fallback。",
                 message=(
-                    "内部规划连续未产生有效进展，已由 emergency breaker 停止。"
-                    "当前上下文和 Observation 已保留；请稍后重试或补充新的加工事实。"
+                    "本轮已达到规划调用上限，当前上下文和 Observation 均已保留。"
+                    "这不表示任务完成。NextAction：补充新事实或在下一轮继续。"
                 ),
             )
             _publish(events, event_sink, _safe_trace(
@@ -139,6 +147,14 @@ def run_main_agent_turn(
 
         exposed = exposed_tool_names(skills, loaded)
         tool_schemas = _rank_tool_schemas(registry.schemas_for_agent(exposed), skills, loaded)
+        if model_call_count >= MAX_MODEL_CALLS_PER_TURN:
+            final_action = planner.deterministic_fallback(
+                _planner_context(working),
+                _planner_observations(observations, turn_observation_offset),
+                [str(item["name"]) for item in tool_schemas],
+                reason="model_call_limit_reached",
+            )
+            break
         planning = _safe_trace(
             session_id, message_id, "agent_planning_started", "main_agent", "主 Agent 规划",
             "正在根据 Working Context 和最新观察规划下一动作。", "running", {"sequence": turn_step}, warnings,
@@ -146,10 +162,13 @@ def run_main_agent_turn(
         _publish(events, event_sink, planning)
 
         def publish_planner_model_call(call: dict[str, Any]) -> None:
-            nonlocal model_call_count
+            nonlocal model_call_count, repair_count, max_prompt_chars
             event_type = str(call.get("event_type") or "model_call_started")
             if event_type == "model_call_started":
                 model_call_count += 1
+                if bool(call.get("repair")):
+                    repair_count += 1
+                max_prompt_chars = max(max_prompt_chars, int(call.get("prompt_chars") or 0))
             provider = str(call.get("provider") or "unknown-provider")
             model = str(call.get("model") or "unknown-model")
             attempt = int(call.get("attempt") or 1)
@@ -195,16 +214,31 @@ def run_main_agent_turn(
                 "running" if event_type == "model_call_started" else "completed", call, warnings,
             ))
 
-        action = planner.decide(
-            message=message,
-            working_context=_planner_context(working),
-            available_tools=tool_schemas,
-            active_skills=loaded,
-            recent_tool_results=_planner_observations(observations, turn_observation_offset),
-            skill_guidance=_skill_guidance(skills, loaded),
-            runtime_hints={"suggested_skills": suggested_skills or [], "router_is_hint_only": True},
-            model_call_sink=publish_planner_model_call,
-        )
+        planner_call_count += 1
+        if deterministic_only:
+            action = planner.deterministic_fallback(
+                _planner_context(working),
+                _planner_observations(observations, turn_observation_offset),
+                [str(item["name"]) for item in tool_schemas],
+                reason="planner_repair_exhausted",
+            )
+        else:
+            action = planner.decide(
+                message=message,
+                working_context=_planner_context(working),
+                available_tools=tool_schemas,
+                active_skills=loaded,
+                recent_tool_results=_planner_observations(observations, turn_observation_offset),
+                skill_guidance=_skill_guidance(skills, loaded),
+                runtime_hints={
+                    "suggested_skills": suggested_skills or [],
+                    "router_is_hint_only": True,
+                    "repair_allowed": repair_count < 1,
+                },
+                model_call_sink=publish_planner_model_call,
+            )
+            if action.provider == "deterministic_fallback" and action.error_details:
+                deterministic_only = True
         final_action = action
         total_decisions += 1
         recent_actions.append({"action": action.action, "tool": action.tool_name, "arguments": action.arguments})
@@ -223,6 +257,17 @@ def run_main_agent_turn(
                 session_id, message_id, working, changed, events, event_sink, warnings,
             )
 
+        if action.action == "update_context":
+            final_action = None
+            if not changed:
+                final_action = planner.deterministic_fallback(
+                    _planner_context(working),
+                    _planner_observations(observations, turn_observation_offset),
+                    [str(item["name"]) for item in tool_schemas],
+                    reason="update_context_without_progress",
+                )
+                break
+            continue
         if action.action != "call_tool":
             break
         final_action = None
@@ -251,7 +296,7 @@ def run_main_agent_turn(
             ))
             if repeated_no_progress[duplicate_key] >= 3:
                 final_action = AgentAction(
-                    action="final_answer", decision_summary="同一 Tool 观察连续未产生上下文进展，判定 probable planning loop。",
+                    action="respond", decision_summary="同一 Tool 观察连续未产生上下文进展，判定 probable planning loop。",
                     message=(
                         "同一工具结果被连续复用且未带来新进展，已停止 probable planning loop。"
                         "现有上下文和工具观察均已保留；可在下一轮补充新事实或要求改用其他证据来源。"
@@ -342,8 +387,13 @@ def run_main_agent_turn(
         "current_stage_code": final_action.action,
         "runtime_metrics": {
             "decision_count": turn_step,
+            "planner_call_count": planner_call_count,
             "model_call_count": model_call_count,
             "tool_call_count": len(tool_calls),
+            "repair_count": repair_count,
+            "max_prompt_chars": max_prompt_chars,
+            "first_event_latency_ms": first_event_latency_ms,
+            "total_latency_ms": round((monotonic() - turn_started) * 1000, 3),
         },
         "warnings": warnings,
     }
@@ -486,9 +536,15 @@ def _public_tool_observation(tool_name: str, envelope: dict[str, Any]) -> dict[s
         return base
     if tool_name == "recommend_process_parameters":
         base.update({
+            "selected_source": data.get("selected_source"),
             "source_type": data.get("source_type"),
             "authority_level": data.get("authority_level"),
             "evidence_level": data.get("evidence_level"),
+            "data_support": data.get("data_support") or {},
+            "uncertainty": data.get("uncertainty") or {},
+            "allowed_for_trial": data.get("allowed_for_trial"),
+            "allowed_for_formal_process": data.get("allowed_for_formal_process"),
+            "internal_trace": data.get("internal_trace") or [],
             "process_parameters": data.get("process_parameters") or {},
             "strategy_parameters": data.get("strategy_parameters") or {},
             "limitations": data.get("limitations") or [],

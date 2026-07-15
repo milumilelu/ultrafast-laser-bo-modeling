@@ -189,11 +189,11 @@ def test_llm_failure_becomes_safe_agent_action_for_sync_and_stream(
         )
     )
 
-    assert response.workflow_state["agent_action"]["action"] == "final_answer"
+    assert response.workflow_state["agent_action"]["action"] == "respond"
     assert response.workflow_state["agent_action"]["error_details"][0]["type"] == "TimeoutError"
     assert "injected provider detail" not in response.assistant_message
     assert any(
-        event.get("type") == "delta" and "现有状态未被修改" in event.get("content", "")
+        event.get("type") == "delta" and "不表示任务完成" in event.get("content", "")
         for event in events
     )
     assert not any(event.get("type") == "error" for event in events)

@@ -9,7 +9,7 @@ def test_normal_chat_uses_event_projection_only(isolated_root, project_root):
     assert response.status_code == 200
     body = response.json()
     assert body["progress"]["progress_percent"] is None
-    assert body["progress"]["current_stage"] == "final_answer"
+    assert body["progress"]["current_stage"] == "respond"
     assert body["evidence_gap"] is None
     assert body["workflow_state"]["runtime_mode"] == "capability_discovery"
     assert not any(item.get("stage") == "evidence_gap_checking" for item in body["execution_trace"])

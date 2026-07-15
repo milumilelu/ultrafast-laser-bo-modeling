@@ -23,10 +23,10 @@ def test_planner_retry_actually_runs():
         message="hello", working_context={"task": {}},
         available_tools=build_main_agent_tool_registry().schemas_for_agent(),
     )
-    assert action.action == "final_answer"
+    assert action.action == "respond"
     assert len(llm.calls) == 2
     assert llm.calls[0]["response_format"] == {"type": "json_object"}
-    assert "response_format" not in llm.calls[1]
+    assert llm.calls[1]["response_format"] == {"type": "json_object"}
 
 
 def test_provider_actions_array_is_normalized_to_one_action():

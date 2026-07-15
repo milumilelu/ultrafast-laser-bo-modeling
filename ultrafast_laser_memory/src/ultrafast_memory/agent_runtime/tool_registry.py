@@ -25,6 +25,9 @@ from ultrafast_memory.reports.task_report_service import TaskReportService
 from ultrafast_memory.trial.service import TrialApplicationService
 
 
+TOOL_REGISTRY_VERSION = "v31-foreground-tools-1"
+
+
 FOREGROUND_SAFE_TOOL_NAMES = {
     "get_equipment_context",
     "search_knowledge",
@@ -279,6 +282,7 @@ class RecommendationAuthorityPolicy:
             "matched_sample_count": matched,
             "effective_sample_count": effective,
             "context_match_score": 1.0 if matched else 0.0,
+            "fidelity": "not_reported",
             "fidelity_level": "not_reported",
             "model_validation": metrics,
             "uncertainty_calibrated": uncertainty_calibrated,

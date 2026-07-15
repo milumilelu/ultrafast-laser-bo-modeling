@@ -46,8 +46,14 @@ class EventStateProjector:
         final_action = dict(agent_result.get("final_action") or {})
         action = str(final_action.get("action") or "unknown")
         waiting_user = action == "ask_user"
-        nonterminal = action == "call_tool"
-        status = "waiting_user" if waiting_user else "execution_error" if nonterminal else "completed"
+        nonterminal = action in {"update_context", "call_tool"}
+        responding = action == "respond"
+        status = (
+            "waiting_user" if waiting_user
+            else "responded" if responding
+            else "execution_error" if nonterminal
+            else "completed"
+        )
         progress = {
             "workflow_type": "main_agent",
             "current_stage": action,
@@ -85,7 +91,12 @@ class EventStateProjector:
             workflow_state["fixed_equipment_conditions"] = dict(equipment.get("fixed_conditions") or {})
             workflow_state["tunable_equipment_capabilities"] = dict(equipment.get("tunable_capabilities") or {})
         next_action = {
-            "action_type": "provide_clarification" if waiting_user else "execution_aborted" if nonterminal else "answer_complete",
+            "action_type": (
+                "provide_clarification" if waiting_user
+                else "continue_task" if responding
+                else "execution_aborted" if nonterminal
+                else "task_completed"
+            ),
             "required_fields": list(workflow_state.get("missing_slots") or []),
             "blocking": waiting_user,
         }
@@ -201,7 +212,11 @@ class EventStateProjector:
             "completed_steps": [],
             "pending_steps": [],
             "missing_slots": workflow.get("missing_slots") or [],
-            "status": "waiting_user" if action_name == "ask_user" else "completed",
+            "status": (
+                "waiting_user" if action_name == "ask_user"
+                else "responded" if action_name == "respond"
+                else "completed"
+            ),
             "message": action.get("decision_summary") or "",
         }
 

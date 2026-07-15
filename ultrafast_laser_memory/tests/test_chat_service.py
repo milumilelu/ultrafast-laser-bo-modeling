@@ -13,7 +13,8 @@ def test_chat_service_persists_messages_and_skill_trace(isolated_root, monkeypat
     response = handle_chat(ChatRequest(message="我想加工金刚石 CRL，Ra小于460nm"))
 
     assert response.session_id
-    assert "现有任务状态未被修改" in response.assistant_message
+    assert "NextAction" in response.assistant_message
+    assert response.workflow_state["agent_action"]["action"] == "respond"
     assert "严格字段格式" not in response.assistant_message
     assert response.selected_skill == "task_understanding"
     assert [step["step"] for step in response.audit_trace] == ["rule_skill_hints", "main_agent_loop"]

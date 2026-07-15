@@ -11,8 +11,18 @@ from pydantic import ValidationError
 
 from ultrafast_domain.process import ProcessPlan
 from ultrafast_domain.trial import TrialPlan
-from ultrafast_memory.agent_runtime.actions import AgentAction
+from ultrafast_memory.agent_runtime.actions import ACTION_SCHEMA_VERSION, AgentAction
+from ultrafast_memory.agent_runtime.tool_registry import TOOL_REGISTRY_VERSION
 from ultrafast_memory.core.time_utils import utc_now_iso
+
+
+class PlannerActionError(ValueError):
+    def __init__(self, code: str, *, location: str, received: Any, expected: Any):
+        super().__init__(code)
+        self.code = code
+        self.location = location
+        self.received = received
+        self.expected = expected
 
 
 class MainAgentPlanner:
@@ -35,19 +45,15 @@ class MainAgentPlanner:
         runtime_hints: dict[str, Any] | None = None,
         model_call_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentAction:
+        tools = available_tools or []
+        tool_names = [str(item["name"]) for item in tools]
+        observations = recent_tool_results or []
         if self.client is None or getattr(self.client, "provider", None) == "mock":
-            return AgentAction(
-                action="final_answer",
-                decision_summary="主 Agent LLM 当前不可用，无法可靠解释该自由文本。",
-                message=(
-                    "主 Agent 模型当前不可用，无法可靠生成专业加工方案。"
-                    "现有任务状态未被修改，已识别的事实和 Observation 均已保留；请稍后重试。"
-                ),
-                provider=getattr(self.client, "provider", None),
-                model=getattr(self.client, "model", None),
+            return self.deterministic_fallback(
+                working_context, observations, tool_names,
+                reason="main_agent_model_unavailable",
             )
 
-        tools = available_tools or []
         guidance = skill_guidance or []
         skill_names = [str(item.get("name")) for item in guidance if item.get("name")]
         if not skill_names:
@@ -55,18 +61,33 @@ class MainAgentPlanner:
         system_prompt = self._system_prompt()
         prompt = self._prompt(
             message, working_context, tools, guidance,
-            recent_tool_results or [], runtime_hints or {},
+            observations, runtime_hints or {},
         )
         last_error: Exception | None = None
-        for attempt in range(1, 3):
+        last_raw_content = ""
+        last_parsed_action: dict[str, Any] | None = None
+        repair_allowed = bool((runtime_hints or {}).get("repair_allowed", True))
+        max_attempts = 2 if repair_allowed else 1
+        for attempt in range(1, max_attempts + 1):
             stage = "request"
             call_started = monotonic()
             response_chars = 0
             options: dict[str, Any] = {"temperature": 0, "timeout": 60}
-            if attempt == 1:
-                options["response_format"] = {"type": "json_object"}
-            repair = "" if attempt == 1 else "\n" + self._repair_note(last_error)
-            user_prompt = prompt + repair
+            options["response_format"] = {"type": "json_object"}
+            is_repair = attempt == 2
+            call_system_prompt = (
+                system_prompt if not is_repair
+                else "你只修复一个 JSON Action。不得重新规划任务，不得输出解释或 Markdown。"
+            )
+            user_prompt = (
+                prompt if not is_repair
+                else self._repair_prompt(
+                    last_raw_content,
+                    last_parsed_action,
+                    last_error,
+                    tool_names,
+                )
+            )
             self._model_call_sequence += 1
             call_id = f"main-agent-{uuid4().hex}"
             common = {
@@ -77,9 +98,12 @@ class MainAgentPlanner:
                 "component": "main_agent_planner",
                 "purpose": "选择下一项 Tool、合并追问或最终答复",
                 "attempt": attempt,
-                "max_attempts": 2,
+                "max_attempts": max_attempts,
                 "timeout_s": int(options["timeout"]),
-                "prompt_chars": len(system_prompt) + len(user_prompt),
+                "prompt_chars": len(call_system_prompt) + len(user_prompt),
+                "repair": is_repair,
+                "action_schema_version": ACTION_SCHEMA_VERSION,
+                "tool_registry_version": TOOL_REGISTRY_VERSION,
                 "started_at": utc_now_iso(),
             }
             self._emit_model_event(model_call_sink, "model_call_started", {
@@ -88,11 +112,12 @@ class MainAgentPlanner:
             try:
                 stage = "provider"
                 result = self.client.chat([
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": call_system_prompt},
                     {"role": "user", "content": user_prompt},
                 ], **options)
                 provider_ms = (monotonic() - call_started) * 1000
                 content = str(result.get("content") or "")
+                last_raw_content = content
                 response_chars = len(content)
                 self._emit_model_event(model_call_sink, "model_provider_response_received", {
                     **common,
@@ -107,6 +132,7 @@ class MainAgentPlanner:
                 parse_started = monotonic()
                 raw = self._normalize_provider_action(self._json(content), message)
                 raw = self._protect_established_task_facts(raw, working_context, message)
+                last_parsed_action = raw
                 parse_ms = (monotonic() - parse_started) * 1000
                 self._emit_model_event(model_call_sink, "model_parse_completed", {
                     **common, "duration_ms": round(parse_ms, 3), "parse_success": True,
@@ -115,10 +141,10 @@ class MainAgentPlanner:
 
                 stage = "validation"
                 validation_started = monotonic()
-                action = self._validate_action(
-                    raw, [item["name"] for item in tools], skill_names,
-                    working_context, recent_tool_results or [],
-                )
+                action = self._validate_action(raw, tool_names)
+                allowed_skills = [name for name in action.skills_used if name in skill_names]
+                if allowed_skills != action.skills_used:
+                    action = action.model_copy(update={"skills_used": allowed_skills})
                 validation_ms = (monotonic() - validation_started) * 1000
                 total_ms = (monotonic() - call_started) * 1000
                 self._emit_model_event(model_call_sink, "model_validation_completed", {
@@ -140,27 +166,148 @@ class MainAgentPlanner:
                 })
             except Exception as exc:  # noqa: BLE001 - retried then sanitized
                 last_error = exc
+                errors = self._safe_error_details(exc)
                 self._emit_model_event(model_call_sink, "model_call_failed", {
                     **common,
                     "failure_stage": stage,
                     "duration_ms": round((monotonic() - call_started) * 1000, 3),
                     "response_chars": response_chars,
-                    "errors": self._safe_error_details(exc),
-                    "will_retry": attempt < 2,
+                    "errors": errors,
+                    "raw_model_output": self._safe_debug_value(last_raw_content),
+                    "parsed_action": self._safe_debug_value(last_parsed_action),
+                    "will_retry": attempt < max_attempts,
                     "completed_at": utc_now_iso(),
                 })
 
-        return AgentAction(
-            action="final_answer",
-            decision_summary=f"主 Agent 行动规划失败：{type(last_error).__name__ if last_error else 'unknown'}。",
-            message=(
-                "主 Agent 连续两次未能产生有效的结构化行动。"
-                "现有状态未被修改，已有上下文和观察均已保留；这是可恢复的模型规划错误，请稍后重试。"
-            ),
-            provider=getattr(self.client, "provider", None),
-            model=getattr(self.client, "model", None),
+        return self.deterministic_fallback(
+            working_context,
+            observations,
+            tool_names,
+            reason=f"planner_validation_failed:{type(last_error).__name__ if last_error else 'unknown'}",
             error_details=self._safe_error_details(last_error),
         )
+
+    @staticmethod
+    def deterministic_fallback(
+        working_context: dict[str, Any],
+        recent_tool_results: list[dict[str, Any]],
+        available_tool_names: list[str],
+        *,
+        reason: str,
+        error_details: list[dict[str, Any]] | None = None,
+    ) -> AgentAction:
+        task = dict(working_context.get("task") or {})
+        intake = working_context.get("task_intake") or {}
+        blocking = list(intake.get("blocking_fields") or [])
+        pending = working_context.get("pending_user_action")
+        common = {
+            "provider": "deterministic_fallback",
+            "model": "v31-safe-next-action",
+            "error_details": error_details or [],
+        }
+        if pending:
+            message = pending.get("message") if isinstance(pending, dict) else str(pending)
+            return AgentAction(
+                action="ask_user",
+                decision_summary=f"Fallback：当前明确等待用户输入（{reason}）。",
+                message=message or "请补充当前步骤所需的信息。",
+                **common,
+            )
+        if blocking:
+            questions = {
+                "geometry.depth_mm": "目标槽深是多少，还是要求贯穿？",
+            }
+            message = "\n".join(questions.get(field, f"请补充 {field}。") for field in blocking[:5])
+            return AgentAction(
+                action="ask_user",
+                decision_summary=f"Fallback：只询问当前阻塞字段（{reason}）。",
+                message=message,
+                **common,
+            )
+        if task and not working_context.get("equipment_context") \
+                and "get_equipment_context" in available_tool_names:
+            return AgentAction(
+                action="call_tool",
+                decision_summary=f"Fallback：任务事实已保存，下一步读取设备上下文（{reason}）。",
+                tool_name="get_equipment_context",
+                arguments={},
+                **common,
+            )
+
+        parameter_observation = MainAgentPlanner._latest_tool_observation(
+            recent_tool_results, "recommend_process_parameters",
+        )
+        equipment = working_context.get("equipment_context") or {}
+        if task and equipment and parameter_observation is None \
+                and "recommend_process_parameters" in available_tool_names:
+            process_plan = working_context.get("process_plan") or {}
+            variables = [
+                str(item.get("name"))
+                for item in process_plan.get("controllable_variables") or []
+                if isinstance(item, dict) and item.get("name")
+            ]
+            if not variables:
+                variables = list((equipment.get("tunable_capabilities") or {}).keys())
+            fallback_plan = process_plan or {
+                "objective": "为当前任务生成保守的试切候选",
+                "controllable_variables": [
+                    {"name": name, "role": "process_setpoint"} for name in variables
+                ],
+            }
+            return AgentAction(
+                action="call_tool",
+                decision_summary=f"Fallback：设备已读取，按统一参数策略继续（{reason}）。",
+                tool_name="recommend_process_parameters",
+                arguments={
+                    "task_context": task,
+                    "process_plan": fallback_plan,
+                    "variables": variables,
+                    "equipment_context": equipment,
+                    "allow_llm_fallback": False,
+                },
+                **common,
+            )
+        if parameter_observation is not None:
+            source = parameter_observation.get("selected_source") \
+                or parameter_observation.get("source_type") or "未形成可用来源"
+            allowed = parameter_observation.get("allowed_for_trial") is True
+            next_action = (
+                "选择简化试切或完整试切。" if allowed
+                else "补全有效设备配置，或明确授权生成仅限试切的探索候选。"
+            )
+            return AgentAction(
+                action="respond",
+                decision_summary=f"Fallback：已有参数策略结果，返回当前阶段结论（{reason}）。",
+                message=(
+                    f"参数策略检查已完成，当前来源：{source}；"
+                    f"试切权限：{'允许' if allowed else '未确认'}。"
+                    f"这些结果不表示任务完成。NextAction：{next_action}"
+                ),
+                **common,
+            )
+        return AgentAction(
+            action="respond",
+            decision_summary=f"Fallback：返回已确认事实和安全下一步（{reason}）。",
+            message=(
+                "已保存当前明确任务事实，但暂时无法可靠生成下一项结构化行动。"
+                "本次回复不表示任务完成。NextAction：补充新的任务事实或稍后重试。"
+            ),
+            **common,
+        )
+
+    @staticmethod
+    def _latest_tool_observation(
+        observations: list[dict[str, Any]], tool_name: str,
+    ) -> dict[str, Any] | None:
+        for item in reversed(observations):
+            if item.get("tool_name") == tool_name:
+                data = item.get("data")
+                return data if isinstance(data, dict) else item
+            meta = item.get("meta") if isinstance(item, dict) else None
+            if isinstance(meta, dict) and meta.get("tool_name") == tool_name:
+                data = item.get("data")
+                return data if isinstance(data, dict) else item
+        return None
 
     @staticmethod
     def _emit_model_event(
@@ -179,45 +326,16 @@ class MainAgentPlanner:
     def _validate_action(
         raw: dict[str, Any],
         available_tool_names: list[str],
-        skill_names: list[str] | None = None,
-        working_context: dict[str, Any] | None = None,
-        recent_tool_results: list[dict[str, Any]] | None = None,
+        *_compatibility_args: Any,
     ) -> AgentAction:
         action = AgentAction.model_validate(raw)
-        if action.action == "call_tool":
-            if not action.tool_name:
-                raise ValueError("tool_name_required")
-            if action.tool_name not in available_tool_names:
-                raise ValueError(f"tool_not_registered:{action.tool_name}")
-        elif not action.message:
-            raise ValueError("message_required")
-        unknown_skills = sorted(set(action.skills_used) - set(skill_names or []))
-        if unknown_skills:
-            raise ValueError(f"skill_not_injected:{','.join(unknown_skills)}")
-        if action.action == "final_answer" and MainAgentPlanner._complete_plan_required(
-            working_context or {}
-        ):
-            updates = action.context_updates or {}
-            process = ProcessPlan.model_validate(
-                updates.get("process_plan") or (working_context or {}).get("process_plan")
+        if action.action == "call_tool" and action.tool_name not in available_tool_names:
+            raise PlannerActionError(
+                "tool_not_registered",
+                location="tool_name",
+                received=action.tool_name,
+                expected=available_tool_names,
             )
-            trial = TrialPlan.model_validate(
-                updates.get("trial_plan") or (working_context or {}).get("trial_plan")
-            )
-            MainAgentPlanner._validate_self_contained_plan_message(action.message or "")
-            if updates.get("trial_plan") is not None:
-                parameter_truth = MainAgentPlanner._latest_parameter_truth(
-                    recent_tool_results or []
-                )
-                if not parameter_truth:
-                    raise ValueError("new_trial_plan_requires_successful_parameter_tool_result")
-                equipment_truth = MainAgentPlanner._latest_equipment_truth(
-                    recent_tool_results or []
-                )
-                MainAgentPlanner._validate_process_parameter_semantics(
-                    process, parameter_truth, equipment_truth,
-                )
-                MainAgentPlanner._validate_trial_parameter_truth(trial, parameter_truth)
         return action
 
     @staticmethod
@@ -359,7 +477,8 @@ class MainAgentPlanner:
             raw = dict(raw)
         aliases = {
             "tool_call": "call_tool", "clarify": "ask_user",
-            "request_clarification": "ask_user", "answer": "final_answer",
+            "request_clarification": "ask_user", "answer": "respond",
+            "final_answer": "respond", "continue_planning": "update_context",
         }
         raw["action"] = aliases.get(str(raw.get("action") or raw.get("type") or ""), raw.get("action"))
         raw.setdefault("tool_name", raw.get("tool"))
@@ -371,7 +490,7 @@ class MainAgentPlanner:
         if skills_used is None and raw.get("skill"):
             raw["skills_used"] = [raw["skill"]]
         raw.setdefault("skills_used", [])
-        if raw.get("action") == "final_answer" and isinstance(raw.get("message"), str):
+        if raw.get("action") == "respond" and isinstance(raw.get("message"), str):
             raw["message"] = MainAgentPlanner._strip_terminal_confirmation(raw["message"])
         return raw
 
@@ -447,7 +566,8 @@ class MainAgentPlanner:
         return (
             "你是超快激光加工前台唯一主 Agent。每次只返回一个 JSON 对象，不输出 Markdown。"
             "字段仅包括 action,decision_summary,skills_used,tool_name,arguments,message,context_updates。"
-            "action 仅限 call_tool、ask_user、final_answer；Skill 不是行动，不得加载或卸载 Skill。"
+            "action 仅限 update_context、call_tool、ask_user、respond；Skill 不是行动，不得加载或卸载 Skill。"
+            "update_context 只更新事实并继续规划；respond 只结束当前对话轮次，不表示加工任务完成。"
             "一次读取用户消息、Working Context、相关 Observation、注入的 Skill 指导和 Tool Schema。"
             "Tool 是外部能力；需要证据、设备事实、参数计算或执行时选择一个 Tool，Tool 返回后再决策。"
             "同一行动可以提交明确的 context_updates；不得逐字段写状态，也不得重复查询相同 Tool。"
@@ -459,7 +579,7 @@ class MainAgentPlanner:
             "设备范围只是边界，不能用范围中点冒充推荐；不得改写 Tool 返回的证据和 provenance。"
             "所有参数推荐只能调用 recommend_process_parameters；该 Tool 内部强制 BO→RAG→受控探索顺序，"
             "不得请求或伪造其内部子步骤。"
-            "加工任务信息足够时形成与当前任务和 Tool 结果一致的 ProcessPlan、第一轮 TrialPlan 和自包含答复。"
+            "加工任务信息足够时继续调用必要 Tool，并用 respond 返回当前阶段结论和明确 NextAction。"
             "真实设备动作仍须遵守 Tool 的安全边界和当次用户授权。"
         )
 
@@ -492,25 +612,87 @@ class MainAgentPlanner:
         ])
 
     @classmethod
-    def _repair_note(cls, exc: Exception | None) -> str:
-        return (
-            f"previous_output_errors={json.dumps(cls._safe_error_details(exc), ensure_ascii=False)}\n"
-            "修复要求：只返回一个行动 JSON；action 只能是 call_tool、ask_user 或 final_answer；"
-            "context_updates 和 arguments 必须是对象；skills_used 只能引用已注入 Skill；"
-            "不要调用未注册 Tool。"
-        )
+    def _repair_prompt(
+        cls,
+        raw_output: str,
+        parsed_action: dict[str, Any] | None,
+        exc: Exception | None,
+        allowed_tools: list[str],
+    ) -> str:
+        payload = {
+            "task": "只修复下面的 Action JSON，不重新规划任务。",
+            "raw_action": cls._safe_debug_value(raw_output),
+            "parsed_action": cls._safe_debug_value(parsed_action),
+            "validation_errors": cls._safe_error_details(exc),
+            "action_schema_version": ACTION_SCHEMA_VERSION,
+            "allowed_actions": ["update_context", "call_tool", "ask_user", "respond"],
+            "required_types": {
+                "decision_summary": "string",
+                "arguments": "object",
+                "context_updates": "object",
+                "skills_used": "array[string]",
+            },
+            "allowed_tools": allowed_tools,
+            "tool_registry_version": TOOL_REGISTRY_VERSION,
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
     @staticmethod
-    def _safe_error_details(exc: Exception | None) -> list[dict[str, str]]:
+    def _safe_error_details(exc: Exception | None) -> list[dict[str, Any]]:
         if isinstance(exc, ValidationError):
             return [
                 {
                     "loc": ".".join(map(str, item.get("loc") or [])),
                     "type": str(item.get("type") or ""),
                     "msg": str(item.get("msg") or ""),
+                    "received": MainAgentPlanner._safe_debug_value(item.get("input")),
+                    "expected": MainAgentPlanner._expected_for_error(item),
                 }
                 for item in exc.errors()
             ]
+        if isinstance(exc, PlannerActionError):
+            return [{
+                "loc": exc.location,
+                "type": exc.code,
+                "msg": str(exc),
+                "received": MainAgentPlanner._safe_debug_value(exc.received),
+                "expected": MainAgentPlanner._safe_debug_value(exc.expected),
+            }]
         if exc is None:
             return []
-        return [{"loc": "", "type": type(exc).__name__, "msg": str(exc)[:240]}]
+        return [{
+            "loc": "",
+            "type": type(exc).__name__,
+            "msg": str(exc)[:240],
+            "received": None,
+            "expected": None,
+        }]
+
+    @staticmethod
+    def _expected_for_error(item: dict[str, Any]) -> Any:
+        expected = {
+            "dict_type": "object",
+            "list_type": "array",
+            "string_type": "string",
+            "literal_error": item.get("ctx", {}).get("expected"),
+            "missing": "required field",
+            "value_error": item.get("ctx", {}).get("error"),
+        }
+        return MainAgentPlanner._safe_debug_value(expected.get(str(item.get("type") or "")))
+
+    @staticmethod
+    def _safe_debug_value(value: Any) -> Any:
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return value[:2000]
+        if isinstance(value, list):
+            return [MainAgentPlanner._safe_debug_value(item) for item in value[:20]]
+        if isinstance(value, dict):
+            blocked = {"api_key", "authorization", "password", "secret", "token"}
+            return {
+                str(key): "[REDACTED]" if str(key).lower() in blocked
+                else MainAgentPlanner._safe_debug_value(item)
+                for key, item in list(value.items())[:40]
+            }
+        return str(value)[:500]
