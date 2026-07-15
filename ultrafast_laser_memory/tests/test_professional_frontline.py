@@ -35,8 +35,8 @@ def _plans(diameter_mm: float = 1.0) -> tuple[dict, dict]:
         },
         "controllable_variables": [
             {"name": "laser_power_W", "role": "process_setpoint"},
-            {"name": "frequency_kHz", "role": "process_setpoint"},
-            {"name": "scan_speed_mm_s", "role": "process_setpoint"},
+            {"name": "frequency_kHz", "role": "process_setpoint", "selected_for_trial": False},
+            {"name": "scan_speed_mm_s", "role": "process_setpoint", "selected_for_trial": False},
             {"name": "layer_step_um", "role": "strategy_parameter"},
         ],
         "evaluation_plan": [
@@ -70,6 +70,20 @@ def _plans(diameter_mm: float = 1.0) -> tuple[dict, dict]:
         "allowed_for_formal_process": False,
         "allowed_for_bo_training": False,
     }
+    layer_parameter = {
+        "name": "layer_step_um",
+        "value": 10,
+        "unit": "um",
+        "role": "strategy_parameter",
+        "source_type": "llm_exploration",
+        "source_refs": [],
+        "authority_level": "exploratory",
+        "uncertainty": {},
+        "validated": False,
+        "allowed_for_trial": True,
+        "allowed_for_formal_process": False,
+        "allowed_for_bo_training": False,
+    }
     trial_plan = {
         "objective": "验证稳定去除、排屑和贯穿趋势",
         "hypothesis": "受控分层去除可降低脆性损伤并改善深孔排屑",
@@ -79,7 +93,10 @@ def _plans(diameter_mm: float = 1.0) -> tuple[dict, dict]:
             "fixed_conditions": process_plan["fixed_conditions"],
         },
         "strategy": process_plan["strategy"],
-        "parameter_candidates": [{"candidate_id": "trial-1", "parameters": {"laser_power_W": parameter}}],
+        "parameter_candidates": [{"candidate_id": "trial-1", "parameters": {
+            "laser_power_W": parameter,
+            "layer_step_um": layer_parameter,
+        }}],
         "evaluation_plan": process_plan["evaluation_plan"],
         "success_criteria": [
             {"metric": "through_status", "operator": "==", "value": True},
@@ -115,7 +132,7 @@ class CompletePlanLLM:
                 "arguments": {
                     "task_context": {"material": "氧化锆陶瓷"},
                     "process_plan": process_plan,
-                    "variables": ["laser_power_W"],
+                    "variables": ["laser_power_W", "layer_step_um"],
                     "equipment_context": {
                         "fixed_conditions": process_plan["fixed_conditions"],
                         "tunable_capabilities": {
@@ -124,7 +141,7 @@ class CompletePlanLLM:
                     },
                     "evidence_summary": "测试探索假设",
                     "intended_use": "trial",
-                    "candidate": {"laser_power_W": 1.1},
+                    "candidate": {"laser_power_W": 1.1, "layer_step_um": 10},
                 },
             }
             return {
@@ -303,6 +320,73 @@ def test_open_plan_models_normalize_equivalent_generic_shapes() -> None:
     assert trial.strategy == {"description": "task-selected strategy"}
     assert len(trial.parameter_candidates) == 1
     assert trial.stop_conditions == [{"description": "unsafe observation"}]
+
+
+def test_latest_parameter_truth_keeps_process_and_strategy_parameters() -> None:
+    process_parameter = {
+        "name": "laser_power_W", "value": 1.1, "role": "process_setpoint",
+    }
+    strategy_parameter = {
+        "name": "scan_pattern", "value": "cross_hatch", "role": "strategy_parameter",
+    }
+
+    truth = MainAgentPlanner._latest_parameter_truth([{"data": {
+        "process_parameters": {"laser_power_W": process_parameter},
+        "strategy_parameters": {"scan_pattern": strategy_parameter},
+    }}])
+
+    assert truth == {
+        "laser_power_W": process_parameter,
+        "scan_pattern": strategy_parameter,
+    }
+
+
+def test_plan_semantics_rejects_tunable_as_strategy_and_unproven_assigned_control() -> None:
+    process = ProcessPlan.model_validate({
+        "objective": "generic",
+        "strategy": {"type": "task_selected"},
+        "operations": [{"name": "operation"}],
+        "controllable_variables": [
+            {"name": "pulse_width_fs", "role": "strategy_parameter", "fixed": 500},
+            {"name": "scan_pattern", "role": "strategy_parameter", "fixed": "cross_hatch"},
+        ],
+        "evaluation_plan": [{"metric": "task_specific"}],
+    })
+    equipment = {
+        "fixed_conditions": {"wavelength_nm": 1030},
+        "tunable_capabilities": {"pulse_width_fs": {"min": 500, "max": 8000}},
+    }
+
+    with pytest.raises(ValueError, match="equipment_tunable_must_be_process_setpoint"):
+        MainAgentPlanner._validate_process_parameter_semantics(
+            process, {"scan_pattern": {"role": "strategy_parameter"}}, equipment,
+        )
+
+    process.controllable_variables[0]["role"] = "process_setpoint"
+    with pytest.raises(ValueError, match="controllable_variable_requires_parameter_tool_truth"):
+        MainAgentPlanner._validate_process_parameter_semantics(
+            process, {"pulse_width_fs": {"role": "process_setpoint"}}, equipment,
+        )
+
+
+def test_plan_semantics_allows_tool_validated_setpoint_held_fixed_for_trial() -> None:
+    process = ProcessPlan.model_validate({
+        "objective": "generic",
+        "strategy": {"type": "task_selected"},
+        "operations": [{"name": "operation"}],
+        "fixed_conditions": {"pulse_width_fs": 500},
+        "controllable_variables": [{"name": "pulse_width_fs", "role": "process_setpoint"}],
+        "evaluation_plan": [{"metric": "task_specific"}],
+    })
+    truth = {"pulse_width_fs": {
+        "name": "pulse_width_fs", "value": 500, "role": "process_setpoint",
+    }}
+    equipment = {
+        "fixed_conditions": {"wavelength_nm": 1030},
+        "tunable_capabilities": {"pulse_width_fs": {"min": 500, "max": 8000}},
+    }
+
+    MainAgentPlanner._validate_process_parameter_semantics(process, truth, equipment)
 
 
 def test_completed_answer_removes_nonblocking_confirmation_invitation() -> None:

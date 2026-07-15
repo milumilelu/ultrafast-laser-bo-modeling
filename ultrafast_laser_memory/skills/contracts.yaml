@@ -142,7 +142,7 @@ skills:
       - 试切 coupon 或代表性几何是否能回答当前问题。
       - 本轮固定条件、变化变量、派生指标和样本数量。
       - 检测可行性、成功判据、设备报警和材料损伤停止条件。
-      - 去除不足、崩边、锥度、裂纹、热损伤等现象对应的调整方向。
+      - 只分析当前任务相关的失效现象及其调整方向，不套用其他加工类型的缺陷清单。
       - 数据是否具备进入 BO 的合格性。
     recommended_tools: [manage_trial, recommend_parameters_bo, recommend_parameters_rag, propose_exploratory_parameters, record_process_result, get_equipment_context]
     output_expectations:

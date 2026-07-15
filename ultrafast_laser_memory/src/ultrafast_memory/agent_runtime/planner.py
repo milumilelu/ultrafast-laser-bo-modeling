@@ -131,7 +131,9 @@ class MainAgentPlanner:
             raise ValueError("message_required")
         if action.action == "final_answer" and MainAgentPlanner._complete_plan_required(working_context or {}):
             updates = action.context_updates or {}
-            ProcessPlan.model_validate(updates.get("process_plan") or (working_context or {}).get("process_plan"))
+            process = ProcessPlan.model_validate(
+                updates.get("process_plan") or (working_context or {}).get("process_plan")
+            )
             trial = TrialPlan.model_validate(
                 updates.get("trial_plan") or (working_context or {}).get("trial_plan")
             )
@@ -140,6 +142,10 @@ class MainAgentPlanner:
                 parameter_truth = MainAgentPlanner._latest_parameter_truth(recent_tool_results or [])
                 if not parameter_truth:
                     raise ValueError("new_trial_plan_requires_successful_parameter_tool_result")
+                equipment_truth = MainAgentPlanner._latest_equipment_truth(recent_tool_results or [])
+                MainAgentPlanner._validate_process_parameter_semantics(
+                    process, parameter_truth, equipment_truth,
+                )
                 MainAgentPlanner._validate_trial_parameter_truth(trial, parameter_truth)
         return action
 
@@ -147,10 +153,72 @@ class MainAgentPlanner:
     def _latest_parameter_truth(observations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         for observation in reversed(observations):
             data = observation.get("data") or {}
-            parameters = data.get("process_parameters") if isinstance(data, dict) else None
-            if isinstance(parameters, dict) and parameters:
-                return parameters
+            if not isinstance(data, dict):
+                continue
+            process_parameters = data.get("process_parameters") or {}
+            strategy_parameters = data.get("strategy_parameters") or {}
+            if isinstance(process_parameters, dict) and isinstance(strategy_parameters, dict):
+                parameters = {**process_parameters, **strategy_parameters}
+                if parameters:
+                    return parameters
         return {}
+
+    @staticmethod
+    def _latest_equipment_truth(observations: list[dict[str, Any]]) -> dict[str, Any]:
+        for observation in reversed(observations):
+            data = observation.get("data") or {}
+            if isinstance(data, dict) and isinstance(data.get("tunable_capabilities"), dict):
+                return data
+        return {}
+
+    @staticmethod
+    def _validate_process_parameter_semantics(
+        process: ProcessPlan,
+        parameter_truth: dict[str, dict[str, Any]],
+        equipment_truth: dict[str, Any],
+    ) -> None:
+        tunable = set((equipment_truth.get("tunable_capabilities") or {}).keys())
+        fixed = equipment_truth.get("fixed_conditions") or {}
+        for name, value in process.fixed_conditions.items():
+            if name in tunable:
+                parameter = parameter_truth.get(name) or {}
+                if (
+                    parameter.get("role") != "process_setpoint"
+                    or parameter.get("value") != value
+                ):
+                    raise ValueError(
+                        f"tunable_fixed_for_trial_requires_matching_tool_truth:{name};"
+                        "move_to_process_setpoint_candidate_or_remove"
+                    )
+            if name in fixed and value != fixed[name]:
+                raise ValueError(f"fixed_equipment_condition_mismatch:{name}")
+
+        declared_controls: set[str] = set()
+        for variable in process.controllable_variables:
+            name = variable.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            role = MainAgentPlanner._canonical_parameter_role(str(variable.get("role") or "process_setpoint"))
+            if role in {"process_setpoint", "strategy_parameter"} and variable.get("selected_for_trial") is not False:
+                declared_controls.add(name)
+            if name in tunable and role != "process_setpoint":
+                raise ValueError(f"equipment_tunable_must_be_process_setpoint:{name}")
+        missing_truth = sorted(declared_controls - set(parameter_truth))
+        if missing_truth:
+            raise ValueError(f"controllable_variable_requires_parameter_tool_truth:{','.join(missing_truth)}")
+
+    @staticmethod
+    def _canonical_parameter_role(value: str) -> str:
+        aliases = {
+            "process_setpoint": "process_setpoint",
+            "process setpoint": "process_setpoint",
+            "工艺设定值": "process_setpoint",
+            "工艺参数": "process_setpoint",
+            "strategy_parameter": "strategy_parameter",
+            "strategy parameter": "strategy_parameter",
+            "策略参数": "strategy_parameter",
+        }
+        return aliases.get(value.strip().lower(), value.strip())
 
     @staticmethod
     def _validate_trial_parameter_truth(
@@ -324,6 +392,13 @@ class MainAgentPlanner:
             "Tool 结果是真实来源：不得改写 BO/RAG provenance，不得把 exploratory 参数冒充已验证参数。"
             "探索候选必须由 ProcessPlan 选择变量，由你基于材料、几何、路线和风险提出少量有理由的 candidate，"
             "再交给 propose_exploratory_parameters 做边界检查。"
+            "准备调用参数 Tool 时，应先加载 parameter_recommendation Skill；准备形成 TrialPlan 时，应加载 "
+            "experiment_optimization Skill。Skill 提供方法指导，不改变 Tool 可见性。"
+            "ProcessPlan 中本轮每个 controllable_variable 都必须进入参数 Tool；仅明确 "
+            "selected_for_trial=false 的后续变量可以不进入当前候选。"
+            "设备 tunable_capabilities 中的变量只能是 process_setpoint，min/max 不是固定条件或推荐值。"
+            "设备可调量只有作为参数 Tool 验证过的 process_setpoint 才能在本轮保持固定；"
+            "不得把设备下限、上限直接写成 fixed_conditions。"
             "当加工任务信息足以继续时，应组合必要 Skill 和 Tool，形成完整 ProcessPlan 与第一轮 TrialPlan。"
             "ProcessPlan 和 TrialPlan 是开放语义结构：只规定目标、策略、操作、相关变量、评价和迭代逻辑，"
             "具体路径、分层、焦点、参数和检测指标必须按当前任务动态选择，不得套用其他加工类型模板。"
@@ -332,7 +407,8 @@ class MainAgentPlanner:
             "形成有用 TrialPlan 后必须 final_answer，不得自动追加是否接受、是否开始或是否还有要求。"
             "最终用户回复必须自包含任务、策略、试切参数、检测与判据、调整逻辑、来源、风险；"
             "不得让用户去看内部 context_updates、process_plan 或 trial_plan。"
-            "新生成的 TrialPlan 候选参数必须逐字段复制本轮成功参数 Tool 的 process_parameters，"
+            "新生成的 TrialPlan 候选参数必须逐字段复制本轮成功参数 Tool 的 process_parameters 和 "
+            "strategy_parameters，"
             "不得改写 value、source_type、authority_level、uncertainty 或权限。"
             "只在设备硬安全、明确 unsafe 或不可逆动作未获本次确认时阻断。"
         )

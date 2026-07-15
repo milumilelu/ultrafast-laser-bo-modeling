@@ -196,3 +196,132 @@ def test_exploratory_accepts_explicit_value_metadata_and_flat_fixed_equipment(is
         "wavelength_nm": 1030, "spot_diameter_um": 5,
     }
     assert result["process_parameters"]["laser_power_W"]["source_type"] == "llm_exploration"
+
+
+def test_exploratory_accepts_wrapped_parameters_without_deriving_values(isolated_root) -> None:
+    init_database()
+    _equipment_profile()
+    equipment = _equipment_output()
+    payload = {
+        "task_context": {"material": {"name": "generic"}},
+        "process_plan": {"controllable_variables": [{"name": "laser_power_W"}]},
+        "variables": ["laser_power_W"],
+        "equipment_context": equipment,
+        "evidence_summary": {},
+        "intended_use": "trial",
+        "candidate": {"parameters": {"laser_power_W": {"value": 1.1, "unit": "W"}}},
+    }
+
+    result = ToolExecutor(build_main_agent_tool_registry()).execute(
+        "propose_exploratory_parameters", payload, {"session_id": "semantic"},
+    ).output
+
+    assert result["status"] == "exploratory"
+    assert result["process_parameters"]["laser_power_W"]["value"] == 1.1
+
+
+def test_exploratory_separates_explicit_strategy_parameters(isolated_root) -> None:
+    init_database()
+    _equipment_profile()
+    equipment = _equipment_output()
+    payload = {
+        "task_context": {"material": {"name": "generic"}},
+        "process_plan": {"controllable_variables": [
+            {"name": "laser_power_W", "role": "process_setpoint"},
+            {"name": "scan_pattern", "role": "strategy_parameter"},
+        ]},
+        "variables": ["laser_power_W", "scan_pattern"],
+        "equipment_context": equipment,
+        "evidence_summary": {},
+        "intended_use": "trial",
+        "candidate": {"parameters": {
+            "laser_power_W": {"value": 1.1, "unit": "W"},
+            "scan_pattern": {"value": "cross_hatch"},
+        }},
+    }
+
+    result = ToolExecutor(build_main_agent_tool_registry()).execute(
+        "propose_exploratory_parameters", payload, {"session_id": "semantic"},
+    ).output
+
+    assert result["status"] == "exploratory"
+    assert set(result["process_parameters"]) == {"laser_power_W"}
+    assert result["strategy_parameters"]["scan_pattern"]["value"] == "cross_hatch"
+    assert result["strategy_parameters"]["scan_pattern"]["role"] == "strategy_parameter"
+
+
+def test_exploratory_does_not_infer_strategy_role_from_missing_equipment_bound(isolated_root) -> None:
+    init_database()
+    _equipment_profile()
+    equipment = _equipment_output()
+    payload = {
+        "task_context": {"material": {"name": "generic"}},
+        "process_plan": {"controllable_variables": [{"name": "scan_pattern"}]},
+        "variables": ["scan_pattern"],
+        "equipment_context": equipment,
+        "evidence_summary": {},
+        "intended_use": "trial",
+        "candidate": {"parameters": {"scan_pattern": {"value": "cross_hatch"}}},
+    }
+
+    result = ToolExecutor(build_main_agent_tool_registry()).execute(
+        "propose_exploratory_parameters", payload, {"session_id": "semantic"},
+    ).output
+
+    assert result["status"] == "validation_error"
+    assert "role=strategy_parameter" in result["summary"]
+
+
+def test_exploratory_normalizes_unambiguous_trial_and_role_aliases(isolated_root) -> None:
+    init_database()
+    _equipment_profile()
+    equipment = _equipment_output()
+    payload = {
+        "task_context": {"material": {"name": "generic"}},
+        "process_plan": {"controllable_variables": [
+            {"name": "laser_power_W", "role": "工艺设定值"},
+            {"name": "scan_pattern", "role": "策略参数"},
+        ]},
+        "variables": ["laser_power_W", "scan_pattern"],
+        "equipment_context": equipment,
+        "evidence_summary": {},
+        "intended_use": "first_trial",
+        "candidate": {"parameters": {
+            "laser_power_W": {"value": 1.1},
+            "scan_pattern": {"value": "cross_hatch"},
+        }},
+    }
+
+    result = ToolExecutor(build_main_agent_tool_registry()).execute(
+        "propose_exploratory_parameters", payload, {"session_id": "semantic"},
+    ).output
+
+    assert result["status"] == "exploratory"
+    assert result["process_parameters"]["laser_power_W"]["role"] == "process_setpoint"
+    assert result["strategy_parameters"]["scan_pattern"]["role"] == "strategy_parameter"
+
+
+def test_exploratory_rejects_unvalidated_tunable_fixed_condition(isolated_root) -> None:
+    init_database()
+    _equipment_profile()
+    equipment = _equipment_output()
+    payload = {
+        "task_context": {"material": {"name": "generic"}},
+        "process_plan": {
+            "fixed_conditions": {"frequency_kHz": 2},
+            "controllable_variables": [{"name": "laser_power_W"}],
+        },
+        "variables": ["laser_power_W"],
+        "equipment_context": equipment,
+        "evidence_summary": {},
+        "intended_use": "trial",
+        "candidate": {"laser_power_W": 1.1},
+    }
+
+    result = ToolExecutor(build_main_agent_tool_registry()).execute(
+        "propose_exploratory_parameters", payload, {"session_id": "semantic"},
+    ).output
+
+    assert result["status"] == "validation_error"
+    assert result["invalid_variables"] == ["frequency_kHz"]
+    assert "process_setpoint" in result["summary"]
