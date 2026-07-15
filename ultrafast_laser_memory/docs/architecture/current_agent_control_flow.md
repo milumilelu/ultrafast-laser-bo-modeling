@@ -2,6 +2,8 @@
 
 The Main LLM is the only foreground business orchestrator. Router output and six Skills are non-binding hints; all eight foreground-safe Tools remain discoverable.
 
+The TUI and chat API recognize an explicitly pasted local requirement-document path. Text is extracted from supported text/PDF/DOCX formats and placed directly in the Planner message; Working Context stores only document metadata and provenance. `ask_user` output is validated to contain one batch of 3–5 numbered questions.
+
 ```mermaid
 flowchart LR
     U["User message"] --> R["Router hints"]

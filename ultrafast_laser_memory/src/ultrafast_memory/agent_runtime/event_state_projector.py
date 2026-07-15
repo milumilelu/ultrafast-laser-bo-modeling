@@ -16,6 +16,7 @@ PUBLIC_STATUS_EVENT_TYPES = {
     "agent_decision",
     "knowledge_lookup",
     "device_lookup",
+    "document_loaded",
     "tool_call_started",
     "tool_completed",
     "tool_failed",

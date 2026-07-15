@@ -8,6 +8,11 @@ from typing import Any
 
 from ultrafast_agent.observability import DebugTraceRenderer, TUIRenderer
 from ultrafast_memory.agent_runtime.event_state_projector import EventStateProjector
+from ultrafast_memory.agent_runtime.document_input import (
+    DocumentReadError,
+    load_document_from_message,
+    public_document_metadata,
+)
 from ultrafast_memory.agent_runtime.trace_collector import record_agent_trace_event
 from ultrafast_memory.chat.router.debug_commands import handle_debug_command
 from ultrafast_memory.chat.router.hybrid_router import route_message
@@ -37,8 +42,24 @@ def handle_chat(
     event_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> ChatResponse:
     session_id = _ensure_session(request)
+    agent_message = request.message
+    document_context: dict[str, Any] | None = None
+    try:
+        document = load_document_from_message(request.message)
+        if document is not None:
+            agent_message = str(document["agent_message"])
+            document_context = public_document_metadata(document)
+    except DocumentReadError as exc:
+        document_context = {"status": "read_error", "path_input": request.message.strip(), "error": str(exc)}
+        agent_message = (
+            "用户提交了本地加工需求文档路径，但系统读取失败。"
+            f"错误：{exc}。请说明可执行修复，并一次提出 3–5 个必要问题。"
+        )
 
-    user_message = _safe_save_message(session_id, "user", request.message, {"mode": request.mode})
+    user_metadata: dict[str, Any] = {"mode": request.mode}
+    if document_context is not None:
+        user_metadata["document"] = document_context
+    user_message = _safe_save_message(session_id, "user", request.message, user_metadata)
     state = get_session_state(session_id)
 
     mode_command = _handle_display_mode_command(request.message, session_id)
@@ -118,10 +139,10 @@ def handle_chat(
             trace_mode=_public_trace_mode(session_id),
         )
 
-    route_plan = route_message(request.message, session_id, user_message["message_id"])
+    route_plan = route_message(agent_message, session_id, user_message["message_id"])
     selected_skill = route_plan.primary_skill
     route_event = _record_route_decision_trace(
-        session_id, user_message["message_id"], request.message, route_plan
+        session_id, user_message["message_id"], agent_message, route_plan
     )
     _emit_live(event_sink, route_event)
     try:
@@ -144,11 +165,12 @@ def handle_chat(
     ]))
     agent_result = run_main_agent_turn(
         session_id=session_id,
-        message=request.message,
+        message=agent_message,
         message_id=user_message["message_id"],
         client=create_llm_client(get_llm_config()),
         suggested_skills=suggested_skills,
         event_sink=event_sink,
+        document_context=document_context,
     )
     audit_trace.append({
         "step": "main_agent_loop",

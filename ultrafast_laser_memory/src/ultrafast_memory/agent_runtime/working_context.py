@@ -18,6 +18,7 @@ class WorkingContext(BaseModel):
     observations: list[dict[str, Any]] = Field(default_factory=list)
     active_skills: list[str] = Field(default_factory=list)
     equipment_context: dict[str, Any] | None = None
+    documents: list[dict[str, Any]] = Field(default_factory=list)
 
     def apply(self, updates: dict[str, Any]) -> list[str]:
         changed: list[str] = []

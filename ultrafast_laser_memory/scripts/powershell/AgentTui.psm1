@@ -624,6 +624,24 @@ function Send-AgentChatMessage {
     return Invoke-RestMethod -Method Post -Uri "$BaseUrl/chat" -ContentType "application/json; charset=utf-8" -Body $body
 }
 
+function Resolve-AgentDocumentPath {
+    param([string]$InputText)
+    if ([string]::IsNullOrWhiteSpace($InputText)) { return $null }
+    $candidate = $InputText.Trim()
+    if ($candidate.StartsWith("/file ", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $candidate = $candidate.Substring(6).Trim()
+    }
+    if ($candidate.Length -ge 2) {
+        $first = $candidate.Substring(0, 1)
+        $last = $candidate.Substring($candidate.Length - 1, 1)
+        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            $candidate = $candidate.Substring(1, $candidate.Length - 2).Trim()
+        }
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+    return (Resolve-Path -LiteralPath $candidate).Path
+}
+
 function Get-AgentStreamMode {
     return $script:AgentStreamMode
 }
@@ -1266,7 +1284,7 @@ function Start-AgentChat {
     Set-AgentStreamMode -Enabled $true
 
     Write-Host ""
-    Write-Host "进入超快激光智能体聊天模式。输入 exit 退出。" -ForegroundColor Cyan
+    Write-Host "进入超快激光智能体聊天模式。可直接粘贴加工需求文档路径；输入 exit 退出。" -ForegroundColor Cyan
     Write-Host "可用命令：/stream on|off, /mode normal|research|debug, /trace summary|full|off, /skills, /tools, /reasoning, /waterfall, /campaign, /model, /llm config, /routes, /state, /reset, /skill <name>, /no_skill, /equipment show|edit"
     Write-Host ""
     Write-Host "已启用 Debug + full public trace。隐藏推理、系统提示词和凭据不会公开。" -ForegroundColor DarkGray
@@ -1303,6 +1321,11 @@ function Start-AgentChat {
             if ($inputText.Trim().StartsWith("/mode ")) {
                 Set-AgentDisplayMode -Mode ($inputText.Trim().Substring("/mode ".Length).Trim().ToLowerInvariant())
                 continue
+            }
+            $documentPath = Resolve-AgentDocumentPath -InputText $inputText
+            if ($documentPath) {
+                $inputText = $documentPath
+                Write-Host ("[文档] 已识别本地需求文档：{0}" -f $documentPath) -ForegroundColor DarkCyan
             }
             Write-Host "加工助手执行中..." -ForegroundColor DarkCyan
             if (Get-AgentStreamMode) {
@@ -1441,4 +1464,4 @@ function Show-AgentMainMenu {
     }
 }
 
-Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentRuntimeIdentity, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret
+Export-ModuleMember -Function Show-AgentBanner, Show-ProviderMenu, Show-ModelMenu, Show-DeepSeekModelMenu, Read-AgentApiKey, Set-AgentEnvironment, Set-AgentDeepSeekEnvironment, Initialize-AgentDeepSeekConfig, Use-AgentSavedDeepSeekConfig, Save-AgentLlmConfig, Load-AgentLlmConfig, Clear-AgentLlmConfig, Show-AgentMainMenu, Initialize-AgentDatabase, Update-AgentDatabaseSchemaQuiet, Invoke-AgentScan, Start-AgentApiServer, Start-AgentApiServerBackground, Export-AgentBoDataset, Initialize-AgentLocalBootstrap, Test-AgentPythonEnvironment, Test-AgentApiServer, Test-AgentRuntimeIdentity, Test-AgentLlmConnection, Update-AgentLlmConfigFromChat, New-AgentChatSession, Send-AgentChatMessage, Send-AgentChatStream, Resolve-AgentDocumentPath, Get-AgentStreamMode, Set-AgentStreamMode, Get-AgentDisplayMode, Set-AgentDisplayMode, Show-AgentProgressBar, Show-AgentThinkingStatus, Show-AgentTraceEvent, Show-AgentRuntimeIdentity, Show-AgentWorkflowState, Show-AgentExecutionTrace, Show-AgentToolCall, Show-AgentEvidenceSummary, Show-AgentTrialDecision, Show-AgentApprovalCard, Show-AgentLatencyWaterfall, Show-AgentTrialChoice, Show-AgentKnowledgeUsageCard, Get-AgentMachineBounds, Start-EquipmentSetupWizard, Update-ActiveEquipmentProfileWizard, Show-ActiveEquipmentProfile, Select-ActiveEquipmentProfile, Show-AgentReviewTasks, Show-AgentReviewTaskDetail, Invoke-AgentKnowledgeBootstrapMenu, Invoke-AgentReviewQueueMenu, Start-AgentChat, Start-AgentDeepSeekAutoLaunch, Save-AgentSecret, Get-AgentSecret, Remove-AgentSecret

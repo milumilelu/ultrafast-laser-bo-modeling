@@ -30,6 +30,7 @@ def run_main_agent_turn(
     *, session_id: str, message: str, message_id: str | None, client: Any,
     suggested_skills: list[str] | None = None, active_skills: list[str] | None = None,
     event_sink: Callable[[dict[str, Any]], None] | None = None,
+    document_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the single foreground control loop until a semantic terminal action."""
     registry = build_main_agent_tool_registry()
@@ -52,6 +53,36 @@ def run_main_agent_turn(
     repeated_no_progress: dict[str, int] = {}
     recent_actions: list[dict[str, Any]] = []
 
+    if document_context is not None:
+        document_observation = {
+            "type": "DocumentObservation",
+            "status": str(document_context.get("status") or "loaded"),
+            **document_context,
+        }
+        if document_context.get("status") == "loaded":
+            document_id = document_context.get("document_id")
+            if not any(item.get("document_id") == document_id for item in working.documents):
+                working.documents.append(dict(document_context))
+            if not any(item.get("type") == "DocumentObservation" and item.get("document_id") == document_id
+                       for item in observations):
+                observations.append(document_observation)
+            _persist_context_nonblocking(
+                session_id, message_id, working, ["documents", "observations"],
+                events, event_sink, warnings,
+            )
+            _publish(events, event_sink, _safe_trace(
+                session_id, message_id, "document_loaded", "document_input", "加工需求文档已读取",
+                f"已提取 {document_context.get('file_name')}，正在交给主 Agent 解析。",
+                "completed", {"document": document_context}, warnings,
+            ))
+        else:
+            observations.append(document_observation)
+            _publish(events, event_sink, _safe_trace(
+                session_id, message_id, "warning", "document_input", "加工需求文档读取失败",
+                str(document_context.get("error") or "文档读取失败。"),
+                "completed", {"document": document_context}, warnings,
+            ))
+
     _publish(events, event_sink, _safe_trace(
         session_id, message_id, "agent_started", "main_agent", "主 Agent 已启动",
         "已读取当前 Working Context，开始推进任务。", "running", {}, warnings,
@@ -63,7 +94,12 @@ def run_main_agent_turn(
         if turn_step > ABSOLUTE_EMERGENCY_DECISION_LIMIT:
             final_action = AgentAction(
                 action="ask_user", decision_summary="检测到 probable planning loop，已触发内部失控保护。",
-                message="当前规划未能继续产生有效进展。请确认是否调整目标或补充新的加工观察。",
+                message=(
+                    "当前规划未能继续产生有效进展，请一次确认以下事项：\n"
+                    "1. 是否保持当前加工目标继续重试？\n"
+                    "2. 是否有新的测量、设备告警或加工现象需要补充？\n"
+                    "3. 是否允许切换参数来源或回退到试切方案？"
+                ),
             )
             _publish(events, event_sink, _safe_trace(
                 session_id, message_id, "probable_agent_loop", "main_agent", "检测到规划循环",
@@ -158,7 +194,12 @@ def run_main_agent_turn(
             if repeated_no_progress[duplicate_key] >= 3:
                 final_action = AgentAction(
                     action="ask_user", decision_summary="同一 Tool 观察连续未产生上下文进展，判定 probable planning loop。",
-                    message="现有工具结果已重复但没有产生新进展。请补充新的加工信息或调整目标。",
+                    message=(
+                        "现有工具结果重复且没有新进展，请一次回答：\n"
+                        "1. 当前加工目标是否保持不变？\n"
+                        "2. 是否有新的工件、测量或设备信息？\n"
+                        "3. 是否同意改用其他证据或参数来源继续？"
+                    ),
                     provider=action.provider, model=action.model,
                 )
                 _publish(events, event_sink, _safe_trace(

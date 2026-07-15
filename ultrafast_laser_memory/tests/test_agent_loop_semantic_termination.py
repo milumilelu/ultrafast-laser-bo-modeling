@@ -23,6 +23,7 @@ def test_rectangular_groove_commits_all_facts_once_then_asks_depth(isolated_root
 
     assert response.current_stage_code == "ask_user"
     assert "目标深度" in response.assistant_message
+    assert 3 <= response.assistant_message.count("？") <= 5
     spec = response.workflow_state["task_spec"]
     assert spec["material"] == {"name": "铝基碳化硅板材"}
     assert spec["process_intent"] == "groove_machining"

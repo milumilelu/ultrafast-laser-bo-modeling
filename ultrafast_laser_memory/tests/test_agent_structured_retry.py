@@ -37,3 +37,32 @@ def test_provider_actions_array_is_normalized_to_one_action():
     assert normalized["action"] == "call_tool"
     assert normalized["tool_name"] == "search_knowledge"
     assert normalized["context_updates"]["task"]["material"]["name"] == "diamond"
+
+
+def test_single_question_is_retried_as_three_to_five_question_batch():
+    class QuestionRetryLLM:
+        provider = "test"
+        model = "question-retry"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kwargs):
+            self.calls += 1
+            message = (
+                "槽深是多少？"
+                if self.calls == 1 else
+                "1. 槽深是多少？\n2. 工件总厚度是多少？\n3. 尺寸公差是多少？"
+            )
+            return {"content": json.dumps({
+                "action": "ask_user", "decision_summary": "确认关键歧义", "message": message,
+            }, ensure_ascii=False)}
+
+    llm = QuestionRetryLLM()
+    action = MainAgentPlanner(llm).decide(
+        message="加工矩形槽", working_context={"task": {}},
+        available_tools=build_main_agent_tool_registry().schemas_for_agent(),
+    )
+    assert llm.calls == 2
+    assert action.action == "ask_user"
+    assert 3 <= action.message.count("？") <= 5

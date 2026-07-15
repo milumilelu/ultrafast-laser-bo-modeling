@@ -33,7 +33,12 @@ class MainAgentPlanner:
             return AgentAction(
                 action="ask_user",
                 decision_summary="主 Agent LLM 当前不可用，无法可靠解释该自由文本。",
-                message="当前无法可靠理解这条信息，请稍后重试；现有任务状态未被修改，已有上下文未被清空。",
+                message=(
+                    "当前无法可靠解释这条自由文本，现有任务状态未被修改。请一次回答：\n"
+                    "1. 加工材料及工件厚度是什么？\n"
+                    "2. 加工特征、关键尺寸和是否贯穿是什么？\n"
+                    "3. 目标质量、允许缺陷和本次希望得到方案还是真实加工准备？"
+                ),
                 provider=getattr(self.client, "provider", None),
                 model=getattr(self.client, "model", None),
             )
@@ -71,7 +76,12 @@ class MainAgentPlanner:
         return AgentAction(
             action="ask_user",
             decision_summary=f"主 Agent 行动规划失败：{type(last_error).__name__ if last_error else 'unknown'}。",
-            message="我暂时无法安全规划下一步；现有状态未被修改，已有任务上下文和观察均已保留。请稍后重试。",
+            message=(
+                "我暂时无法安全规划下一步，现有状态未被修改，已有上下文和观察均已保留。请一次确认：\n"
+                "1. 是否立即重试当前任务？\n"
+                "2. 是否先返回已识别的任务事实供您核对？\n"
+                "3. 是否有新的材料、几何或质量要求需要同时补充？"
+            ),
             provider=getattr(self.client, "provider", None),
             model=getattr(self.client, "model", None),
             error_details=self._safe_error_details(last_error),
@@ -90,6 +100,10 @@ class MainAgentPlanner:
                 raise ValueError(f"skill_not_registered:{action.skill_name}")
         elif not action.message:
             raise ValueError("message_required")
+        if action.action == "ask_user":
+            question_count = len(re.findall(r"[?？]", action.message or ""))
+            if not 3 <= question_count <= 5:
+                raise ValueError(f"ask_user_requires_3_to_5_questions:{question_count}")
         return action
 
     @staticmethod
@@ -141,6 +155,8 @@ class MainAgentPlanner:
             "把用户明确事实直接写入 context_updates.task；Working Context 是开放结构，允许部分信息和自定义几何。"
             "同一行动可同时更新上下文并追问、调用工具或回答；不存在独立的任务状态写入工具。"
             "关键歧义（如槽深、通孔或盲孔）必须立即追问；功率、频率、速度等工艺参数应由系统推荐，不询问用户。"
+            "每次 ask_user 必须把当前最重要且文档中没有答案的问题合并为 3–5 个编号问题，"
+            "每题以问号结尾；不得重复询问用户或文档已经提供的事实。"
             "所有前台安全 Tool 始终可见；Skill 只提供专业指导和排序提示。"
             "Tool 结果是真实来源：不得改写 BO/RAG provenance，不得把 exploratory 参数冒充已验证参数。"
             "只在设备硬安全、明确 unsafe 或不可逆动作未获本次确认时阻断。"
@@ -162,7 +178,10 @@ class MainAgentPlanner:
             "skill_name": None,
             "tool_name": None,
             "arguments": {},
-            "message": "矩形槽的目标深度是多少？",
+            "message": (
+                "请一次回答：\n1. 槽深或贯穿要求是什么？\n2. 工件总厚度是多少？\n"
+                "3. 关键尺寸公差是多少？\n4. 本次目标是方案、试切还是真实加工准备？"
+            ),
             "context_updates": {"task": {"process_intent": "groove_machining"}},
         }
         return "\n".join([
@@ -219,7 +238,14 @@ class MainAgentPlanner:
                 size_text = f"{float(groove.group('length')) * factor:g}×{float(groove.group('width')) * factor:g} mm"
                 return AgentAction(
                     action="ask_user", decision_summary="槽深会显著改变加工路线和参数空间，必须先确认。",
-                    message=f"已识别材料和 {size_text} 矩形槽。矩形槽的目标深度是多少（或是否贯穿）？",
+                    message=(
+                        f"已识别材料和 {size_text} 矩形槽。请一次回答以下关键问题：\n"
+                        "1. 矩形槽的目标深度是多少，还是要求贯穿？\n"
+                        "2. 工件的总厚度是多少？\n"
+                        "3. 材料牌号或 SiC 体积分数是否已知？\n"
+                        "4. 长宽和槽深允许的尺寸公差、边缘崩裂上限分别是多少？\n"
+                        "5. 本次希望获得工艺方案、试切计划，还是真实加工准备？"
+                    ),
                     context_updates=updates, provider="deterministic_task_intake", model="open-geometry-adapter",
                 )
             return AgentAction(
@@ -287,7 +313,8 @@ class MainAgentPlanner:
     def _repair_note(cls, exc: Exception | None) -> str:
         return (
             f"previous_output_errors={json.dumps(cls._safe_error_details(exc), ensure_ascii=False)}\n"
-            "修复要求：只返回一个行动 JSON；context_updates 必须是对象；不要调用未注册的状态写入工具。"
+            "修复要求：只返回一个行动 JSON；context_updates 必须是对象；不要调用未注册的状态写入工具；"
+            "ask_user 必须合并 3–5 个编号问题，每题以问号结尾。"
         )
 
     @staticmethod
