@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import re
 from typing import Any
 
 from ultrafast_domain.domain_packs import load_domain_pack
@@ -86,7 +85,8 @@ def design_trial_plan(
     trial_mode: TrialMode | str,
     machine_bounds: dict[str, list[float | int]],
     domain_pack_name: str | None = None,
-    approved_parameter_candidates: list[dict[str, float | int]] | None = None,
+    approved_parameter_candidates: list[dict[str, float | int | str]] | None = None,
+    plan_definition: dict[str, Any] | None = None,
 ) -> TrialPlanDraft:
     mode = TrialMode(trial_mode)
     if mode == TrialMode.SKIP:
@@ -102,21 +102,41 @@ def design_trial_plan(
         )
     pack = load_domain_pack(domain_pack_name) if domain_pack_name else None
     template = pack.trial_templates.get(mode.value, {}) if pack else {}
-    representative = {
-        "type": template.get("representative_geometry") or _representative_geometry(task_spec, mode),
-        "full_geometry": mode == TrialMode.FULL,
-        "source": f"domain_pack:{domain_pack_name}" if pack else "process_type_rule",
-    }
+    definition = dict(plan_definition or {})
+    representative_value = definition.get("representative_geometry") \
+        or template.get("representative_geometry") or task_spec.get("geometry") or {}
+    representative = (
+        dict(representative_value)
+        if isinstance(representative_value, dict)
+        else {"description": str(representative_value)}
+    )
+    representative.setdefault("full_geometry", mode == TrialMode.FULL)
+    representative.setdefault(
+        "source",
+        "main_llm_plan" if definition.get("representative_geometry") is not None
+        else (f"domain_pack:{domain_pack_name}" if pack else "task_context"),
+    )
     parameter_matrix = list(approved_parameter_candidates or [])
-    metrics = list(pack.quality_metrics) if pack else list(task_spec.get("quality_metrics") or [])
-    measurement = {
-        "required": True,
-        "metrics": metrics,
-        "templates": pack.measurement_templates if pack else {},
-        "traceability_required": True,
-    }
-    criteria = _acceptance_criteria(task_spec.get("targets") or {}, metrics)
-    stop_conditions = _stop_conditions(task_spec)
+    supplied_measurement = definition.get("measurement_plan")
+    if isinstance(supplied_measurement, dict):
+        measurement = dict(supplied_measurement)
+        measurement.setdefault("required", True)
+        measurement.setdefault("traceability_required", True)
+    else:
+        metrics = list(pack.quality_metrics) if pack else list(task_spec.get("quality_metrics") or [])
+        measurement = {
+            "required": True,
+            "metrics": metrics,
+            "templates": pack.measurement_templates if pack else {},
+            "traceability_required": True,
+        }
+    criteria = list(
+        definition.get("acceptance_criteria")
+        or _acceptance_criteria(task_spec.get("targets") or {})
+    )
+    stop_conditions = list(
+        definition.get("stop_conditions") or task_spec.get("stop_conditions") or []
+    )
     warnings = []
     if not parameter_matrix:
         warnings.append("parameter matrix is empty because no parameter tool output was approved")
@@ -190,20 +210,7 @@ def evaluate_trial_result(
     }
 
 
-def _representative_geometry(task_spec: dict[str, Any], mode: TrialMode) -> str:
-    process = str(task_spec.get("process_type") or "").lower()
-    if mode == TrialMode.FULL:
-        return "full_target_geometry_and_complete_toolpath"
-    if any(token in process for token in ("drill", "hole", "tgv", "钻孔", "孔")):
-        return "single_hole_or_3x3_hole_array"
-    if any(token in process for token in ("cut", "切割")):
-        return "straight_line_small_circle_or_short_arc"
-    if any(token in process for token in ("texture", "surface", "织构", "表面")):
-        return "small_groove_dot_or_stripe_patch"
-    return "single_track_rectangle_step_or_small_pocket"
-
-
-def _acceptance_criteria(targets: dict[str, Any], metrics: list[str]) -> list[dict[str, Any]]:
+def _acceptance_criteria(targets: dict[str, Any]) -> list[dict[str, Any]]:
     criteria: list[dict[str, Any]] = [{"type": "critical_defects_absent", "required": True}]
     for key, raw in targets.items():
         if isinstance(raw, dict):
@@ -212,35 +219,4 @@ def _acceptance_criteria(targets: dict[str, Any], metrics: list[str]) -> list[di
             if raw.get("min") is not None:
                 criteria.append({"metric": key, "operator": ">=", "value": raw["min"], "unit": raw.get("unit"), "required": True})
             continue
-        match = re.match(r"(.+?)_(max|min)_(.+)$", key)
-        if match and isinstance(raw, (int, float)):
-            metric, direction, unit = match.groups()
-            criteria.append({"metric": f"{metric}_{unit}", "operator": "<=" if direction == "max" else ">=", "value": raw, "unit": unit, "required": True})
-    declared = {item.get("metric") for item in criteria}
-    for metric in metrics:
-        if metric not in declared:
-            criteria.append({"metric": metric, "required": False, "source": "domain_pack"})
     return criteria
-
-
-def _stop_conditions(task_spec: dict[str, Any]) -> list[dict[str, Any]]:
-    conditions = [
-        "energy_drift",
-        "depth_deviation",
-        "temperature_anomaly",
-        "crack_growth",
-        "edge_chipping_exceeded",
-        "online_monitoring_anomaly",
-        "equipment_alarm",
-        "processing_time_anomaly",
-    ]
-    thresholds = task_spec.get("stop_thresholds") or {}
-    return [
-        {
-            "condition": name,
-            "threshold": thresholds.get(name),
-            "threshold_source": "task_or_equipment" if name in thresholds else "operator_or_equipment_interlock",
-            "action": "stop_and_record",
-        }
-        for name in conditions
-    ]

@@ -18,6 +18,7 @@ class WorkingContext(BaseModel):
     observations: list[dict[str, Any]] = Field(default_factory=list)
     active_skills: list[str] = Field(default_factory=list)
     equipment_context: dict[str, Any] | None = None
+    pending_user_action: dict[str, Any] | None = None
     documents: list[dict[str, Any]] = Field(default_factory=list)
 
     def apply(self, updates: dict[str, Any]) -> list[str]:
@@ -28,10 +29,6 @@ class WorkingContext(BaseModel):
                 merged = deepcopy(current)
                 _deep_merge(merged, value, changed, key)
                 setattr(self, key, merged)
-            elif isinstance(current, (dict, list)) and not isinstance(value, type(current)):
-                # Terse LLM projections must not destroy richer established facts.
-                # A correction can still replace them by submitting the same structured type.
-                continue
             elif current != value:
                 setattr(self, key, value)
                 changed.append(key)
@@ -76,7 +73,7 @@ class ContextPersistenceService:
             state_update["last_agent_action_json"] = final_action
             state_update["collected_slots"]["process_workflow"] = {
                 "last_agent_action": final_action,
-                "missing_slots": _critical_missing(snapshot["task"]),
+                "missing_slots": [],
             }
         if decision_count is not None:
             state_update["agent_decision_count"] = decision_count
@@ -102,15 +99,6 @@ def _deep_merge(target: dict[str, Any], updates: dict[str, Any], changed: list[s
         current = target.get(key)
         if isinstance(current, dict) and isinstance(value, dict):
             _deep_merge(current, value, changed, path)
-        elif isinstance(current, (dict, list)) and not isinstance(value, type(current)):
-            continue
         elif current != value:
             target[key] = value
             changed.append(path)
-
-
-def _critical_missing(task: dict[str, Any]) -> list[str]:
-    geometry = task.get("geometry") or {}
-    if geometry.get("feature_type") == "rectangular_groove" and geometry.get("depth_mm") is None and not geometry.get("through"):
-        return ["geometry.depth_mm"]
-    return []

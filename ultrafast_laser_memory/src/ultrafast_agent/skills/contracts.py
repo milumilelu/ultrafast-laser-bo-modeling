@@ -14,29 +14,22 @@ REQUIRED_FIELDS = {
     "version",
     "purpose",
     "when_useful",
-    "method",
-    "required_considerations",
-    "recommended_tools",
-    "output_expectations",
-    "prohibitions",
-    "failure_handling",
+    "prompt",
+    "process_guidance",
 }
 
 
 @dataclass(frozen=True, slots=True)
 class SkillDescriptor:
-    """Planner guidance loaded on demand; a Skill is not an execution gate."""
+    """Prompt and workflow guidance; never a permission or execution gate."""
 
     name: str
     version: str
     purpose: str
     when_useful: tuple[str, ...]
-    method: tuple[str, ...]
-    required_considerations: tuple[str, ...]
-    recommended_tools: tuple[str, ...]
-    output_expectations: tuple[str, ...]
-    prohibitions: tuple[str, ...]
-    failure_handling: tuple[str, ...]
+    prompt: str
+    process_guidance: tuple[str, ...]
+    tool_hints: tuple[str, ...]
 
     @property
     def description(self) -> str:
@@ -48,13 +41,12 @@ class SkillDescriptor:
 
     @property
     def guidance(self) -> tuple[str, ...]:
-        return (
-            *self.method,
-            *(f"必须考虑：{item}" for item in self.required_considerations),
-            *(f"输出要求：{item}" for item in self.output_expectations),
-            *(f"禁止：{item}" for item in self.prohibitions),
-            *(f"失败处理：{item}" for item in self.failure_handling),
-        )
+        return (self.prompt, *self.process_guidance)
+
+    @property
+    def recommended_tools(self) -> tuple[str, ...]:
+        """Compatibility alias; these are prompt hints and grant no access."""
+        return self.tool_hints
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "SkillDescriptor":
@@ -67,18 +59,15 @@ class SkillDescriptor:
             raise ValueError(f"invalid skill name: {name}")
         if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[a-z0-9.]+)?", version):
             raise ValueError(f"invalid skill version: {name}={version}")
-        recommended = tuple(dict.fromkeys(map(str, value["recommended_tools"])))
+        tool_hints = tuple(dict.fromkeys(map(str, value.get("tool_hints") or [])))
         return cls(
             name=name,
             version=version,
             purpose=str(value["purpose"]),
             when_useful=tuple(map(str, value["when_useful"])),
-            method=tuple(map(str, value["method"])),
-            required_considerations=tuple(map(str, value["required_considerations"])),
-            recommended_tools=recommended,
-            output_expectations=tuple(map(str, value["output_expectations"])),
-            prohibitions=tuple(map(str, value["prohibitions"])),
-            failure_handling=tuple(map(str, value["failure_handling"])),
+            prompt=str(value["prompt"]),
+            process_guidance=tuple(map(str, value["process_guidance"])),
+            tool_hints=tool_hints,
         )
 
 
@@ -117,13 +106,11 @@ class SkillRegistry:
             "version": item.version,
             "purpose": item.purpose,
             "when_useful": list(item.when_useful),
-            "method": list(item.method),
-            "required_considerations": list(item.required_considerations),
+            "authority": "guidance_only",
+            "prompt": item.prompt,
+            "process_guidance": list(item.process_guidance),
             "guidance": list(item.guidance),
-            "recommended_tools": list(item.recommended_tools),
-            "output_expectations": list(item.output_expectations),
-            "prohibitions": list(item.prohibitions),
-            "failure_handling": list(item.failure_handling),
+            "tool_hints": list(item.tool_hints),
         }
 def load_skill_contracts(path: str | Path) -> SkillRegistry:
     source = Path(path)

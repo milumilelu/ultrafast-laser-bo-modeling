@@ -12,8 +12,8 @@
 |---|---|---:|---|---|
 | 任务、设备与能力提示 Router | implemented | 是 | SQLite 设备 revision | Router 只给非绑定建议 |
 | 文献导入与混合 RAG | implemented | 是 | 本地 8,512 个语料 chunks；Demo 可加 1 个忽略的 fixture | 旧导入命令不自动 OCR；扫描件可显式进入 PaddleOCR Job |
-| 真实 BO | implemented | 是 | 旧 BO 数据与受治理训练样本 | `<10` 样本为规则冷启动；文献参数必须过 Gate |
-| Skill Registry 与 Domain Pack | implemented | 是 | 6 个可组合 Skill 描述符 | 旧名只在读取边界解析 |
+| 真实 BO | implemented | 是 | 旧 BO 数据与受治理训练样本 | 数据未达到验证门槛时不输出数值候选；文献参数必须过 Gate |
+| Skill Registry 与 Domain Pack | implemented | 是 | 6 个提示与流程指导描述符 | Skill 不授予权限、不隐藏 Tool、不写入任务事实 |
 | 简化/完整/跳过试切 | implemented | 是 | 版本化 SQLite 表 | 不控制真实设备 |
 | KnowledgeUseGate 与单次聚合审核 | implemented | 是 | append-only 审计 | 单用户显式审核，不是多用户 RBAC |
 | Runtime/NDJSON/性能 waterfall | implemented | 是 | 单调公开事件 | 不公开 hidden reasoning |
@@ -31,7 +31,6 @@ ultrafast api
 ultrafast doctor
 ultrafast --demo
 ultrafast demo tgv --approve-review
-ultrafast workflow complex_process_task --request request.json
 ultrafast legacy-bo -- --help
 ```
 
@@ -102,7 +101,7 @@ See `../docs/governed_runtime_bo_cam_migration.md` for migration, rollback, cont
 
 ## 聊天功能
 
-`/chat` 是超快激光智能体的 Agent Orchestrator 入口，不是普通 LLM proxy。执行链为：PowerShell TUI -> `/chat` -> 非绑定能力提示 -> Main Agent -> Skill 动态加载 / Tool 调用循环 -> session persistence -> audit trace。
+`/chat` 是超快激光智能体的 Agent Orchestrator 入口，不是普通 LLM proxy。执行链为：PowerShell TUI -> `/chat` -> 非绑定能力提示 -> Main Agent -> Tool 调用循环 -> session persistence -> audit trace。Skill 只作为 Main LLM 的提示与流程指导。
 
 启动后端：
 
@@ -118,11 +117,11 @@ pwsh -ExecutionPolicy Bypass -File scripts/start_agent_tui.ps1
 
 默认启动流程已简化为 DeepSeek 专用向导：只选择 `Flash` 或 `Pro` 模型并输入 DeepSeek API Key。数据库初始化、示例扫描、BO CSV 导出、FastAPI 后端启动都会自动完成，随后直接进入聊天界面。
 
-无 API Key 或 LLM 配置不完整时会使用 `MockLLMClient`，因此离线也可跑通会话保存、skill 路由和审计记录。当前 TUI 默认固定供应商为 DeepSeek，只保留 `deepseek-v4-flash` 和 `deepseek-v4-pro` 两个模型选项。其他 OpenAI-Compatible provider 仍保留在后端 adapter 中，但默认启动器不再要求用户配置。
+无 API Key 或 LLM 配置不完整时会使用 `MockLLMClient`，仅提供不生成工艺数值的确定性降级。当前 TUI 默认固定供应商为 DeepSeek，只保留 `deepseek-v4-flash` 和 `deepseek-v4-pro` 两个模型选项。其他 OpenAI-Compatible provider 仍保留在后端 adapter 中，但默认启动器不再要求用户配置。
 
 重要：如果在 TUI 中配置了 API Key，必须从同一个 TUI 会话中启动 FastAPI，否则后端进程可能无法继承环境变量。API Key 不会出现在 `/chat`、`/chat/sessions` 或消息历史响应中。
 
-当前系统会真实调用本地 RAG、工具注册表和 BO application service；无有效样本时明确返回 `rule_based_cold_start`，不会伪装成数据驱动最优值。当前不提供 Web Chat 前端。
+当前系统会真实调用本地 RAG、工具注册表和 BO application service；无有效且经验证的数据时返回 `insufficient_data`，不向 Planner 暴露规则冷启动数值。当前不提供 Web Chat 前端。
 
 API 示例：
 
@@ -140,7 +139,7 @@ curl -X POST http://127.0.0.1:8000/chat \
 
 ## Streaming Chat 与混合 Router
 
-`/chat` 返回兼容字段 `selected_skill`，同时返回结构化 `route_plan`。Router 结果仅是能力提示，不会激活 Skill、限制 Tool 或推进状态。Main Agent 通过 `load_skill` / `unload_skill` 决定本轮组合；路由记录写入 `chat_route_trace`，Agent 状态写入 `chat_session_state`。
+`/chat` 返回兼容字段 `selected_skill`，同时返回结构化 `route_plan`。Router 结果仅是能力提示，不会激活 Skill、限制 Tool 或推进状态。Main Agent 每轮最多注入两项相关 Skill 指导；路由记录写入 `chat_route_trace`，Agent 状态写入 `chat_session_state`。
 
 流式接口：
 
@@ -212,7 +211,7 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 
 聊天集成：
 
-- 需要外部证据时，Main Agent 必须先加载 `evidence_research` 并调用受审批保护的 `bootstrap_external_knowledge`；
+- 需要外部证据时，Main Agent 可参考 `evidence_research` 指导并调用受审批保护的 `bootstrap_external_knowledge`；
 - 内部证据不足且配置要求授权时，聊天会请求用户确认；
 - 用户输入“可以 / 同意 / 允许 / 执行冷启动 / yes / ok”后才会执行 mock bootstrap；
 - `/bootstrap status` 查看当前会话候选知识和审核状态；
@@ -225,11 +224,11 @@ curl -X POST http://127.0.0.1:8000/knowledge/review/tasks/<review_id>/action \
 
 聊天返回 Agent 动作、Skill 加载、ToolResult 和 Working Context 投影。开放式任务不伪造进度百分比；澄清只针对会改变加工路线或工具输入的关键歧义。
 
-所有聊天统一进入 Main Agent Loop：主 LLM 读取开放式 `WorkingContext`、已加载 Skill 指导、全部前台安全 Tool Schema 和工具观察，决定加载能力、直接回答、澄清或连续调用工具。用户明确提供或修正任务信息时，Planner 通过 `AgentAction.context_updates` 更新内存上下文；持久化是非阻断旁路。
+所有聊天统一进入 Main Agent Loop：主 LLM 读取开放式 `WorkingContext`、相关 Skill 指导、全部前台安全 Tool Schema 和压缩后的工具观察，决定直接回答、澄清、更新事实或连续调用工具。用户明确提供或修正任务信息时，Planner 通过 `AgentAction.context_updates` 更新内存上下文；持久化是非阻断旁路。
 
 Working Context 允许部分信息、未知字段和自定义几何；具体 Tool 输入仍严格校验。上下文、Trace、报告和知识治理失败只产生 warning，不中断当前用户任务。
 
-状态仅投影已发生事件，用于进度、审计和恢复，不裁剪 Agent 的工具集合。Skill 只影响工具排序；所有前台安全 Tool 始终可发现。只有设备硬安全、明确 unsafe 状态和当前不可逆动作未获本次确认可以阻断。
+状态仅投影已发生事件，用于进度、审计和恢复，不裁剪 Agent 的工具集合。Skill 只提供提示和流程指导；所有前台安全 Tool 始终可发现。只有设备硬安全、明确 unsafe 状态和当前不可逆动作未获本次确认可以阻断。
 
 系统不展示模型原始隐藏推理链。返回和 TUI 展示的是可公开的 Agent 执行轨迹、任务状态、工具调用状态、证据检查结果和简要推理摘要，字段使用 `progress`、`thinking_status`、`workflow_state`、`execution_trace`、`audit_trace`。
 
@@ -251,7 +250,7 @@ Working Context 允许部分信息、未知字段和自定义几何；具体 Too
     }
   ],
   "workflow_state": {
-    "missing_slots": ["geometry.depth_mm"],
+    "missing_slots": [],
     "current_stage_code": "ask_user"
   },
   "execution_trace": [
@@ -370,13 +369,13 @@ BO 默认要求 active equipment profile。没有 active profile 时，系统阻
 
 ## 降级与最终性能
 
-- Router/LLM 异常回退到规则路由或不含工艺参数的安全模板；
+- Main LLM 不可用时只返回不含工艺参数的确定性安全下一步，不使用规则解析任务语义；
 - 混合 RAG 异常回退 SQLite FTS，完全失败时返回 `insufficient`；
 - BO 超时返回设备搜索空间和阻塞原因，不伪造推荐；
 - 审核存储异常时高风险知识 fail closed；
 - 数据库只读时 Demo 仅返回不持久化预览，审批和正式加工保持阻塞。
 
-最终离线基准的 P50/P95/P99 与 12 项预算/基线判定见 `../reports/final_performance.json`；当前结果为 `pass`。全量测试、Demo replay 和 Doctor 结果见 `../reports/final_tests.txt`。
+历史性能报告不作为当前主执行链正确性的证明；实际加工验证由操作者执行。
 
 ## 架构与回滚
 
@@ -469,12 +468,6 @@ POST http://127.0.0.1:8000/llm/test
 ```
 
 接口不会返回真实 API Key，`/llm/test` 只检查配置完整性，不执行外部调用。
-
-## 测试
-
-```powershell
-pytest
-```
 
 ## RAG 文献知识库
 

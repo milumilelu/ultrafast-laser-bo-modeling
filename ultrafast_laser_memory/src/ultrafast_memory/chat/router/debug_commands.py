@@ -54,7 +54,8 @@ def handle_debug_command(message: str, session_id: str) -> dict[str, Any] | None
         state = get_session_state(session_id)
         active = set(state.get("active_skills_json") or [])
         skills = {item.name: {"version": item.version, "description": item.description,
-                             "recommended_tools": list(item.recommended_tools),
+                             "authority": "guidance_only",
+                             "tool_hints": list(item.tool_hints),
                              "loaded": item.name in active}
                   for item in get_default_skill_registry().list()}
         return {"handled": True, "message": "registered skill inventory", "skills": skills}

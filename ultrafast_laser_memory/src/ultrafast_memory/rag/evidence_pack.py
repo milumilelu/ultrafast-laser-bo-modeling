@@ -56,18 +56,30 @@ def build_evidence_pack(
                 metadata=metadata,
             )
         )
-    paper_count = len({hit.paper_id for hit in evidence_hits})
+    purpose_key = purpose.strip().lower()
+    if purpose_key in {"parameter_recommendation", "rag_parameter_recommendation"}:
+        eligible_hits = [
+            hit for hit in evidence_hits if hit.allowed_for_parameter_recommendation
+        ]
+    elif purpose_key in {"formal_process", "direct_parameter_recommendation", "bo", "bo_boundary"}:
+        eligible_hits = [hit for hit in evidence_hits if hit.allowed_for_formal_process]
+    else:
+        eligible_hits = [hit for hit in evidence_hits if hit.authority_level != "candidate"]
+    paper_count = len({hit.paper_id for hit in eligible_hits})
     matched_condition = any(
         (not filters.get("material") or hit.material == filters.get("material"))
         and (not filters.get("process_type") or hit.process_type == filters.get("process_type"))
-        for hit in evidence_hits
+        for hit in eligible_hits
     )
-    if len(evidence_hits) >= 3 and paper_count >= 2 and matched_condition:
+    if len(eligible_hits) >= 3 and paper_count >= 2 and matched_condition:
         status = "sufficient"
         missing = []
     elif evidence_hits:
         status = "partial"
-        missing = ["at least three relevant chunks from two papers with matching material/process"]
+        missing = [
+            "at least three purpose-eligible reviewed chunks from two papers "
+            "with matching material/process"
+        ]
     else:
         status = "insufficient"
         missing = ["matching traceable literature chunks"]

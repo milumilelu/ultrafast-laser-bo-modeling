@@ -20,6 +20,7 @@ from ultrafast_memory.agent_runtime.working_context import (
     load_working_context,
 )
 from ultrafast_memory.chat.session_state import get_session_state
+from ultrafast_memory.chat.session_store import get_recent_messages
 from ultrafast_memory.core.ids import stable_id
 from ultrafast_memory.core.time_utils import utc_now_iso
 from ultrafast_memory.equipment.bounds import build_machine_bounds
@@ -27,6 +28,8 @@ from ultrafast_memory.equipment.bounds import build_machine_bounds
 
 MAX_PLANNER_DECISIONS_PER_TURN = 6
 MAX_MODEL_CALLS_PER_TURN = 6
+MAX_PLANNER_OBSERVATION_CHARS = 3600
+MAX_PLANNER_CONTEXT_CHARS = 6500
 
 
 def run_main_agent_turn(
@@ -42,6 +45,7 @@ def run_main_agent_turn(
     skills = build_skill_registry()
     planner = MainAgentPlanner(client)
     state = get_session_state(session_id)
+    recent_dialogue = _recent_dialogue(session_id, message)
     working = load_working_context(state)
     observations = working.observations
     turn_observation_offset = len(observations)
@@ -123,11 +127,6 @@ def run_main_agent_turn(
             "injected_skills": loaded,
         }, warnings,
     ))
-    if preparation.blocking_fields and (
-        client is None or getattr(client, "provider", None) == "mock"
-    ):
-        final_action = _fallback_blocking_action(preparation.blocking_fields)
-
     turn_step = 0
     while final_action is None:
         turn_step += 1
@@ -145,6 +144,15 @@ def run_main_agent_turn(
             ))
             break
 
+        loaded = _select_skill_names(
+            skills,
+            explicit=active_skills or [],
+            suggested=suggested_skills or [],
+            prepared=preparation.skill_hints,
+            task=working.task,
+            observations=observations,
+        )
+        working.active_skills = loaded
         exposed = exposed_tool_names(skills, loaded)
         tool_schemas = _rank_tool_schemas(registry.schemas_for_agent(exposed), skills, loaded)
         if model_call_count >= MAX_MODEL_CALLS_PER_TURN:
@@ -184,7 +192,8 @@ def run_main_agent_turn(
             summaries = {
                 "model_call_started": (
                     f"等待模型 {model_name} 返回主 Agent 下一动作；"
-                    f"调用序号 {call.get('call_sequence') or model_call_count}，第 {attempt}/2 次尝试，"
+                    f"调用序号 {call.get('call_sequence') or model_call_count}，"
+                    f"第 {attempt}/{call.get('max_attempts') or 1} 次尝试，"
                     f"输入 {call.get('prompt_chars') or 0} 字符。"
                 ),
                 "model_provider_response_received": (
@@ -230,6 +239,7 @@ def run_main_agent_turn(
                 active_skills=loaded,
                 recent_tool_results=_planner_observations(observations, turn_observation_offset),
                 skill_guidance=_skill_guidance(skills, loaded),
+                recent_dialogue=recent_dialogue,
                 runtime_hints={
                     "suggested_skills": suggested_skills or [],
                     "router_is_hint_only": True,
@@ -253,8 +263,18 @@ def run_main_agent_turn(
 
         changed = working.apply(action.context_updates)
         if changed:
+            loaded = _select_skill_names(
+                skills,
+                explicit=active_skills or [],
+                suggested=suggested_skills or [],
+                prepared=preparation.skill_hints,
+                task=working.task,
+                observations=observations,
+            )
+            working.active_skills = loaded
             _persist_context_nonblocking(
-                session_id, message_id, working, changed, events, event_sink, warnings,
+                session_id, message_id, working, [*changed, "active_skills"],
+                events, event_sink, warnings,
             )
 
         if action.action == "update_context":
@@ -366,13 +386,21 @@ def run_main_agent_turn(
 
     if final_action is None:
         raise RuntimeError("main agent produced no action")
+    if final_action.action == "ask_user":
+        working.pending_user_action = {
+            "message": final_action.message,
+            "decision_summary": final_action.decision_summary,
+            "message_id": message_id,
+        }
+    elif getattr(working, "pending_user_action", None) is not None:
+        working.pending_user_action = None
     working.active_skills = loaded
     _persist_context_nonblocking(
-        session_id, message_id, working, ["final_action"], events, event_sink, warnings,
+        session_id, message_id, working, ["final_action", "pending_user_action"], events, event_sink, warnings,
         final_action=final_action.model_dump(mode="json"), decision_count=total_decisions,
     )
     exposed = exposed_tool_names(skills, loaded)
-    critical_missing = _critical_missing(working.task)
+    critical_missing: list[str] = []
     workflow = {
         "runtime_mode": "capability_discovery",
         "task_spec": working.task,
@@ -422,35 +450,27 @@ def _select_skill_names(
         if name in available and name not in selected:
             selected.append(name)
 
+    del task
     add("task_understanding")
-    for name in [*explicit, *suggested, *prepared]:
-        add(str(name))
-    if task.get("material") and task.get("process_intent"):
-        add("evidence_research")
-        add("process_planning")
-        add("parameter_recommendation")
-        add("experiment_optimization")
-    recent_tools = {str(item.get("tool_name") or "") for item in observations[-4:]}
-    if "search_knowledge" in recent_tools:
-        add("evidence_research")
-        add("process_planning")
-    if "recommend_process_parameters" in recent_tools:
-        add("parameter_recommendation")
-        add("experiment_optimization")
+    latest_tool = ""
+    for item in reversed(observations):
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        latest_tool = str(item.get("tool_name") or meta.get("tool_name") or "")
+        if latest_tool:
+            break
+    dynamic = {
+        "search_knowledge": "evidence_research",
+        "recommend_process_parameters": "parameter_recommendation",
+        "manage_trial": "experiment_optimization",
+        "manage_process": "process_planning",
+        "record_process_result": "result_learning",
+    }.get(latest_tool)
+    for name in [*explicit, *suggested, *(prepared[:1]), dynamic]:
+        if name:
+            add(str(name))
+        if len(selected) >= 2:
+            break
     return selected
-
-
-def _fallback_blocking_action(fields: list[str]) -> AgentAction:
-    questions = {
-        "geometry.depth_mm": "矩形槽的目标深度（槽深）是多少，还是要求贯穿？",
-    }
-    selected = [questions[field] for field in fields if field in questions][:5]
-    return AgentAction(
-        action="ask_user",
-        decision_summary="主模型不可用；仅追问任务抽取已确认的阻塞字段。",
-        skills_used=["task_understanding"],
-        message="\n".join(selected) or "请补充当前加工路线所必需的缺失信息。",
-    )
 
 
 def _skill_guidance(registry: Any, selected: list[str]) -> list[dict[str, Any]]:
@@ -459,21 +479,36 @@ def _skill_guidance(registry: Any, selected: list[str]) -> list[dict[str, Any]]:
         item = registry.get(name)
         guidance.append({
             "name": item.name,
+            "authority": "guidance_only",
             "purpose": item.purpose,
-            "method": list(item.method),
-            "required_considerations": list(item.required_considerations),
-            "recommended_tools": list(item.recommended_tools),
-            "output_expectations": list(item.output_expectations),
-            "prohibitions": list(item.prohibitions),
-            "failure_handling": list(item.failure_handling),
+            "prompt": item.prompt,
+            "process_guidance": list(item.process_guidance),
+            "tool_hints": list(item.tool_hints),
         })
     return guidance
 
 
+def _recent_dialogue(session_id: str, current_message: str) -> list[dict[str, str]]:
+    try:
+        messages = get_recent_messages(session_id, limit=8)
+    except Exception:  # noqa: BLE001 - conversation persistence cannot block the foreground
+        return []
+    if messages and messages[-1].get("role") == "user" \
+            and messages[-1].get("content") == current_message:
+        messages = messages[:-1]
+    return [
+        {
+            "role": str(item.get("role") or "user"),
+            "content": str(item.get("content") or "")[:800],
+        }
+        for item in messages[-6:]
+        if item.get("content")
+    ]
+
+
 def _planner_context(working: WorkingContext) -> dict[str, Any]:
     value = working.model_dump(mode="json")
-    value.pop("observations", None)
-    value["documents"] = [
+    documents = [
         {
             key: item.get(key)
             for key in ("document_id", "file_name", "path", "status", "content_type", "char_count")
@@ -481,19 +516,147 @@ def _planner_context(working: WorkingContext) -> dict[str, Any]:
         }
         for item in value.get("documents") or []
     ]
-    return _compact_public_value(value, max_string=1600, max_list=8, max_depth=7)
+    projected = {
+        "task": value.get("task") or {},
+        "equipment_context": value.get("equipment_context"),
+        "process_plan": value.get("process_plan"),
+        "trial_plan": value.get("trial_plan"),
+        "pending_user_action": value.get("pending_user_action"),
+        "documents": documents,
+        "task_intake": {
+            key: (value.get("task_intake") or {}).get(key)
+            for key in ("extractor", "authority", "blocking_fields")
+            if (value.get("task_intake") or {}).get(key) is not None
+        },
+    }
+    compact = _compact_public_value(
+        projected, max_string=600, max_list=6, max_depth=6, max_dict=12,
+    )
+    if _json_chars(compact) <= MAX_PLANNER_CONTEXT_CHARS:
+        return compact
+    compact["trial_plan"] = _context_record_summary(
+        value.get("trial_plan"),
+        (
+            "trial_plan_id", "objective", "status", "trial_mode", "strategy",
+            "setup", "parameter_candidates", "warnings",
+        ),
+    )
+    if _json_chars(compact) > MAX_PLANNER_CONTEXT_CHARS:
+        compact["process_plan"] = _context_record_summary(
+            value.get("process_plan"),
+            (
+                "plan_id", "objective", "strategy", "fixed_conditions",
+                "controllable_variables", "assumptions", "risks",
+            ),
+        )
+    if _json_chars(compact) > MAX_PLANNER_CONTEXT_CHARS:
+        compact["task"] = _compact_public_value(
+            value.get("task") or {}, max_string=300, max_list=4,
+            max_depth=5, max_dict=10,
+        )
+        compact["documents"] = documents[:2]
+    if _json_chars(compact) > MAX_PLANNER_CONTEXT_CHARS:
+        compact["task"] = _context_record_summary(
+            value.get("task"),
+            (
+                "objective", "material", "workpiece", "geometry", "process_intent",
+                "quality_targets", "constraints", "assumptions", "user_preferences",
+            ),
+        )
+    if _json_chars(compact) > MAX_PLANNER_CONTEXT_CHARS:
+        compact = {
+            "task": _compact_public_value(
+                compact.get("task") or {}, max_string=180, max_list=2,
+                max_depth=3, max_dict=8,
+            ),
+            "equipment_context": _context_record_summary(
+                value.get("equipment_context"),
+                ("equipment_profile_id", "revision_id", "active", "missing_equipment_fields"),
+            ),
+            "pending_user_action": _compact_public_value(
+                value.get("pending_user_action"), max_string=300, max_list=2,
+                max_depth=3, max_dict=5,
+            ),
+        }
+    compact["projection_notice"] = (
+        "Large records are summarized for Planner input; full values remain in WorkingContext."
+    )
+    return compact
+
+
+def _context_record_summary(value: Any, fields: tuple[str, ...]) -> Any:
+    if not isinstance(value, dict):
+        return value
+    summary = {key: value.get(key) for key in fields if value.get(key) is not None}
+    summary["_projection"] = "summary_only_full_record_retained"
+    return _compact_public_value(
+        summary, max_string=300, max_list=3, max_depth=4, max_dict=10,
+    )
+
+
+def _json_chars(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str))
 
 
 def _planner_observations(
     observations: list[dict[str, Any]], turn_offset: int,
 ) -> list[dict[str, Any]]:
-    prior = observations[max(0, turn_offset - 2):turn_offset]
     current = observations[turn_offset:]
-    selected = [*prior, *current[-5:]]
-    return [
-        _compact_public_value(item, max_string=1200, max_list=6, max_depth=7)
-        for item in selected
-    ]
+    candidates = current if current else observations[max(0, turn_offset - 3):turn_offset]
+    selected_reversed: list[dict[str, Any]] = []
+    seen_tools: set[str] = set()
+    for item in reversed(candidates):
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        tool_name = str(item.get("tool_name") or meta.get("tool_name") or "")
+        identity = tool_name or str(item.get("type") or item.get("event_type") or "observation")
+        if identity in seen_tools:
+            continue
+        seen_tools.add(identity)
+        selected_reversed.append(item)
+        if len(selected_reversed) >= 3:
+            break
+    selected = list(reversed(selected_reversed))
+    selected_tools = {_observation_tool_name(item) for item in selected}
+    if "recommend_process_parameters" in selected_tools:
+        selected = [
+            item for item in selected
+            if _observation_tool_name(item) != "search_knowledge"
+        ]
+    projected: list[dict[str, Any]] = []
+    for item in selected:
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        tool_name = str(item.get("tool_name") or meta.get("tool_name") or "")
+        if tool_name:
+            projected.append(_public_tool_observation(tool_name, item))
+        else:
+            projected.append(
+                _compact_public_value(item, max_string=800, max_list=6, max_depth=6)
+            )
+    bounded: list[dict[str, Any]] = []
+    used = 2
+    for item in reversed(projected):
+        serialized = json.dumps(item, ensure_ascii=False, separators=(",", ":"), default=str)
+        if used + len(serialized) <= MAX_PLANNER_OBSERVATION_CHARS:
+            bounded.insert(0, item)
+            used += len(serialized) + 1
+            continue
+        summary_item = {
+            "tool_name": item.get("tool_name"),
+            "status": item.get("status"),
+            "summary": item.get("summary"),
+            "warnings": list(item.get("warnings") or [])[:2],
+            "detail_omitted": "planner_observation_budget",
+        }
+        summary_chars = _json_chars(summary_item)
+        if used + summary_chars <= MAX_PLANNER_OBSERVATION_CHARS:
+            bounded.insert(0, summary_item)
+            used += summary_chars + 1
+    return bounded
+
+
+def _observation_tool_name(item: dict[str, Any]) -> str:
+    meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+    return str(item.get("tool_name") or meta.get("tool_name") or "")
 
 
 def _public_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -502,45 +665,70 @@ def _public_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def _public_tool_observation(tool_name: str, envelope: dict[str, Any]) -> dict[str, Any]:
     data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+    raw_meta = envelope.get("meta") if isinstance(envelope.get("meta"), dict) else {}
     base: dict[str, Any] = {
+        "tool_name": tool_name,
         "status": envelope.get("status"),
         "summary": envelope.get("summary"),
         "warnings": envelope.get("warnings") or [],
         "error": envelope.get("error"),
-        "meta": envelope.get("meta") or {},
+        "meta": {
+            key: raw_meta.get(key)
+            for key in ("cache_hit", "reused_existing_observation", "wall_duration_ms")
+            if raw_meta.get(key) is not None
+        },
     }
     if tool_name == "search_knowledge":
-        result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        result = data.get("evidence_pack") if isinstance(data.get("evidence_pack"), dict) else {}
         hits = list(data.get("hits") or result.get("hits") or [])
+        metadata = result.get("retrieval_metadata") or {}
+        authorities = sorted({
+            str(hit.get("authority_level") or "unknown")
+            for hit in hits if isinstance(hit, dict)
+        })
         base.update({
             "query": data.get("query"),
             "purpose": data.get("purpose"),
-            "hit_count": len(hits),
+            "hit_count": int(data.get("hit_count") or len(hits)),
             "evidence_status": result.get("evidence_status"),
-            "retrieval_metadata": _compact_public_value(
-                result.get("retrieval_metadata") or {}, max_string=300, max_list=5, max_depth=4,
-            ),
-            "hits": [
-                _compact_public_value({
-                    key: hit.get(key)
-                    for key in (
-                        "chunk_id", "paper_id", "title", "section_type", "authority_level",
-                        "score", "rerank_score", "text", "content",
-                    )
-                    if hit.get(key) is not None
-                }, max_string=360, max_list=3, max_depth=3)
-                for hit in hits[:3]
+            "evidence_quality": {
+                "authority_levels": authorities,
+                "degraded": bool(metadata.get("degraded")),
+                "failure_stage": metadata.get("failure_stage"),
+                "fallback": metadata.get("fallback"),
+                "candidate_only": bool(authorities) and set(authorities) <= {"candidate", "unknown"},
+            },
+            "evidence_pack": [
+                {
+                    "chunk_id": hit.get("chunk_id"),
+                    "paper_id": hit.get("paper_id"),
+                    "title": hit.get("title"),
+                    "authority_level": hit.get("authority_level"),
+                    "score": hit.get("rerank_score") or hit.get("score"),
+                    "excerpt": str(hit.get("text") or hit.get("content") or "")[:140],
+                }
+                for hit in hits[:2]
                 if isinstance(hit, dict)
             ],
         })
-        return base
+        return _compact_public_value(
+            base, max_string=240, max_list=4, max_depth=5, max_dict=16,
+        )
     if tool_name == "recommend_process_parameters":
+        support = data.get("data_support") if isinstance(data.get("data_support"), dict) else {}
         base.update({
             "selected_source": data.get("selected_source"),
             "source_type": data.get("source_type"),
             "authority_level": data.get("authority_level"),
             "evidence_level": data.get("evidence_level"),
-            "data_support": data.get("data_support") or {},
+            "support_summary": {
+                key: support.get(key)
+                for key in (
+                    "support_status", "model_mode", "matched_sample_count",
+                    "effective_sample_count", "context_match_score", "fidelity",
+                )
+                if support.get(key) is not None
+            },
             "uncertainty": data.get("uncertainty") or {},
             "allowed_for_trial": data.get("allowed_for_trial"),
             "allowed_for_formal_process": data.get("allowed_for_formal_process"),
@@ -549,7 +737,9 @@ def _public_tool_observation(tool_name: str, envelope: dict[str, Any]) -> dict[s
             "strategy_parameters": data.get("strategy_parameters") or {},
             "limitations": data.get("limitations") or [],
         })
-        return _compact_public_value(base, max_string=500, max_list=8, max_depth=6)
+        return _compact_public_value(
+            base, max_string=300, max_list=6, max_depth=5, max_dict=20,
+        )
     if tool_name == "get_equipment_context":
         base.update({
             "equipment_profile_id": data.get("equipment_profile_id"),
@@ -560,29 +750,68 @@ def _public_tool_observation(tool_name: str, envelope: dict[str, Any]) -> dict[s
             "missing_equipment_fields": data.get("missing_equipment_fields") or [],
         })
         return _compact_public_value(base, max_string=500, max_list=8, max_depth=6)
+    if tool_name == "manage_trial":
+        result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        base.update({
+            "operation_status": data.get("status"),
+            "trial_plan_id": result.get("trial_plan_id"),
+            "trial_status": result.get("status"),
+            "trial_mode": result.get("trial_mode"),
+            "parameter_candidate_count": len(
+                result.get("parameter_matrix") or result.get("parameter_candidates") or []
+            ),
+            "measurement_metrics": [
+                item.get("metric") if isinstance(item, dict) else item
+                for item in (result.get("measurement_plan") or {}).get("metrics") or []
+            ][:6],
+            "result_warnings": list(result.get("warnings") or [])[:4],
+        })
+        return _compact_public_value(base, max_string=300, max_list=6, max_depth=4)
+    if tool_name == "manage_process":
+        result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        base.update({
+            "operation_status": data.get("status"),
+            "plan_id": result.get("plan_id"),
+            "execution_id": result.get("execution_id"),
+            "release_status": result.get("release_status"),
+            "decision": result.get("decision"),
+        })
+        return _compact_public_value(base, max_string=300, max_list=5, max_depth=4)
+    if tool_name == "record_process_result":
+        base.update({
+            "bo_data_eligibility": data.get("bo_data_eligibility") or {},
+            "observation_count": data.get("observation_count"),
+        })
+        return _compact_public_value(base, max_string=300, max_list=5, max_depth=4)
     base["data"] = data
-    return _compact_public_value(base, max_string=600, max_list=8, max_depth=6)
+    return _compact_public_value(base, max_string=300, max_list=5, max_depth=4)
 
 
 def _compact_public_value(
     value: Any, *, max_string: int, max_list: int, max_depth: int,
+    max_dict: int | None = None,
     _depth: int = 0,
 ) -> Any:
     if _depth >= max_depth:
         return "<truncated>"
     if isinstance(value, dict):
-        return {
+        items = list(value.items())
+        selected_items = items[:max_dict] if max_dict is not None else items
+        result = {
             str(key): _compact_public_value(
                 item, max_string=max_string, max_list=max_list,
-                max_depth=max_depth, _depth=_depth + 1,
+                max_depth=max_depth, max_dict=max_dict, _depth=_depth + 1,
             )
-            for key, item in value.items()
+            for key, item in selected_items
         }
+        if max_dict is not None and len(items) > max_dict:
+            result["_truncated_fields"] = len(items) - max_dict
+        return result
     if isinstance(value, (list, tuple)):
         result = [
             _compact_public_value(
                 item, max_string=max_string, max_list=max_list,
-                max_depth=max_depth, _depth=_depth + 1,
+                max_depth=max_depth, max_dict=max_dict, _depth=_depth + 1,
             )
             for item in value[:max_list]
         ]
@@ -595,10 +824,8 @@ def _compact_public_value(
 
 
 def _rank_tool_schemas(items: list[dict[str, Any]], skills: Any, loaded: list[str]) -> list[dict[str, Any]]:
-    recommended: set[str] = set()
-    for name in loaded:
-        recommended.update(skills.get(name).recommended_tools)
-    return sorted(items, key=lambda item: (item["name"] not in recommended, item["name"]))
+    del skills, loaded
+    return sorted(items, key=lambda item: item["name"])
 
 
 def _scoped_user_approval(message: str, message_id: str | None, tool: str,
@@ -671,14 +898,6 @@ def _publish(events: list[dict[str, Any]], sink: Callable[[dict[str, Any]], None
             sink(event)
         except Exception:  # noqa: BLE001 - client disconnect cannot break domain work
             pass
-
-
-def _critical_missing(task: dict[str, Any]) -> list[str]:
-    geometry = task.get("geometry")
-    if isinstance(geometry, dict) and geometry.get("feature_type") == "rectangular_groove" \
-            and geometry.get("depth_mm") is None and not geometry.get("through"):
-        return ["geometry.depth_mm"]
-    return []
 
 
 def _cached_observation(

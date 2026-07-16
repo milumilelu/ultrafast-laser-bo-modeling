@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from time import monotonic
 from typing import Any
@@ -9,8 +8,6 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from ultrafast_domain.process import ProcessPlan
-from ultrafast_domain.trial import TrialPlan
 from ultrafast_memory.agent_runtime.actions import ACTION_SCHEMA_VERSION, AgentAction
 from ultrafast_memory.agent_runtime.tool_registry import TOOL_REGISTRY_VERSION
 from ultrafast_memory.core.time_utils import utc_now_iso
@@ -31,6 +28,7 @@ class MainAgentPlanner:
     def __init__(self, client: Any):
         self.client = client
         self._model_call_sequence = 0
+        self._last_prompt_section_chars: dict[str, int] = {}
 
     def decide(
         self,
@@ -42,6 +40,7 @@ class MainAgentPlanner:
         recent_tool_results: list[dict[str, Any]] | None = None,
         skill_catalog: list[dict[str, Any]] | None = None,
         skill_guidance: list[dict[str, Any]] | None = None,
+        recent_dialogue: list[dict[str, str]] | None = None,
         runtime_hints: dict[str, Any] | None = None,
         model_call_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentAction:
@@ -55,13 +54,10 @@ class MainAgentPlanner:
             )
 
         guidance = skill_guidance or []
-        skill_names = [str(item.get("name")) for item in guidance if item.get("name")]
-        if not skill_names:
-            skill_names = list(active_skills or [])
         system_prompt = self._system_prompt()
         prompt = self._prompt(
             message, working_context, tools, guidance,
-            observations, runtime_hints or {},
+            observations, recent_dialogue or [], runtime_hints or {},
         )
         last_error: Exception | None = None
         last_raw_content = ""
@@ -101,6 +97,7 @@ class MainAgentPlanner:
                 "max_attempts": max_attempts,
                 "timeout_s": int(options["timeout"]),
                 "prompt_chars": len(call_system_prompt) + len(user_prompt),
+                "prompt_section_chars": dict(self._last_prompt_section_chars),
                 "repair": is_repair,
                 "action_schema_version": ACTION_SCHEMA_VERSION,
                 "tool_registry_version": TOOL_REGISTRY_VERSION,
@@ -130,8 +127,18 @@ class MainAgentPlanner:
 
                 stage = "parse"
                 parse_started = monotonic()
-                raw = self._normalize_provider_action(self._json(content), message)
-                raw = self._protect_established_task_facts(raw, working_context, message)
+                try:
+                    parsed = self._json(content)
+                except (json.JSONDecodeError, TypeError):
+                    if self._looks_like_natural_response(content):
+                        parsed = {
+                            "action": "respond",
+                            "decision_summary": "Main LLM 直接生成自然语言回复。",
+                            "message": content.strip(),
+                        }
+                    else:
+                        raise
+                raw = self._normalize_provider_action(parsed, message)
                 last_parsed_action = raw
                 parse_ms = (monotonic() - parse_started) * 1000
                 self._emit_model_event(model_call_sink, "model_parse_completed", {
@@ -142,9 +149,6 @@ class MainAgentPlanner:
                 stage = "validation"
                 validation_started = monotonic()
                 action = self._validate_action(raw, tool_names)
-                allowed_skills = [name for name in action.skills_used if name in skill_names]
-                if allowed_skills != action.skills_used:
-                    action = action.model_copy(update={"skills_used": allowed_skills})
                 validation_ms = (monotonic() - validation_started) * 1000
                 total_ms = (monotonic() - call_started) * 1000
                 self._emit_model_event(model_call_sink, "model_validation_completed", {
@@ -197,8 +201,6 @@ class MainAgentPlanner:
         error_details: list[dict[str, Any]] | None = None,
     ) -> AgentAction:
         task = dict(working_context.get("task") or {})
-        intake = working_context.get("task_intake") or {}
-        blocking = list(intake.get("blocking_fields") or [])
         pending = working_context.get("pending_user_action")
         common = {
             "provider": "deterministic_fallback",
@@ -211,17 +213,6 @@ class MainAgentPlanner:
                 action="ask_user",
                 decision_summary=f"Fallback：当前明确等待用户输入（{reason}）。",
                 message=message or "请补充当前步骤所需的信息。",
-                **common,
-            )
-        if blocking:
-            questions = {
-                "geometry.depth_mm": "目标槽深是多少，还是要求贯穿？",
-            }
-            message = "\n".join(questions.get(field, f"请补充 {field}。") for field in blocking[:5])
-            return AgentAction(
-                action="ask_user",
-                decision_summary=f"Fallback：只询问当前阻塞字段（{reason}）。",
-                message=message,
                 **common,
             )
         if task and not working_context.get("equipment_context") \
@@ -263,7 +254,6 @@ class MainAgentPlanner:
                     "process_plan": fallback_plan,
                     "variables": variables,
                     "equipment_context": equipment,
-                    "allow_llm_fallback": False,
                 },
                 **common,
             )
@@ -271,10 +261,15 @@ class MainAgentPlanner:
             source = parameter_observation.get("selected_source") \
                 or parameter_observation.get("source_type") or "未形成可用来源"
             allowed = parameter_observation.get("allowed_for_trial") is True
-            next_action = (
-                "选择简化试切或完整试切。" if allowed
-                else "补全有效设备配置，或明确授权生成仅限试切的探索候选。"
-            )
+            equipment_ready = bool(equipment) \
+                and equipment.get("active", True) is not False \
+                and not equipment.get("missing_equipment_fields")
+            if allowed:
+                next_action = "选择简化试切或完整试切。"
+            elif equipment_ready:
+                next_action = "补充可审核证据或合格历史/实验数据。"
+            else:
+                next_action = "补全有效设备配置，并补充可审核证据或合格历史/实验数据。"
             return AgentAction(
                 action="respond",
                 decision_summary=f"Fallback：已有参数策略结果，返回当前阶段结论（{reason}）。",
@@ -339,134 +334,6 @@ class MainAgentPlanner:
         return action
 
     @staticmethod
-    def _latest_parameter_truth(
-        observations: list[dict[str, Any]],
-    ) -> dict[str, dict[str, Any]]:
-        for observation in reversed(observations):
-            data = observation.get("data") or {}
-            if not isinstance(data, dict):
-                continue
-            process_parameters = data.get("process_parameters") or {}
-            strategy_parameters = data.get("strategy_parameters") or {}
-            if isinstance(process_parameters, dict) and isinstance(strategy_parameters, dict):
-                parameters = {**process_parameters, **strategy_parameters}
-                if parameters:
-                    return parameters
-        return {}
-
-    @staticmethod
-    def _latest_equipment_truth(observations: list[dict[str, Any]]) -> dict[str, Any]:
-        for observation in reversed(observations):
-            data = observation.get("data") or {}
-            if isinstance(data, dict) and isinstance(data.get("tunable_capabilities"), dict):
-                return data
-        return {}
-
-    @staticmethod
-    def _validate_process_parameter_semantics(
-        process: ProcessPlan,
-        parameter_truth: dict[str, dict[str, Any]],
-        equipment_truth: dict[str, Any],
-    ) -> None:
-        tunable = set((equipment_truth.get("tunable_capabilities") or {}).keys())
-        fixed = equipment_truth.get("fixed_conditions") or {}
-        for name, value in process.fixed_conditions.items():
-            if name in tunable:
-                parameter = parameter_truth.get(name) or {}
-                if parameter.get("role") != "process_setpoint" or parameter.get("value") != value:
-                    raise ValueError(
-                        f"tunable_fixed_for_trial_requires_matching_tool_truth:{name};"
-                        "move_to_process_setpoint_candidate_or_remove"
-                    )
-            if name in fixed and value != fixed[name]:
-                raise ValueError(f"fixed_equipment_condition_mismatch:{name}")
-
-        declared_controls: set[str] = set()
-        for variable in process.controllable_variables:
-            name = variable.get("name")
-            if not isinstance(name, str) or not name:
-                continue
-            role = MainAgentPlanner._canonical_parameter_role(
-                str(variable.get("role") or "process_setpoint")
-            )
-            if role in {"process_setpoint", "strategy_parameter"} \
-                    and variable.get("selected_for_trial") is not False:
-                declared_controls.add(name)
-            if name in tunable and role != "process_setpoint":
-                raise ValueError(f"equipment_tunable_must_be_process_setpoint:{name}")
-        missing_truth = sorted(declared_controls - set(parameter_truth))
-        if missing_truth:
-            raise ValueError(
-                f"controllable_variable_requires_parameter_tool_truth:{','.join(missing_truth)}"
-            )
-
-    @staticmethod
-    def _canonical_parameter_role(value: str) -> str:
-        aliases = {
-            "process_setpoint": "process_setpoint",
-            "process setpoint": "process_setpoint",
-            "工艺设定值": "process_setpoint",
-            "工艺参数": "process_setpoint",
-            "strategy_parameter": "strategy_parameter",
-            "strategy parameter": "strategy_parameter",
-            "策略参数": "strategy_parameter",
-        }
-        return aliases.get(value.strip().lower(), value.strip())
-
-    @staticmethod
-    def _validate_trial_parameter_truth(
-        trial: TrialPlan,
-        parameter_truth: dict[str, dict[str, Any]],
-    ) -> None:
-        truth_names = set(parameter_truth)
-        compared_fields = {
-            "name", "value", "unit", "role", "source_type", "source_refs",
-            "authority_level", "uncertainty", "validated", "allowed_for_trial",
-            "allowed_for_formal_process", "allowed_for_bo_training",
-        }
-        for candidate in trial.parameter_candidates:
-            if set(candidate.parameters) != truth_names:
-                raise ValueError("trial_parameter_names_must_match_latest_tool_result")
-            for name, parameter in candidate.parameters.items():
-                actual = parameter.model_dump(mode="json")
-                expected = parameter_truth[name]
-                if any(actual.get(field) != expected.get(field) for field in compared_fields):
-                    raise ValueError(f"trial_parameter_provenance_mismatch:{name}")
-
-    @staticmethod
-    def _validate_self_contained_plan_message(message: str) -> None:
-        lowered = message.lower()
-        if len(message.strip()) < 80 or any(
-            marker in message for marker in ("详见上下文", "见上下文中的", "见 Context", "见context")
-        ):
-            raise ValueError("final_answer_must_be_self_contained")
-        concepts = {
-            "strategy": ("策略", "路线", "strategy"),
-            "trial": ("试切", "trial"),
-            "evaluation": ("检测", "评价", "测量", "判据"),
-            "adaptation": ("调整", "迭代", "下一轮"),
-            "provenance": ("来源", "可信", "未经验证", "provenance"),
-            "risk": ("风险", "警告", "提醒"),
-        }
-        missing = [
-            name for name, markers in concepts.items()
-            if not any(marker.lower() in lowered for marker in markers)
-        ]
-        if missing:
-            raise ValueError(f"final_answer_missing_concepts:{','.join(missing)}")
-
-    @staticmethod
-    def _complete_plan_required(working_context: dict[str, Any]) -> bool:
-        task = working_context.get("task") or {}
-        geometry = task.get("geometry") or {}
-        if not (task.get("material") and task.get("process_intent") and geometry.get("feature_type")):
-            return False
-        if geometry.get("feature_type") == "rectangular_groove" \
-                and geometry.get("depth_mm") is None and not geometry.get("through"):
-            return False
-        return True
-
-    @staticmethod
     def _normalize_provider_action(raw: dict[str, Any], user_message: str) -> dict[str, Any]:
         if isinstance(raw.get("actions"), list):
             actions = raw["actions"]
@@ -482,65 +349,68 @@ class MainAgentPlanner:
         }
         raw["action"] = aliases.get(str(raw.get("action") or raw.get("type") or ""), raw.get("action"))
         raw.setdefault("tool_name", raw.get("tool"))
-        raw.setdefault("arguments", raw.get("args") or {})
-        raw.setdefault("context_updates", {})
+        if raw.get("arguments") is None:
+            raw["arguments"] = raw.get("args") or {}
+        else:
+            raw.setdefault("arguments", raw.get("args") or {})
+        if raw.get("context_updates") is None:
+            raw["context_updates"] = {}
+        else:
+            raw.setdefault("context_updates", {})
+        if isinstance(raw.get("context_updates"), dict):
+            raw["context_updates"] = MainAgentPlanner._normalize_context_updates(
+                raw["context_updates"]
+            )
         raw.setdefault("message", raw.get("answer") or raw.get("content"))
         raw.setdefault("decision_summary", str(raw.get("reason") or "执行主 Agent 选择的下一动作。"))
         skills_used = raw.get("skills_used")
         if skills_used is None and raw.get("skill"):
             raw["skills_used"] = [raw["skill"]]
         raw.setdefault("skills_used", [])
-        if raw.get("action") == "respond" and isinstance(raw.get("message"), str):
-            raw["message"] = MainAgentPlanner._strip_terminal_confirmation(raw["message"])
         return raw
 
     @staticmethod
-    def _strip_terminal_confirmation(message: str) -> str:
-        text = re.sub(r"(?:请)?确认后(?:即可|可以|可)?", "", message)
-        text = re.sub(
-            r"(?m)^.*(?:是否接受|是否开始|请确认是否|如无问题.*(?:确认|回复)).*(?:\n|$)",
-            "", text,
-        )
-        return text.strip()
+    def _normalize_context_updates(updates: dict[str, Any]) -> dict[str, Any]:
+        """Normalize wire paths structurally without interpreting task semantics."""
+        normalized: dict[str, Any] = {}
+        context_roots = {
+            "task", "process_plan", "trial_plan",
+        }
+        tool_owned_roots = {
+            "task_intake", "equipment_context", "documents", "observations",
+            "pending_user_action", "active_skills",
+        }
 
-    @staticmethod
-    def _protect_established_task_facts(
-        raw: dict[str, Any], working_context: dict[str, Any], user_message: str,
-    ) -> dict[str, Any]:
-        updates = raw.get("context_updates")
-        if not isinstance(updates, dict) or not isinstance(updates.get("task"), dict):
-            return raw
-        if re.search(r"改为|改成|更正|修正|调整为|应为|换成|不是.+(?:而是|是)", user_message):
-            return raw
-        missing = object()
+        def merge(target: dict[str, Any], value: dict[str, Any]) -> None:
+            for key, item in value.items():
+                if isinstance(target.get(key), dict) and isinstance(item, dict):
+                    merge(target[key], item)
+                else:
+                    target[key] = item
 
-        def additions(current: Any, proposed: Any) -> Any:
-            if isinstance(current, dict) and isinstance(proposed, dict):
-                result: dict[str, Any] = {}
-                for key, value in proposed.items():
-                    if key not in current:
-                        result[key] = value
-                        continue
-                    child = additions(current[key], value)
-                    if child is not missing:
-                        result[key] = child
-                return result if result else missing
-            if isinstance(current, list) and isinstance(proposed, list):
-                merged = list(current)
-                for item in proposed:
-                    if item not in merged:
-                        merged.append(item)
-                return merged if merged != current else missing
-            return missing
+        def set_path(target: dict[str, Any], parts: list[str], value: Any) -> None:
+            cursor = target
+            for part in parts[:-1]:
+                child = cursor.get(part)
+                if not isinstance(child, dict):
+                    child = {}
+                    cursor[part] = child
+                cursor = child
+            final = parts[-1]
+            if isinstance(cursor.get(final), dict) and isinstance(value, dict):
+                merge(cursor[final], value)
+            else:
+                cursor[final] = value
 
-        protected = additions(working_context.get("task") or {}, updates["task"])
-        normalized = dict(raw)
-        normalized_updates = dict(updates)
-        if protected is missing:
-            normalized_updates.pop("task", None)
-        else:
-            normalized_updates["task"] = protected
-        normalized["context_updates"] = normalized_updates
+        for key, value in updates.items():
+            parts = [part for part in str(key).split(".") if part]
+            if not parts:
+                continue
+            if parts[0] in tool_owned_roots:
+                continue
+            if parts[0] not in context_roots:
+                parts.insert(0, "task")
+            set_path(normalized, parts, value)
         return normalized
 
     @staticmethod
@@ -562,14 +432,33 @@ class MainAgentPlanner:
         return value
 
     @staticmethod
+    def _looks_like_natural_response(content: str) -> bool:
+        text = content.strip()
+        return bool(text) and not text.startswith(("{", "[", "```"))
+
+    @staticmethod
     def _system_prompt() -> str:
         return (
             "你是超快激光加工前台唯一主 Agent。每次只返回一个 JSON 对象，不输出 Markdown。"
             "字段仅包括 action,decision_summary,skills_used,tool_name,arguments,message,context_updates。"
             "action 仅限 update_context、call_tool、ask_user、respond；Skill 不是行动，不得加载或卸载 Skill。"
+            "Skill 只提供提示和流程指导：不授予权限、不隐藏 Tool、不校验行动、不写入事实，"
+            "也不得阻塞 Main LLM 的任务理解与自然对话。"
             "update_context 只更新事实并继续规划；respond 只结束当前对话轮次，不表示加工任务完成。"
+            "你是任务语义的唯一裁决者：直接理解完整用户原话和会话上下文；规则、路由提示、Task Intake、"
+            "检索和工具都无权替你判定材料、几何、工艺意图、缺失项或用户修正。"
+            "当前用户原话的语义优先于旧 Working Context；若用户提供了新事实或纠正，直接用"
+            "context_updates.task 的嵌套对象更新规范任务，不要求用户使用‘修正’等关键词。"
+            "context_updates 只可写 task、process_plan、trial_plan；设备、Observation、文档、Skill 状态和待确认状态由运行时或 Tool 维护。"
+            "recent_dialogue 用于解析‘同意’‘不是’‘继续’等承接上一轮的短回复；不得脱离上一轮问题猜测其授权范围。"
+            "不得把 task 字段写成 geometry.feature_type 之类的顶层点号键。"
             "一次读取用户消息、Working Context、相关 Observation、注入的 Skill 指导和 Tool Schema。"
             "Tool 是外部能力；需要证据、设备事实、参数计算或执行时选择一个 Tool，Tool 返回后再决策。"
+            "任何新增能力失败、缺证或返回低质量结果，都只能成为 Observation，不能阻止你理解任务、"
+            "正常追问或自然回复；只有真实安全边界和本任务不可缺少的信息才可阻塞执行。"
+            "relevant_observations 已是去重后的公开摘要或 Evidence Pack；正文省略不代表需要重复检索。"
+            "若 evidence_quality 显示 degraded 或 candidate_only，不得因 evidence_status=sufficient 就当作"
+            "直接匹配的参数证据。"
             "同一行动可以提交明确的 context_updates；不得逐字段写状态，也不得重复查询相同 Tool。"
             "只有缺失信息会实质改变加工路线且无法安全假设时才 ask_user；按阻塞信息量提出 1 至 5 个问题，"
             "只有一个阻塞字段时只问一个，不得为凑数量询问非阻塞偏好。"
@@ -577,19 +466,22 @@ class MainAgentPlanner:
             "方案结构、工艺变量和评价指标必须按当前任务动态选择，不套用通孔、切割或其他案例模板。"
             "参数必须区分设备固定条件、设备可调能力、工艺设定值、策略参数和派生指标。"
             "设备范围只是边界，不能用范围中点冒充推荐；不得改写 Tool 返回的证据和 provenance。"
-            "所有参数推荐只能调用 recommend_process_parameters；该 Tool 内部强制 BO→RAG→受控探索顺序，"
+            "所有参数推荐只能调用 recommend_process_parameters；该 Tool 内部强制 BO→审核 RAG 顺序，"
             "不得请求或伪造其内部子步骤。"
+            "参数 Tool 返回 insufficient_data 时，不得把自行编造的数值直接交给 manage_trial。"
+            "BO 与审核 RAG 均不足时不得生成任何数值候选；说明证据缺口并继续自然回复。"
             "加工任务信息足够时继续调用必要 Tool，并用 respond 返回当前阶段结论和明确 NextAction。"
             "真实设备动作仍须遵守 Tool 的安全边界和当次用户授权。"
         )
 
-    @staticmethod
     def _prompt(
+        self,
         message: str,
         working_context: dict[str, Any],
         available_tools: list[dict[str, Any]],
         skill_guidance: list[dict[str, Any]],
         recent_tool_results: list[dict[str, Any]],
+        recent_dialogue: list[dict[str, str]],
         runtime_hints: dict[str, Any],
     ) -> str:
         wire_example = {
@@ -601,15 +493,22 @@ class MainAgentPlanner:
             "message": None,
             "context_updates": {},
         }
-        return "\n".join([
-            f"wire_example={json.dumps(wire_example, ensure_ascii=False)}",
-            f"user_message={json.dumps(message, ensure_ascii=False)}",
-            f"working_context={json.dumps(working_context, ensure_ascii=False)}",
-            f"relevant_observations={json.dumps(recent_tool_results, ensure_ascii=False)}",
-            f"injected_skill_guidance={json.dumps(skill_guidance, ensure_ascii=False)}",
-            f"available_tools={json.dumps(available_tools, ensure_ascii=False)}",
-            f"runtime_hints={json.dumps(runtime_hints, ensure_ascii=False)}",
-        ])
+        sections = [
+            ("wire_example", wire_example),
+            ("recent_dialogue", recent_dialogue),
+            ("user_message", message),
+            ("working_context", working_context),
+            ("relevant_observations", recent_tool_results),
+            ("injected_skill_guidance", skill_guidance),
+            ("available_tools", available_tools),
+            ("runtime_hints", runtime_hints),
+        ]
+        encoded = [
+            (name, json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str))
+            for name, value in sections
+        ]
+        self._last_prompt_section_chars = {name: len(value) for name, value in encoded}
+        return "\n".join(f"{name}={value}" for name, value in encoded)
 
     @classmethod
     def _repair_prompt(

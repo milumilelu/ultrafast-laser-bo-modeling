@@ -15,7 +15,6 @@ STATE_DEFAULTS = {
     "workflow_stage": None,
     "collected_slots": {},
     "pending_questions": [],
-    "allowed_next_skills": [],
     "debug_router": False,
     "streaming_enabled": False,
     "evidence_gap": {},
@@ -96,7 +95,6 @@ def update_session_state(session_id: str, state_update: dict[str, Any]) -> dict[
     for key in (
         "collected_slots",
         "pending_questions",
-        "allowed_next_skills",
         "evidence_gap",
         "active_knowledge_bootstrap",
         "pending_review_task_ids",
@@ -171,7 +169,7 @@ def _persist_state(session_id: str, state: dict[str, Any]) -> None:
                 state.get("workflow_stage"),
                 json.dumps(state.get("collected_slots") or {}, ensure_ascii=False),
                 json.dumps(state.get("pending_questions") or [], ensure_ascii=False),
-                json.dumps(state.get("allowed_next_skills") or [], ensure_ascii=False),
+                "[]",  # Legacy column retained for DB compatibility; never used as a Skill gate.
                 int(bool(state.get("debug_router"))),
                 int(bool(state.get("streaming_enabled"))),
                 json.dumps(state.get("evidence_gap") or {}, ensure_ascii=False),
@@ -196,7 +194,6 @@ def _row_to_state(row: dict[str, Any]) -> dict[str, Any]:
         "workflow_stage": row["workflow_stage"],
         "collected_slots": collected,
         "pending_questions": _loads(row["pending_questions_json"], []),
-        "allowed_next_skills": _loads(row["allowed_next_skills_json"], []),
         "debug_router": bool(row["debug_router"]),
         "streaming_enabled": bool(row["streaming_enabled"]),
         "evidence_gap": _loads(row.get("evidence_gap_json"), {}),

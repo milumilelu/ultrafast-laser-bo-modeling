@@ -42,7 +42,7 @@ class TrialPlanDraft:
     task_id: str
     trial_mode: TrialMode
     representative_geometry: dict[str, Any]
-    parameter_matrix: list[dict[str, float | int]]
+    parameter_matrix: list[dict[str, float | int | str]]
     measurement_plan: dict[str, Any]
     acceptance_criteria: list[dict[str, Any]]
     stop_conditions: list[dict[str, Any]]

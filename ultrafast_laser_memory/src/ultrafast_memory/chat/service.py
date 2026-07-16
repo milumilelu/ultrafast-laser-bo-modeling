@@ -507,8 +507,6 @@ def _handle_bootstrap_permission_reply(message: str, session_id: str, state: dic
             [{"step": "knowledge_bootstrap_permission", "status": "granted"}],
         )
     return None
-
-
 def _handle_bootstrap_chat_command(message: str, session_id: str, state: dict) -> dict | None:
     text = message.strip()
     if text == "/bootstrap status":
@@ -535,7 +533,10 @@ def _handle_bootstrap_chat_command(message: str, session_id: str, state: dict) -
         }
     if text == "/bootstrap run":
         active = state.get("active_knowledge_bootstrap") or {}
-        task_spec = active.get("task_spec") or _task_spec_from_message(message, None)
+        working = state.get("working_context_json") or {}
+        collected = state.get("collected_slots") or {}
+        task_spec = active.get("task_spec") or working.get("task") \
+            or collected.get("task_spec") or {}
         question = active.get("question") or message
         return _execute_bootstrap(
             session_id,
@@ -653,23 +654,3 @@ def _handle_review_guard(message: str, session_id: str, state: dict) -> dict | N
             "command_status": "waiting_review",
         }
     return None
-
-
-def _task_spec_from_message(message: str, route_plan) -> dict:
-    text = message.lower()
-    task_spec = {}
-    if "diamond" in text or "金刚石" in text:
-        task_spec["material"] = "diamond"
-    if "crl" in text or "透镜" in text or "x-ray" in text:
-        task_spec["component_type"] = "CRL"
-    if "飞秒" in text or "femtosecond" in text or "超快" in text:
-        task_spec["process_type"] = "femtosecond_laser_micromachining"
-    if "tgv" in text or "玻璃通孔" in text:
-        task_spec.update({"scenario_id": "scenario_05_tgv_drilling", "material": "glass_wafer", "component_type": "TGV_array", "process_type": "TGV_drilling"})
-    if "t300" in text:
-        task_spec.update({"scenario_id": "scenario_02_surface_microstructure_bonding", "material": "CFRP_T300", "material_grade": "T300", "process_type": "surface_microtexturing"})
-    elif "cfrp" in text or "碳纤维" in text:
-        task_spec.update({"scenario_id": "scenario_02_surface_microstructure_bonding", "material": "CFRP"})
-    if route_plan and getattr(route_plan, "primary_skill", None):
-        task_spec["route_skill"] = route_plan.primary_skill
-    return task_spec

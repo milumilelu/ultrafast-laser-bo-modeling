@@ -15,7 +15,7 @@ COMMANDS = {"tui", "api", "doctor", "demo"}
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ultrafast",
-        description="Formal entry for the ultrafast-laser agent, workflows, demo, and diagnostics.",
+        description="Formal entry for the ultrafast-laser Main Agent, demo, and diagnostics.",
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("tui", help="Start the PowerShell TUI")

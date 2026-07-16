@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-ACTION_SCHEMA_VERSION = "v31-minimal-action-1"
+ACTION_SCHEMA_VERSION = "v32-minimal-action-1"
 
 
 class AgentAction(BaseModel):

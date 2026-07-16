@@ -45,6 +45,7 @@ class TrialApplicationService:
             payload.get("machine_bounds") or {},
             payload.get("domain_pack"),
             payload.get("approved_parameter_candidates"),
+            payload.get("plan_definition"),
         )
         result = self.repository.create_plan(draft.to_dict())
         result["warnings"] = draft.warnings

@@ -1,6 +1,6 @@
 # 加工工作流 V3 验收记录
 
-> 历史记录：V3 的强制路由、全局字段门和聊天 FSM 已于 2026-07-14 被 Main Agent 控制平面取代。正式加工 API 与安全/治理约束继续保留；当前架构见 `main_agent_control_plane.md`。
+> 历史记录：以下内容描述已退役的 V3 路线，不代表当前实现。V3 的强制路由、全局字段门、聊天 FSM 和 LLM 参数 fallback 已被 LLM-first Main Agent 控制平面取代；当前参数只允许来自合格 BO 或用途匹配的审核 RAG，当前架构见 `main_agent_control_plane.md`。
 
 日期：2026-07-13
 
